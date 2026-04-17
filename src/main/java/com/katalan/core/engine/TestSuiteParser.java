@@ -189,7 +189,7 @@ public class TestSuiteParser {
     }
     
     /**
-     * Parse Groovy-style value string (e.g., 'string', 10, true)
+     * Parse Groovy-style value string (e.g., 'string', 10, true, GlobalVariable.xxx)
      */
     private Object parseGroovyValue(String value) {
         if (value == null || value.isEmpty()) {
@@ -211,6 +211,19 @@ public class TestSuiteParser {
         // Null
         if ("null".equalsIgnoreCase(value)) return null;
         
+        // GlobalVariable reference - evaluate it
+        if (value.startsWith("GlobalVariable.")) {
+            String varName = value.substring("GlobalVariable.".length());
+            Object globalValue = com.katalan.core.compat.GlobalVariable.get(varName);
+            if (globalValue != null) {
+                logger.debug("Resolved GlobalVariable.{} = {}", varName, globalValue);
+                return globalValue;
+            }
+            // If not found, log and return the expression as-is (might be resolved later)
+            logger.debug("GlobalVariable.{} not found yet, will be resolved at runtime", varName);
+            return new GlobalVariableReference(varName);
+        }
+        
         // Number
         try {
             if (value.contains(".")) {
@@ -222,6 +235,31 @@ public class TestSuiteParser {
         }
         
         return value;
+    }
+    
+    /**
+     * Wrapper class for deferred GlobalVariable resolution
+     */
+    public static class GlobalVariableReference {
+        private final String variableName;
+        
+        public GlobalVariableReference(String variableName) {
+            this.variableName = variableName;
+        }
+        
+        public String getVariableName() {
+            return variableName;
+        }
+        
+        public Object resolve() {
+            return com.katalan.core.compat.GlobalVariable.get(variableName);
+        }
+        
+        @Override
+        public String toString() {
+            Object value = resolve();
+            return value != null ? value.toString() : "GlobalVariable." + variableName;
+        }
     }
     
     /**

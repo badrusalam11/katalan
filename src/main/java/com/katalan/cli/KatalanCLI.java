@@ -126,9 +126,11 @@ public class KatalanCLI implements Callable<Integer> {
                         .failFast(failFast)
                         .executionProfile(profile);
                 
-                if (projectPath != null) {
-                    configBuilder.projectPath(projectPath);
+                // Default to current working directory if project path not specified
+                if (projectPath == null) {
+                    projectPath = java.nio.file.Paths.get(System.getProperty("user.dir"));
                 }
+                configBuilder.projectPath(projectPath);
                 
                 if (remoteUrl != null && !remoteUrl.isEmpty()) {
                     configBuilder.useRemoteWebDriver(true)
