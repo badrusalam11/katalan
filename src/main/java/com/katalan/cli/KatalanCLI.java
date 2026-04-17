@@ -150,10 +150,7 @@ public class KatalanCLI implements Callable<Integer> {
                     if (testSuite != null) {
                         // Run test suite
                         System.out.println("📋 Running test suite: " + testSuite);
-                        Path suitePath = projectPath.resolve("Test Suites").resolve(testSuite + ".ts");
-                        if (!Files.exists(suitePath)) {
-                            suitePath = projectPath.resolve(testSuite);
-                        }
+                        Path suitePath = resolveSuitePath(projectPath, testSuite);
                         result = engine.executeTestSuite(suitePath);
                     } else {
                         // Run test cases
@@ -185,6 +182,41 @@ public class KatalanCLI implements Callable<Integer> {
                 }
                 return 1;
             }
+        }
+        
+        /**
+         * Resolve test suite path with multiple fallback strategies
+         */
+        private Path resolveSuitePath(Path projectPath, String testSuite) throws IOException {
+            // Try different path combinations
+            Path[] candidates = new Path[] {
+                // 1. Direct path with .ts extension
+                projectPath.resolve(testSuite + ".ts"),
+                // 2. Direct path as-is (maybe already has extension)
+                projectPath.resolve(testSuite),
+                // 3. Under Test Suites folder with .ts
+                projectPath.resolve("Test Suites").resolve(testSuite + ".ts"),
+                // 4. Under Test Suites folder as-is
+                projectPath.resolve("Test Suites").resolve(testSuite),
+                // 5. If testSuite starts with "Test Suites/", don't duplicate
+                testSuite.startsWith("Test Suites/") || testSuite.startsWith("Test Suites\\") 
+                    ? projectPath.resolve(testSuite.substring("Test Suites/".length()) + ".ts")
+                    : null,
+            };
+            
+            for (Path candidate : candidates) {
+                if (candidate != null && Files.exists(candidate)) {
+                    return candidate;
+                }
+            }
+            
+            // If nothing found, return the most likely path for better error message
+            Path defaultPath = projectPath.resolve(testSuite);
+            if (!testSuite.endsWith(".ts")) {
+                defaultPath = projectPath.resolve(testSuite + ".ts");
+            }
+            throw new IOException("Test suite not found: " + testSuite + 
+                "\nSearched in: " + projectPath.resolve("Test Suites"));
         }
         
         private void printBanner() {
