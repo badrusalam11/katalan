@@ -172,6 +172,13 @@ public class GlobalVariable {
     }
     
     /**
+     * Get all variables as map (alias for getAll)
+     */
+    public static Map<String, Object> getAllVariables() {
+        return getAll();
+    }
+    
+    /**
      * Set a static field by name
      */
     private static void setStaticField(String name, Object value) throws Exception {

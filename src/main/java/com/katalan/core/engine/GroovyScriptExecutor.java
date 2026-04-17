@@ -41,6 +41,18 @@ public class GroovyScriptExecutor {
     }
     
     /**
+     * Refresh global variables in binding (call after GlobalVariable is loaded)
+     */
+    public void refreshGlobalVariables() {
+        Map<String, Object> globalVars = GlobalVariable.getAllVariables();
+        if (globalVars != null) {
+            for (Map.Entry<String, Object> entry : globalVars.entrySet()) {
+                binding.setVariable(entry.getKey(), entry.getValue());
+            }
+        }
+    }
+    
+    /**
      * Create Groovy binding with Katalon-compatible variables and methods
      */
     private Binding createBinding() {
@@ -66,6 +78,17 @@ public class GroovyScriptExecutor {
         
         // Add common imports as variables
         binding.setVariable("Keys", org.openqa.selenium.Keys.class);
+        
+        // Add CustomKeywords handler
+        binding.setVariable("CustomKeywords", new CustomKeywordsClosure(context));
+        
+        // Add all global variables directly to binding for direct access (e.g. firstName instead of GlobalVariable.firstName)
+        Map<String, Object> globalVars = GlobalVariable.getAllVariables();
+        if (globalVars != null) {
+            for (Map.Entry<String, Object> entry : globalVars.entrySet()) {
+                binding.setVariable(entry.getKey(), entry.getValue());
+            }
+        }
         
         return binding;
     }
@@ -461,5 +484,325 @@ public class GroovyScriptExecutor {
         }
         
         private static final Logger logger = LoggerFactory.getLogger(FindTestCaseClosure.class);
+    }
+    
+    /**
+     * CustomKeywords handler - enables calling custom keywords using Katalon syntax:
+     * CustomKeywords.'package.Class.method'(args)
+     */
+    public static class CustomKeywordsClosure extends groovy.lang.GroovyObjectSupport {
+        
+        private static final Logger logger = LoggerFactory.getLogger(CustomKeywordsClosure.class);
+        private final ExecutionContext context;
+        private GroovyShell keywordShell;
+        private final Map<String, Class<?>> loadedKeywordClasses = new java.util.HashMap<>();
+        
+        public CustomKeywordsClosure(ExecutionContext context) {
+            this.context = context;
+        }
+        
+        /**
+         * Called when CustomKeywords.'package.Class.method'() is invoked
+         * In Groovy, this syntax calls invokeMethod with the string as method name
+         */
+        @Override
+        public Object invokeMethod(String name, Object args) {
+            // name is like "sample.Login.loginIntoApplicationWithGlobalVariable"
+            logger.debug("CustomKeywords invokeMethod called: {}", name);
+            Object[] argsArray = args instanceof Object[] ? (Object[]) args : new Object[]{args};
+            return executeKeyword(name, argsArray);
+        }
+        
+        /**
+         * Called when CustomKeywords.'package.Class.method' is accessed as property
+         */
+        @Override
+        public Object getProperty(String property) {
+            // property is like "sample.Login.loginIntoApplication"
+            logger.debug("CustomKeywords getProperty requested: {}", property);
+            return new KeywordMethodInvoker(property, context, this);
+        }
+        
+        /**
+         * Execute a custom keyword
+         */
+        public Object executeKeyword(String fullPath, Object[] args) {
+            // Parse the full path: package.Class.method
+            int lastDot = fullPath.lastIndexOf('.');
+            if (lastDot < 0) {
+                throw new RuntimeException("Invalid custom keyword format: " + fullPath);
+            }
+            
+            String packageAndClass = fullPath.substring(0, lastDot);
+            String methodName = fullPath.substring(lastDot + 1);
+            
+            logger.info("Executing custom keyword: {}.{}", packageAndClass, methodName);
+            
+            try {
+                Class<?> keywordClass = loadKeywordClass(packageAndClass);
+                if (keywordClass == null) {
+                    throw new RuntimeException("Could not load custom keyword class: " + packageAndClass);
+                }
+                
+                // Find the method
+                java.lang.reflect.Method method = findMethod(keywordClass, methodName, args);
+                if (method == null) {
+                    throw new RuntimeException("Method not found: " + methodName + " in " + packageAndClass);
+                }
+                
+                // Invoke the method (static methods don't need an instance)
+                if (java.lang.reflect.Modifier.isStatic(method.getModifiers())) {
+                    return method.invoke(null, args);
+                } else {
+                    // For instance methods, create an instance
+                    Object instance = keywordClass.getDeclaredConstructor().newInstance();
+                    return method.invoke(instance, args);
+                }
+            } catch (Exception e) {
+                logger.error("Failed to execute custom keyword: {}", fullPath, e);
+                if (e.getCause() != null) {
+                    throw new RuntimeException("Custom keyword failed: " + fullPath + " - " + e.getCause().getMessage(), e.getCause());
+                }
+                throw new RuntimeException("Custom keyword failed: " + fullPath + " - " + e.getMessage(), e);
+            }
+        }
+        
+        private java.lang.reflect.Method findMethod(Class<?> clazz, String methodName, Object[] args) {
+            for (java.lang.reflect.Method method : clazz.getDeclaredMethods()) {
+                if (method.getName().equals(methodName)) {
+                    // Check parameter count match (allowing for Groovy's flexible matching)
+                    if (method.getParameterCount() == args.length) {
+                        return method;
+                    }
+                    // Also check for varargs or default parameters
+                    if (args.length == 0 && method.getParameterCount() == 0) {
+                        return method;
+                    }
+                }
+            }
+            // If exact match not found, try to find any method with the name
+            for (java.lang.reflect.Method method : clazz.getDeclaredMethods()) {
+                if (method.getName().equals(methodName)) {
+                    return method;
+                }
+            }
+            return null;
+        }
+
+        /**
+         * Pre-load all custom keyword classes to enable cross-references
+         * Uses topological sorting to handle dependencies
+         */
+        private void preloadAllKeywordClasses() {
+            if (keywordShell != null) {
+                return; // Already loaded
+            }
+            
+            Path projectPath = context.getProjectPath();
+            if (projectPath == null) {
+                return;
+            }
+            
+            Path keywordsPath = projectPath.resolve("Keywords");
+            if (!Files.exists(keywordsPath)) {
+                return;
+            }
+            
+            keywordShell = createKeywordShell();
+            
+            try {
+                // Collect all .groovy files
+                java.util.List<Path> groovyFiles = Files.walk(keywordsPath)
+                    .filter(p -> p.toString().endsWith(".groovy"))
+                    .collect(java.util.stream.Collectors.toList());
+                
+                // Try to load all files - retry if there are dependencies
+                java.util.Set<Path> failedFiles = new java.util.HashSet<>(groovyFiles);
+                int maxRetries = 5;
+                
+                for (int retry = 0; retry < maxRetries && !failedFiles.isEmpty(); retry++) {
+                    java.util.Set<Path> stillFailed = new java.util.HashSet<>();
+                    
+                    for (Path groovyFile : failedFiles) {
+                        try {
+                            String scriptContent = Files.readString(groovyFile);
+                            scriptContent = preprocessKeywordScript(scriptContent);
+                            
+                            // Parse the class (this adds it to the classloader)
+                            Class<?> clazz = keywordShell.getClassLoader().parseClass(scriptContent, groovyFile.getFileName().toString());
+                            
+                            // Calculate the package.Class name from the file path
+                            Path relativePath = keywordsPath.relativize(groovyFile);
+                            String classPath = relativePath.toString()
+                                .replace(".groovy", "")
+                                .replace("/", ".")
+                                .replace("\\", ".");
+                            
+                            loadedKeywordClasses.put(classPath, clazz);
+                            logger.debug("Loaded keyword class: {} (retry {})", classPath, retry);
+                        } catch (Exception e) {
+                            // Will retry on next iteration
+                            stillFailed.add(groovyFile);
+                            if (retry == maxRetries - 1) {
+                                logger.warn("Failed to load keyword file after {} retries: {} - {}", maxRetries, groovyFile, e.getMessage());
+                            }
+                        }
+                    }
+                    failedFiles = stillFailed;
+                }
+                
+                logger.info("Loaded {} keyword classes", loadedKeywordClasses.size());
+            } catch (IOException e) {
+                logger.warn("Failed to walk keywords directory", e);
+            }
+        }
+
+        /**
+         * Load and compile custom keyword classes from Keywords folder
+         */
+        private Class<?> loadKeywordClass(String packageAndClass) {
+            // Ensure all keyword classes are pre-loaded
+            preloadAllKeywordClasses();
+            
+            if (loadedKeywordClasses.containsKey(packageAndClass)) {
+                return loadedKeywordClasses.get(packageAndClass);
+            }
+            
+            logger.warn("Keyword class not found after preloading: {}", packageAndClass);
+            return null;
+        }
+        
+        private GroovyShell createKeywordShell() {
+            CompilerConfiguration config = new CompilerConfiguration();
+            ImportCustomizer importCustomizer = new ImportCustomizer();
+            
+            // Add necessary imports for keywords
+            importCustomizer.addStarImports(
+                "com.katalan.keywords",
+                "com.katalan.core.model",
+                "com.katalan.core.compat",
+                "org.openqa.selenium",
+                "org.openqa.selenium.support.ui"
+            );
+            importCustomizer.addStaticStars(
+                "com.katalan.keywords.WebUI"
+            );
+            importCustomizer.addImports(
+                "com.katalan.keywords.WebUI",
+                "com.katalan.core.model.TestObject",
+                "com.katalan.core.compat.FailureHandling",
+                "com.katalan.core.compat.GlobalVariable"
+            );
+            
+            config.addCompilationCustomizers(importCustomizer);
+            
+            // Create binding with findTestObject
+            Binding keywordBinding = new Binding();
+            keywordBinding.setVariable("WebUI", com.katalan.keywords.WebUI.class);
+            keywordBinding.setVariable("GlobalVariable", com.katalan.core.compat.GlobalVariable.class);
+            keywordBinding.setVariable("FailureHandling", com.katalan.core.compat.FailureHandling.class);
+            keywordBinding.setVariable("findTestObject", new FindTestObjectClosure(context));
+            
+            GroovyClassLoader classLoader = new GroovyClassLoader(getClass().getClassLoader(), config);
+            return new GroovyShell(classLoader, keywordBinding, config);
+        }
+        
+        private String preprocessKeywordScript(String script) {
+            String result = script;
+            
+            // Replace Katalon static import for findTestObject
+            result = result.replaceAll(
+                "import static com\\.kms\\.katalon\\.core\\.testobject\\.ObjectRepository\\.findTestObject",
+                "import static com.katalan.core.compat.ObjectRepository.findTestObject"
+            );
+            
+            // Replace Katalon imports
+            result = result.replace(
+                "import com.kms.katalon.core.webui.keyword.WebUiBuiltInKeywords as WebUI",
+                "import com.katalan.keywords.WebUI"
+            );
+            result = result.replace(
+                "import com.kms.katalon.core.webui.keyword.WebUiBuiltInKeywords",
+                "import com.katalan.keywords.WebUI"
+            );
+            result = result.replace(
+                "import internal.GlobalVariable as GlobalVariable",
+                "import com.katalan.core.compat.GlobalVariable"
+            );
+            result = result.replace(
+                "import internal.GlobalVariable",
+                "import com.katalan.core.compat.GlobalVariable"
+            );
+            result = result.replace(
+                "import com.kms.katalon.core.model.FailureHandling as FailureHandling",
+                "import com.katalan.core.compat.FailureHandling"
+            );
+            result = result.replace(
+                "import com.kms.katalon.core.model.FailureHandling",
+                "import com.katalan.core.compat.FailureHandling"
+            );
+            
+            // Replace WebUiCommonHelper and DriverFactory
+            result = result.replace(
+                "import com.kms.katalon.core.webui.common.WebUiCommonHelper",
+                "import com.katalan.core.compat.WebUiCommonHelper"
+            );
+            result = result.replace(
+                "import com.kms.katalon.core.webui.driver.DriverFactory",
+                "import com.katalan.core.compat.DriverFactory"
+            );
+            
+            // Comment out unsupported static imports (but not findTestObject which is already replaced)
+            result = result.replaceAll(
+                "import static com\\.kms\\.katalon\\.core\\.(?!testobject\\.ObjectRepository\\.findTestObject).*",
+                "// $0"
+            );
+            result = result.replaceAll(
+                "import com\\.kms\\.katalon\\.core\\.(?!webui|model).*",
+                "// $0"
+            );
+            result = result.replaceAll(
+                "import com\\.kms\\.katalon\\.core\\.testobject\\..*",
+                "import com.katalan.core.model.TestObject"
+            );
+            // Replace Katalon annotation imports with Katalan Keyword
+            result = result.replaceAll(
+                "import com\\.kms\\.katalon\\.core\\.annotation\\.Keyword",
+                "import com.katalan.core.compat.Keyword"
+            );
+            result = result.replaceAll(
+                "import com\\.kms\\.katalon\\.core\\.annotation\\..*",
+                "// Annotation import skipped"
+            );
+            
+            return result;
+        }
+        
+        /**
+         * Inner class to handle method invocation on custom keywords
+         * Used when accessing CustomKeywords as a property before calling method
+         */
+        public static class KeywordMethodInvoker extends groovy.lang.Closure<Object> {
+            
+            private static final Logger logger = LoggerFactory.getLogger(KeywordMethodInvoker.class);
+            private final String fullPath;
+            private final ExecutionContext context;
+            private final CustomKeywordsClosure parent;
+            
+            public KeywordMethodInvoker(String fullPath, ExecutionContext context, CustomKeywordsClosure parent) {
+                super(null);
+                this.fullPath = fullPath;
+                this.context = context;
+                this.parent = parent;
+            }
+            
+            /**
+             * Called when the keyword method is invoked
+             * fullPath is like "sample.Login.loginIntoApplication"
+             */
+            public Object call(Object... args) {
+                return parent.executeKeyword(fullPath, args);
+            }
+        }
     }
 }

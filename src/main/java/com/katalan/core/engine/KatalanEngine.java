@@ -37,6 +37,8 @@ public class KatalanEngine {
         this.config = config;
         this.context = new ExecutionContext(config);
         ExecutionContext.setCurrent(context);
+        // Set context for ObjectRepository static methods
+        com.katalan.core.compat.ObjectRepository.setContext(context);
         this.scriptExecutor = new GroovyScriptExecutor(context);
         this.suiteParser = new TestSuiteParser(config.getProjectPath());
         this.executionResult = new ExecutionResult();
@@ -184,10 +186,16 @@ public class KatalanEngine {
             attempts++;
             
             try {
-                // Add test case variables to script
+                // Add test case variables to script (resolve GlobalVariableReferences)
                 if (testCase.getVariables() != null) {
                     for (Map.Entry<String, Object> var : testCase.getVariables().entrySet()) {
-                        scriptExecutor.setVariable(var.getKey(), var.getValue());
+                        Object value = var.getValue();
+                        // Resolve GlobalVariableReference to actual value
+                        if (value instanceof TestSuiteParser.GlobalVariableReference) {
+                            value = ((TestSuiteParser.GlobalVariableReference) value).resolve();
+                            logger.debug("Resolved test case variable {} = {}", var.getKey(), value);
+                        }
+                        scriptExecutor.setVariable(var.getKey(), value);
                     }
                 }
                 

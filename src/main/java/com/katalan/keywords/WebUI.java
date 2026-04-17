@@ -260,6 +260,22 @@ public class WebUI {
     }
     
     /**
+     * Send keys (text string) to an element - Katalon compatibility
+     */
+    public static void sendKeys(TestObject testObject, String text) {
+        sendKeys(testObject, 30, text);
+    }
+    
+    /**
+     * Send keys (text string) to an element with timeout - Katalon compatibility
+     */
+    public static void sendKeys(TestObject testObject, int timeout, String text) {
+        logger.info("Sending text to: {}", testObject.getName());
+        WebElement element = waitForElement(testObject, timeout);
+        element.sendKeys(text);
+    }
+    
+    /**
      * Send keys to an element with timeout
      */
     public static void sendKeys(TestObject testObject, int timeout, Keys... keys) {
