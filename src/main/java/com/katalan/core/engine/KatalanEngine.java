@@ -23,9 +23,9 @@ import java.util.Map;
 /**
  * Main katalan Engine - Orchestrates test execution
  */
-public class katalanEngine {
+public class KatalanEngine {
     
-    private static final Logger logger = LoggerFactory.getLogger(katalanEngine.class);
+    private static final Logger logger = LoggerFactory.getLogger(KatalanEngine.class);
     
     private final RunConfiguration config;
     private final ExecutionContext context;
@@ -33,7 +33,7 @@ public class katalanEngine {
     private final TestSuiteParser suiteParser;
     private ExecutionResult executionResult;
     
-    public katalanEngine(RunConfiguration config) {
+    public KatalanEngine(RunConfiguration config) {
         this.config = config;
         this.context = new ExecutionContext(config);
         ExecutionContext.setCurrent(context);

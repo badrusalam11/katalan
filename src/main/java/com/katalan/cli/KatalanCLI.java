@@ -1,7 +1,7 @@
 package com.katalan.cli;
 
 import com.katalan.core.config.RunConfiguration;
-import com.katalan.core.engine.katalanEngine;
+import com.katalan.core.engine.KatalanEngine;
 import com.katalan.core.model.ExecutionResult;
 import com.katalan.core.model.TestSuite;
 import com.katalan.core.engine.TestSuiteParser;
@@ -31,14 +31,14 @@ import java.util.concurrent.Callable;
     version = "katalan Runner 1.0.0",
     description = "Unofficial Katalon Test Runner - Execute Katalon automation scripts independently",
     subcommands = {
-        katalanCLI.RunCommand.class,
-        katalanCLI.InfoCommand.class
+        KatalanCLI.RunCommand.class,
+        KatalanCLI.InfoCommand.class
     }
 )
-public class katalanCLI implements Callable<Integer> {
+public class KatalanCLI implements Callable<Integer> {
     
     public static void main(String[] args) {
-        int exitCode = new CommandLine(new katalanCLI()).execute(args);
+        int exitCode = new CommandLine(new KatalanCLI()).execute(args);
         System.exit(exitCode);
     }
     
@@ -138,7 +138,7 @@ public class katalanCLI implements Callable<Integer> {
                 RunConfiguration config = configBuilder.build();
                 
                 // Create engine
-                katalanEngine engine = new katalanEngine(config);
+                KatalanEngine engine = new KatalanEngine(config);
                 
                 try {
                     // Initialize
