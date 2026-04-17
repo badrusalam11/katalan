@@ -1,4 +1,4 @@
-# 🧪 Katalan Runner
+# 🧪 katalan Runner
 
 **Unofficial Katalon Test Runner** - Execute Katalon automation scripts independently without Katalon Studio.
 
@@ -26,7 +26,7 @@
 ### Build from Source
 
 ```bash
-cd Katalan
+cd katalan
 mvn clean package
 ```
 
@@ -268,4 +268,4 @@ MIT License - Use freely for any purpose.
 
 ---
 
-**Disclaimer:** Katalan is an unofficial project and is not affiliated with or endorsed by Katalon LLC.
+**Disclaimer:** katalan is an unofficial project and is not affiliated with or endorsed by Katalon LLC.
