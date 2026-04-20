@@ -570,7 +570,7 @@ public class KatalanBDDExecutor {
         List<Scenario> expanded = new ArrayList<>();
         
         for (Map<String, String> example : examplesData) {
-            Scenario scenario = new Scenario(outline.name + " - " + example.values());
+            Scenario scenario = new Scenario(outline.name);
             for (Step step : outline.steps) {
                 String expandedText = step.text;
                 for (Map.Entry<String, String> entry : example.entrySet()) {
