@@ -289,4 +289,23 @@ public class ExecutionContext {
     public Object getProperty(String key) {
         return this.properties.get(key);
     }
+    
+    /**
+     * Get a unique session ID for this execution
+     */
+    public String getSessionId() {
+        String sessionId = (String) getProperty("sessionId");
+        if (sessionId == null) {
+            sessionId = "katalan-" + System.currentTimeMillis();
+            setProperty("sessionId", sessionId);
+        }
+        return sessionId;
+    }
+    
+    /**
+     * Get the project directory
+     */
+    public Path getProjectDir() {
+        return projectPath;
+    }
 }

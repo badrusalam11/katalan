@@ -56,13 +56,26 @@ public class CucumberKW {
      * @return Result status (0 = success, non-zero = failure)
      */
     public static int runFeatureFile(String featureFile) {
-        logger.info("Running feature file: {}", featureFile);
+        return runFeatureFileWithTags(featureFile, null);
+    }
+    
+    /**
+     * Run a single feature file with tag filter
+     * @param featureFile Relative path to the feature file from project root
+     * @param tags Cucumber tag expression (e.g., "@smoke", "@regression and not @slow")
+     * @return Result status (0 = success, non-zero = failure)
+     */
+    public static int runFeatureFileWithTags(String featureFile, String tags) {
+        logger.info("Running feature file: {} with tags: {}", featureFile, tags != null ? tags : "(none)");
         
         // Mark current test case as BDD in the execution context
         ExecutionContext ctx = ExecutionContext.getCurrent();
         if (ctx != null) {
             ctx.setProperty("isBddTest", true);
             ctx.setProperty("featureFile", featureFile);
+            if (tags != null) {
+                ctx.setProperty("cucumberTags", tags);
+            }
         }
         
         Path projectPath = getProjectPath();
@@ -91,6 +104,12 @@ public class CucumberKW {
             args.add(stepsPath.toString());
         }
         
+        // Add tag filter if specified
+        if (tags != null && !tags.isEmpty()) {
+            args.add("--tags");
+            args.add(tags);
+        }
+        
         // Add plugin for output
         args.add("--plugin");
         args.add("pretty");
@@ -99,7 +118,7 @@ public class CucumberKW {
         
         try {
             // Run Cucumber with our custom runtime that includes Groovy support
-            return runCucumberWithGroovyGlue(featurePath, stepsPath, projectPath);
+            return runCucumberWithGroovyGlue(featurePath, stepsPath, projectPath, tags);
         } catch (Exception e) {
             logger.error("Failed to run feature file: {}", featureFile, e);
             throw new RuntimeException("Cucumber execution failed: " + e.getMessage(), e);
@@ -168,8 +187,8 @@ public class CucumberKW {
     /**
      * Internal method to run Cucumber with Groovy step definitions
      */
-    private static int runCucumberWithGroovyGlue(Path featurePath, Path stepsPath, Path projectPath) {
-        logger.info("Running Cucumber with Groovy glue from: {}", stepsPath);
+    private static int runCucumberWithGroovyGlue(Path featurePath, Path stepsPath, Path projectPath, String tags) {
+        logger.info("Running Cucumber with Groovy glue from: {} with tags: {}", stepsPath, tags != null ? tags : "(none)");
         
         try {
             // Get the execution context for access to the script executor
@@ -184,6 +203,12 @@ public class CucumberKW {
             
             // Parse feature file and execute steps using our own BDD executor
             KatalanBDDExecutor bddExecutor = new KatalanBDDExecutor(ctx, projectPath, stepsPath);
+            
+            // Set tags filter if specified
+            if (tags != null && !tags.isEmpty()) {
+                bddExecutor.setTagFilter(tags);
+            }
+            
             return bddExecutor.executeFeature(featurePath);
             
         } catch (Exception e) {

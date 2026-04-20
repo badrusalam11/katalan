@@ -60,9 +60,10 @@ public class KatalanEngine {
             loadGlobalVariables();
         }
         
-        // Create WebDriver
-        WebDriver driver = WebDriverFactory.createDriver(config);
-        context.setWebDriver(driver);
+        // DO NOT create WebDriver here!
+        // CSWeb library checks DriverFactory.getWebDriver() to determine if it needs to open browser.
+        // If driver exists, CSWeb skips URL navigation and only logs "Starting Chrome driver".
+        // By not creating driver here, CSWeb will properly call WebUI.openBrowser(url).
         
         logger.info("katalan Engine initialized");
     }
