@@ -42,6 +42,9 @@ public class KatalanBDDExecutor {
     // Hierarchical step tracking for reports (Katalon-style structure)
     private final List<Map<String, Object>> scenarioDataList = new ArrayList<>();
     
+    // Tag filter for scenario filtering
+    private String tagFilter;
+    
     public KatalanBDDExecutor(ExecutionContext context, Path projectPath, Path stepsPath) {
         this.context = context;
         this.projectPath = projectPath;
@@ -49,12 +52,29 @@ public class KatalanBDDExecutor {
         this.stepDefinitions = new ArrayList<>();
         this.stepInstances = new HashMap<>();
         this.groovyShell = createGroovyShell();
+        this.tagFilter = null;
         
         // Store this executor in context so WebUI.callTestCase can use it
         context.setProperty("executor", this);
         
         // Load step definitions
         loadStepDefinitions();
+    }
+    
+    /**
+     * Set tag filter for scenario filtering
+     * @param tags Cucumber tag expression (e.g., "@smoke", "@regression and not @slow")
+     */
+    public void setTagFilter(String tags) {
+        this.tagFilter = tags;
+        logger.info("Tag filter set to: {}", tags);
+    }
+    
+    /**
+     * Get the current tag filter
+     */
+    public String getTagFilter() {
+        return tagFilter;
     }
     
     /**
@@ -104,6 +124,10 @@ public class KatalanBDDExecutor {
         config.addCompilationCustomizers(imports);
         
         GroovyClassLoader classLoader = new GroovyClassLoader(getClass().getClassLoader(), config);
+        
+        // Add JAR files from Drivers folder (custom libraries)
+        addProjectLibrariesToClassLoader(classLoader);
+        
         GroovyShell testShell = new GroovyShell(classLoader, binding, config);
         
         try {
@@ -113,6 +137,51 @@ public class KatalanBDDExecutor {
         } catch (Exception e) {
             logger.error("Test case failed: {} - {}", testCase.getTestCaseName(), e.getMessage());
             throw e;
+        }
+    }
+    
+    /**
+     * Add project libraries (from Drivers, Libs folders) to classloader
+     */
+    private void addProjectLibrariesToClassLoader(GroovyClassLoader classLoader) {
+        if (projectPath == null) return;
+        
+        // Load from Drivers folder
+        Path driversPath = projectPath.resolve("Drivers");
+        if (Files.exists(driversPath)) {
+            loadJarsFromDirectory(classLoader, driversPath);
+        }
+        
+        // Load from Libs folder
+        Path libsPath = projectPath.resolve("Libs");
+        if (Files.exists(libsPath)) {
+            loadJarsFromDirectory(classLoader, libsPath);
+        }
+        
+        // Load from bin/lib folder
+        Path binLibPath = projectPath.resolve("bin").resolve("lib");
+        if (Files.exists(binLibPath)) {
+            loadJarsFromDirectory(classLoader, binLibPath);
+        }
+    }
+    
+    /**
+     * Load all JAR files from a directory into the classloader
+     */
+    private void loadJarsFromDirectory(GroovyClassLoader classLoader, Path directory) {
+        try {
+            Files.walk(directory, 1)
+                .filter(p -> p.toString().toLowerCase().endsWith(".jar"))
+                .forEach(jarPath -> {
+                    try {
+                        classLoader.addURL(jarPath.toUri().toURL());
+                        logger.debug("Added JAR to classpath: {}", jarPath.getFileName());
+                    } catch (Exception e) {
+                        logger.warn("Could not add JAR to classpath: {} - {}", jarPath, e.getMessage());
+                    }
+                });
+        } catch (IOException e) {
+            logger.warn("Could not scan directory for JARs: {} - {}", directory, e.getMessage());
         }
     }
     

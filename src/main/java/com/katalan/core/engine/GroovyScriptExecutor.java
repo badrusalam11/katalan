@@ -64,8 +64,8 @@ public class GroovyScriptExecutor {
         // Add GlobalVariable class (for static field access like GlobalVariable.varName)
         binding.setVariable("GlobalVariable", GlobalVariable.class);
         
-        // Add FailureHandling enum
-        binding.setVariable("FailureHandling", FailureHandling.class);
+        // Add FailureHandling enum - use Katalan internal version for compatibility with custom JARs
+        binding.setVariable("FailureHandling", com.katalan.core.compat.FailureHandling.class);
         
         // Add KeywordUtil
         binding.setVariable("KeywordUtil", KeywordUtil.class);
@@ -130,7 +130,7 @@ public class GroovyScriptExecutor {
         
         config.addCompilationCustomizers(importCustomizer);
         
-        // Create class loader with project's keywords
+        // Create class loader with project's keywords and libraries
         GroovyClassLoader classLoader = new GroovyClassLoader(getClass().getClassLoader(), config);
         
         // Add custom keywords path if exists
@@ -139,13 +139,52 @@ public class GroovyScriptExecutor {
             if (Files.exists(keywordsPath)) {
                 try {
                     classLoader.addClasspath(keywordsPath.toString());
+                    logger.debug("Added Keywords path to classpath: {}", keywordsPath);
                 } catch (Exception e) {
                     logger.warn("Could not add Keywords path to classpath: {}", e.getMessage());
                 }
             }
+            
+            // Add JAR files from Drivers folder (custom libraries)
+            Path driversPath = projectPath.resolve("Drivers");
+            if (Files.exists(driversPath)) {
+                loadJarsFromDirectory(classLoader, driversPath);
+            }
+            
+            // Add JAR files from Libs folder
+            Path libsPath = projectPath.resolve("Libs");
+            if (Files.exists(libsPath)) {
+                loadJarsFromDirectory(classLoader, libsPath);
+            }
+            
+            // Add JAR files from bin/lib folder (Katalon structure)
+            Path binLibPath = projectPath.resolve("bin").resolve("lib");
+            if (Files.exists(binLibPath)) {
+                loadJarsFromDirectory(classLoader, binLibPath);
+            }
         }
         
         return new GroovyShell(classLoader, binding, config);
+    }
+    
+    /**
+     * Load all JAR files from a directory into the classloader
+     */
+    private void loadJarsFromDirectory(GroovyClassLoader classLoader, Path directory) {
+        try {
+            Files.walk(directory, 1)
+                .filter(p -> p.toString().toLowerCase().endsWith(".jar"))
+                .forEach(jarPath -> {
+                    try {
+                        classLoader.addURL(jarPath.toUri().toURL());
+                        logger.info("Added JAR to classpath: {}", jarPath.getFileName());
+                    } catch (Exception e) {
+                        logger.warn("Could not add JAR to classpath: {} - {}", jarPath, e.getMessage());
+                    }
+                });
+        } catch (IOException e) {
+            logger.warn("Could not scan directory for JARs: {} - {}", directory, e.getMessage());
+        }
     }
     
     /**
@@ -181,7 +220,7 @@ public class GroovyScriptExecutor {
             throw new RuntimeException("Script execution failed: " + e.getMessage(), e);
         }
     }
-    
+
     /**
      * Execute a Groovy script file with variables (for callTestCase)
      */
@@ -244,7 +283,7 @@ public class GroovyScriptExecutor {
             "import com.katalan.core.compat.GlobalVariable"
         );
         
-        // FailureHandling - all variations
+        // FailureHandling - convert to Katalan internal for compatibility with custom JARs
         result = result.replace(
             "import com.kms.katalon.core.model.FailureHandling as FailureHandling",
             "import com.katalan.core.compat.FailureHandling"
@@ -296,6 +335,12 @@ public class GroovyScriptExecutor {
             "import com.katalan.keywords.CucumberKW"
         );
         
+        // TestNG keywords (comment out - not supported)
+        result = result.replaceAll(
+            "import com\\.kms\\.katalon\\.core\\.testng\\.keyword\\.TestNGBuiltinKeywords.*",
+            "// TestNG keywords not supported by Katalan"
+        );
+        
         // Comment out all unsupported com.kms.katalon imports that weren't handled above
         result = result.replaceAll(
             "import com\\.kms\\.katalon\\.core\\.checkpoint\\..*",
@@ -331,7 +376,14 @@ public class GroovyScriptExecutor {
         String stubMethods = "\n// katalan stubs for unsupported Katalon methods\n" +
             "def findCheckpoint(name) { /*stub*/ null }\n" +
             "def findTestData(name) { /*stub*/ null }\n" +
-            "def findWindowsObject(name) { /*stub*/ null }\n";
+            "def findWindowsObject(name) { /*stub*/ null }\n" +
+            "// TestNGKW stub class for unsupported TestNG keywords\n" +
+            "class TestNGKW {\n" +
+            "    static def runFeatureFile(String featureFile) { println \"[WARN] TestNGKW.runFeatureFile not supported: ${featureFile}\"; return null }\n" +
+            "    static def runFeatureFolder(String featureFolder) { println \"[WARN] TestNGKW.runFeatureFolder not supported: ${featureFolder}\"; return null }\n" +
+            "    static def runWithTestNGRunner(Object... args) { println \"[WARN] TestNGKW.runWithTestNGRunner not supported\"; return null }\n" +
+            "    static def methodMissing(String name, args) { println \"[WARN] TestNGKW.${name} not supported\"; return null }\n" +
+            "}\n";
         
         // Insert stubs after the last import statement
         int lastImportIndex = result.lastIndexOf("import ");

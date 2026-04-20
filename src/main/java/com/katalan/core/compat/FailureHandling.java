@@ -29,16 +29,37 @@ public enum FailureHandling {
     }
     
     /**
-     * Check if execution should stop on failure
+     * Convert from Katalon's FailureHandling
      */
-    public boolean shouldStopOnFailure() {
-        return this == STOP_ON_FAILURE;
+    public static FailureHandling fromKatalon(com.kms.katalon.core.model.FailureHandling katalon) {
+        if (katalon == null) {
+            return STOP_ON_FAILURE;
+        }
+        switch (katalon) {
+            case STOP_ON_FAILURE:
+                return STOP_ON_FAILURE;
+            case CONTINUE_ON_FAILURE:
+                return CONTINUE_ON_FAILURE;
+            case OPTIONAL:
+                return OPTIONAL;
+            default:
+                return STOP_ON_FAILURE;
+        }
     }
     
     /**
-     * Check if failure should be reported
+     * Convert to Katalon's FailureHandling
      */
-    public boolean shouldReportFailure() {
-        return this != OPTIONAL;
+    public com.kms.katalon.core.model.FailureHandling toKatalon() {
+        switch (this) {
+            case STOP_ON_FAILURE:
+                return com.kms.katalon.core.model.FailureHandling.STOP_ON_FAILURE;
+            case CONTINUE_ON_FAILURE:
+                return com.kms.katalon.core.model.FailureHandling.CONTINUE_ON_FAILURE;
+            case OPTIONAL:
+                return com.kms.katalon.core.model.FailureHandling.OPTIONAL;
+            default:
+                return com.kms.katalon.core.model.FailureHandling.STOP_ON_FAILURE;
+        }
     }
 }
