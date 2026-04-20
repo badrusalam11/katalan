@@ -117,7 +117,7 @@ public class TestSuiteParser {
                 
                 if (groovyScript != null) {
                     TestCase testCase = new TestCase();
-                    testCase.setName(extractTestCaseName(testCaseId));
+                    testCase.setName(testCaseId);
                     testCase.setId(testCaseId);
                     testCase.setScriptPath(groovyScript);
                     testCase.setScriptContent(Files.readString(groovyScript));
@@ -148,7 +148,8 @@ public class TestSuiteParser {
         if (name == null) {
             name = extractTestCaseName(testCaseId);
         }
-        testCase.setName(name);
+        // Use full testCaseId as name for proper report display
+        testCase.setName(testCaseId);
         testCase.setId(testCaseId);
         testCase.setDescription(getElementText(root, "description"));
         

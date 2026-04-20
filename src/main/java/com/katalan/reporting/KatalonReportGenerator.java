@@ -240,7 +240,7 @@ public class KatalonReportGenerator {
         
         // Children (test cases)
         List<Map<String, Object>> children = new ArrayList<>();
-        int index = 0;
+        int index = 1;
         for (TestSuiteResult suiteResult : result.getSuiteResults()) {
             for (TestCaseResult tcResult : suiteResult.getTestCaseResults()) {
                 Map<String, Object> child = new LinkedHashMap<>();
