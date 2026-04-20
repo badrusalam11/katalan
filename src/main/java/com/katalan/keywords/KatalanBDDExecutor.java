@@ -4,6 +4,7 @@ import com.katalan.core.context.ExecutionContext;
 import com.katalan.core.compat.GlobalVariable;
 import com.katalan.core.compat.FailureHandling;
 import com.katalan.core.compat.TestCase;
+import com.katalan.core.model.TestCaseResult;
 import groovy.lang.Binding;
 import groovy.lang.GroovyClassLoader;
 import groovy.lang.GroovyShell;
@@ -18,6 +19,7 @@ import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -36,6 +38,9 @@ public class KatalanBDDExecutor {
     private final List<StepDefinition> stepDefinitions;
     private final GroovyShell groovyShell;
     private final Map<String, Object> stepInstances;
+    
+    // Hierarchical step tracking for reports (Katalon-style structure)
+    private final List<Map<String, Object>> scenarioDataList = new ArrayList<>();
     
     public KatalanBDDExecutor(ExecutionContext context, Path projectPath, Path stepsPath) {
         this.context = context;
@@ -124,54 +129,207 @@ public class KatalanBDDExecutor {
     public int executeFeature(Path featurePath) throws IOException {
         logger.info("Executing feature: {}", featurePath);
         
+        // Reset hierarchical tracking
+        scenarioDataList.clear();
+        
         String featureContent = Files.readString(featurePath);
         List<Scenario> scenarios = parseFeature(featureContent);
         
         int failedCount = 0;
+        int scenarioIndex = 0;
         for (Scenario scenario : scenarios) {
             logger.info("Executing scenario: {}", scenario.name);
             
+            Map<String, Object> scenarioData = new LinkedHashMap<>();
+            Instant scenarioStart = Instant.now();
+            
             try {
-                executeScenario(scenario);
+                List<Map<String, Object>> stepDataList = executeScenario(scenario);
+                
+                // Build scenario data as TEST_CASE (Katalon structure)
+                scenarioData.put("entityId", "");
+                scenarioData.put("dataIterationName", "");
+                Map<String, Object> stats = new LinkedHashMap<>();
+                stats.put("total", stepDataList.size());
+                stats.put("passed", stepDataList.size());
+                stats.put("failed", 0);
+                stats.put("errored", 0);
+                stats.put("warned", 0);
+                stats.put("skipped", 0);
+                stats.put("notRun", 0);
+                stats.put("incomplete", 0);
+                scenarioData.put("statistics", stats);
+                scenarioData.put("type", "TEST_CASE");
+                scenarioData.put("name", "Start Test Case : SCENARIO " + scenario.name);
+                scenarioData.put("description", "");
+                scenarioData.put("retryCount", 0);
+                scenarioData.put("status", "COMPLETED");
+                scenarioData.put("result", "PASSED");
+                scenarioData.put("startTime", formatInstant(scenarioStart));
+                scenarioData.put("endTime", formatInstant(Instant.now()));
+                scenarioData.put("children", stepDataList);
+                scenarioData.put("index", scenarioIndex++);
+                scenarioData.put("startIndex", 0);
+                scenarioData.put("logs", Collections.emptyList());
+                
                 logger.info("Scenario PASSED: {}", scenario.name);
             } catch (Exception e) {
+                // Build failed scenario data
+                scenarioData.put("entityId", "");
+                scenarioData.put("dataIterationName", "");
+                Map<String, Object> stats = new LinkedHashMap<>();
+                stats.put("total", 0);
+                stats.put("passed", 0);
+                stats.put("failed", 1);
+                stats.put("errored", 0);
+                stats.put("warned", 0);
+                stats.put("skipped", 0);
+                stats.put("notRun", 0);
+                stats.put("incomplete", 0);
+                scenarioData.put("statistics", stats);
+                scenarioData.put("type", "TEST_CASE");
+                scenarioData.put("name", "Start Test Case : SCENARIO " + scenario.name);
+                scenarioData.put("description", "");
+                scenarioData.put("retryCount", 0);
+                scenarioData.put("status", "COMPLETED");
+                scenarioData.put("result", "FAILED");
+                scenarioData.put("startTime", formatInstant(scenarioStart));
+                scenarioData.put("endTime", formatInstant(Instant.now()));
+                scenarioData.put("children", Collections.emptyList());
+                scenarioData.put("index", scenarioIndex++);
+                scenarioData.put("startIndex", 0);
+                
+                List<Map<String, Object>> errorLogs = new ArrayList<>();
+                Map<String, Object> errorLog = new LinkedHashMap<>();
+                errorLog.put("time", formatInstant(Instant.now()));
+                errorLog.put("level", "FAILED");
+                errorLog.put("message", e.getMessage());
+                errorLogs.add(errorLog);
+                scenarioData.put("logs", errorLogs);
+                
                 logger.error("Scenario FAILED: {} - {}", scenario.name, e.getMessage());
                 failedCount++;
             }
+            
+            scenarioDataList.add(scenarioData);
         }
+        
+        // Store hierarchical data in context for the report generator
+        logger.debug("Storing {} scenario results in context", scenarioDataList.size());
+        context.setProperty("bddScenarioData", new ArrayList<>(scenarioDataList));
         
         return failedCount;
     }
     
     /**
-     * Execute a single scenario
+     * Execute a single scenario and return list of step data
      */
-    private void executeScenario(Scenario scenario) {
+    private List<Map<String, Object>> executeScenario(Scenario scenario) {
+        List<Map<String, Object>> stepDataList = new ArrayList<>();
+        int stepIndex = 0;
+        
         for (Step step : scenario.steps) {
-            executeStep(step);
+            Map<String, Object> stepData = executeStep(step, stepIndex++);
+            stepDataList.add(stepData);
         }
+        
+        return stepDataList;
     }
     
     /**
-     * Execute a single step
+     * Execute a single step and return step data
      */
-    private void executeStep(Step step) {
-        logger.info("  {} {}", step.keyword, step.text);
+    private Map<String, Object> executeStep(Step step, int index) {
+        String stepName = step.text;
+        logger.info("  {} {}", step.keyword, stepName);
+        
+        Map<String, Object> stepData = new LinkedHashMap<>();
+        Instant stepStart = Instant.now();
         
         // Find matching step definition
         StepMatch match = findStepDefinition(step.text);
         if (match == null) {
-            throw new RuntimeException("No step definition found for: " + step.keyword + " " + step.text);
+            stepData.put("type", "TEST_STEP");
+            stepData.put("name", stepName);
+            stepData.put("description", "");
+            stepData.put("retryCount", 0);
+            stepData.put("status", "COMPLETED");
+            stepData.put("result", "FAILED");
+            stepData.put("startTime", formatInstant(stepStart));
+            stepData.put("endTime", formatInstant(Instant.now()));
+            stepData.put("children", Collections.emptyList());
+            stepData.put("index", index);
+            stepData.put("startIndex", 0);
+            
+            List<Map<String, Object>> logs = new ArrayList<>();
+            Map<String, Object> log = new LinkedHashMap<>();
+            log.put("time", formatInstant(Instant.now()));
+            log.put("level", "FAILED");
+            log.put("message", "No step definition found for: " + step.keyword + " " + stepName);
+            logs.add(log);
+            stepData.put("logs", logs);
+            
+            throw new RuntimeException("No step definition found for: " + step.keyword + " " + stepName);
         }
         
         try {
             // Invoke the step definition method
             match.invoke();
+            
+            stepData.put("type", "TEST_STEP");
+            stepData.put("name", stepName);
+            stepData.put("description", "");
+            stepData.put("retryCount", 0);
+            stepData.put("status", "COMPLETED");
+            stepData.put("result", "PASSED");
+            stepData.put("startTime", formatInstant(stepStart));
+            stepData.put("endTime", formatInstant(Instant.now()));
+            stepData.put("children", Collections.emptyList());
+            stepData.put("index", index);
+            stepData.put("startIndex", 0);
+            
+            List<Map<String, Object>> logs = new ArrayList<>();
+            Map<String, Object> log = new LinkedHashMap<>();
+            log.put("time", formatInstant(Instant.now()));
+            log.put("level", "PASSED");
+            log.put("message", stepName);
+            logs.add(log);
+            stepData.put("logs", logs);
+            
             logger.debug("    Step passed");
+            return stepData;
         } catch (Exception e) {
+            stepData.put("type", "TEST_STEP");
+            stepData.put("name", stepName);
+            stepData.put("description", "");
+            stepData.put("retryCount", 0);
+            stepData.put("status", "COMPLETED");
+            stepData.put("result", "FAILED");
+            stepData.put("startTime", formatInstant(stepStart));
+            stepData.put("endTime", formatInstant(Instant.now()));
+            stepData.put("children", Collections.emptyList());
+            stepData.put("index", index);
+            stepData.put("startIndex", 0);
+            
+            List<Map<String, Object>> logs = new ArrayList<>();
+            Map<String, Object> log = new LinkedHashMap<>();
+            log.put("time", formatInstant(Instant.now()));
+            log.put("level", "FAILED");
+            log.put("message", e.getMessage() != null ? e.getMessage() : "Step failed");
+            logs.add(log);
+            stepData.put("logs", logs);
+            
             logger.error("    Step failed: {}", e.getMessage());
-            throw new RuntimeException("Step failed: " + step.keyword + " " + step.text, e);
+            throw new RuntimeException("Step failed: " + step.keyword + " " + stepName, e);
         }
+    }
+    
+    /**
+     * Format Instant to ISO timestamp string
+     */
+    private String formatInstant(Instant instant) {
+        return java.time.ZonedDateTime.ofInstant(instant, java.time.ZoneId.systemDefault())
+                .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSXXX"));
     }
     
     /**

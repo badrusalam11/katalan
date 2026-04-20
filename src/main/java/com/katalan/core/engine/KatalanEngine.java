@@ -18,6 +18,7 @@ import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -206,6 +207,30 @@ public class KatalanEngine {
                     scriptExecutor.executeScript(testCase.getScriptPath());
                 } else {
                     throw new IllegalStateException("No script content or path provided for test case: " + testCase.getName());
+                }
+                
+                // Check if this was a BDD test and capture the info
+                Object isBddTest = context.getProperty("isBddTest");
+                if (Boolean.TRUE.equals(isBddTest)) {
+                    result.setBddTest(true);
+                    Object featureFile = context.getProperty("featureFile");
+                    if (featureFile != null) {
+                        result.setFeatureFile(featureFile.toString());
+                    }
+                    
+                    // Capture hierarchical BDD scenario data
+                    Object bddScenarioData = context.getProperty("bddScenarioData");
+                    if (bddScenarioData instanceof List) {
+                        @SuppressWarnings("unchecked")
+                        List<Map<String, Object>> scenarioData = (List<Map<String, Object>>) bddScenarioData;
+                        result.setBddScenarioData(scenarioData);
+                        logger.debug("Captured {} BDD scenarios for {}", scenarioData.size(), testCase.getName());
+                    }
+                    
+                    // Clear BDD tracking for next test case
+                    context.setProperty("isBddTest", null);
+                    context.setProperty("featureFile", null);
+                    context.setProperty("bddScenarioData", null);
                 }
                 
                 // Test passed

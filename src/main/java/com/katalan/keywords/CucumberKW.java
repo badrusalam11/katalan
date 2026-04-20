@@ -58,6 +58,13 @@ public class CucumberKW {
     public static int runFeatureFile(String featureFile) {
         logger.info("Running feature file: {}", featureFile);
         
+        // Mark current test case as BDD in the execution context
+        ExecutionContext ctx = ExecutionContext.getCurrent();
+        if (ctx != null) {
+            ctx.setProperty("isBddTest", true);
+            ctx.setProperty("featureFile", featureFile);
+        }
+        
         Path projectPath = getProjectPath();
         if (projectPath == null) {
             logger.error("Project path not set. Cannot run feature file.");

@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Represents results from a test case execution
@@ -21,11 +22,21 @@ public class TestCaseResult {
     private List<String> screenshotPaths;
     private int retryAttempt;
     
+    // BDD-related fields
+    private String featureFile;
+    private String scenarioName;
+    private String description;
+    private boolean bddTest;
+    
+    // BDD hierarchical scenario data (for Katalon-style report)
+    private List<Map<String, Object>> bddScenarioData;
+    
     public TestCaseResult() {
         this.stepResults = new ArrayList<>();
         this.screenshotPaths = new ArrayList<>();
         this.status = TestCase.TestCaseStatus.NOT_RUN;
         this.retryAttempt = 0;
+        this.bddTest = false;
     }
     
     public TestCaseResult(String testCaseName) {
@@ -185,6 +196,48 @@ public class TestCaseResult {
     
     public void setRetryAttempt(int retryAttempt) {
         this.retryAttempt = retryAttempt;
+    }
+    
+    // BDD-related getters and setters
+    public String getFeatureFile() {
+        return featureFile;
+    }
+    
+    public void setFeatureFile(String featureFile) {
+        this.featureFile = featureFile;
+        this.bddTest = true;
+    }
+    
+    public String getScenarioName() {
+        return scenarioName;
+    }
+    
+    public void setScenarioName(String scenarioName) {
+        this.scenarioName = scenarioName;
+    }
+    
+    public String getDescription() {
+        return description;
+    }
+    
+    public void setDescription(String description) {
+        this.description = description;
+    }
+    
+    public boolean isBddTest() {
+        return bddTest;
+    }
+    
+    public void setBddTest(boolean bddTest) {
+        this.bddTest = bddTest;
+    }
+    
+    public List<Map<String, Object>> getBddScenarioData() {
+        return bddScenarioData;
+    }
+    
+    public void setBddScenarioData(List<Map<String, Object>> bddScenarioData) {
+        this.bddScenarioData = bddScenarioData;
     }
     
     /**

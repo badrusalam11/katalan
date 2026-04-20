@@ -6,6 +6,7 @@ import com.katalan.core.model.ExecutionResult;
 import com.katalan.core.model.TestSuite;
 import com.katalan.core.engine.TestSuiteParser;
 import com.katalan.reporting.HtmlReportGenerator;
+import com.katalan.reporting.KatalonReportGenerator;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
@@ -162,13 +163,20 @@ public class KatalanCLI implements Callable<Integer> {
                         result = engine.executeTestSuite(suite);
                     }
                     
-                    // Generate report
+                    // Generate Katalon-style report in project folder
                     System.out.println("\n📊 Generating HTML report...");
-                    HtmlReportGenerator reportGenerator = new HtmlReportGenerator(reportPath);
-                    reportGenerator.generateReport(result);
+                    KatalonReportGenerator katalonReporter = new KatalonReportGenerator(projectPath);
+                    Path generatedReportPath = katalonReporter.generateReport(result);
+                    System.out.println("📁 Report generated at: " + generatedReportPath);
+                    
+                    // Also generate simple report at specified path for backwards compatibility
+                    if (reportPath != null && !reportPath.toString().equals("reports")) {
+                        HtmlReportGenerator reportGenerator = new HtmlReportGenerator(reportPath);
+                        reportGenerator.generateReport(result);
+                    }
                     
                     // Print summary
-                    printSummary(result);
+                    printSummary(result, generatedReportPath);
                     
                     // Return exit code based on results
                     return result.getFailedTests() > 0 || result.getErrorTests() > 0 ? 1 : 0;
@@ -232,7 +240,7 @@ public class KatalanCLI implements Callable<Integer> {
             System.out.println();
         }
         
-        private void printSummary(ExecutionResult result) {
+        private void printSummary(ExecutionResult result, Path generatedReportPath) {
             System.out.println();
             System.out.println("╔═══════════════════════════════════════════════════════════╗");
             System.out.println("║                    EXECUTION SUMMARY                      ║");
@@ -245,7 +253,12 @@ public class KatalanCLI implements Callable<Integer> {
             System.out.printf("║  Pass Rate:      %-40.1f%%║%n", result.getPassRate());
             System.out.printf("║  Duration:       %-40s║%n", formatDuration(result.getDuration().toMillis()));
             System.out.println("╠═══════════════════════════════════════════════════════════╣");
-            System.out.printf("║  Report:         %-40s║%n", reportPath.resolve("index.html"));
+            // Show the Katalon-style report path (truncate if too long)
+            String reportDisplayPath = generatedReportPath.toString();
+            if (reportDisplayPath.length() > 38) {
+                reportDisplayPath = "..." + reportDisplayPath.substring(reportDisplayPath.length() - 35);
+            }
+            System.out.printf("║  Report:         %-40s║%n", reportDisplayPath);
             System.out.println("╚═══════════════════════════════════════════════════════════╝");
             System.out.println();
             
