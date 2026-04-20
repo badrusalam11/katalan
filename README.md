@@ -76,6 +76,7 @@ java -jar katalan-runner-1.0.0.jar run \
 | `--retry` | Retry count for failed tests | 0 |
 | `--fail-fast` | Stop on first failure | false |
 | `--timeout` | Implicit wait timeout (seconds) | 30 |
+| `--profile` | Execution profile name | default |
 | `--remote-url` | Remote WebDriver URL | - |
 | `-v, --verbose` | Verbose logging | false |
 
@@ -120,6 +121,35 @@ GlobalVariable.set("username", "admin")
 // Use global variables
 WebUI.openBrowser(GlobalVariable.get("baseUrl"))
 WebUI.setText(findTestObject('Page/Username'), GlobalVariable.get("username"))
+```
+
+### Using Execution Profiles
+
+Execution profiles allow you to define different sets of GlobalVariables for different environments (e.g., dev, staging, production).
+
+**Profile file location:** `Profiles/<profile_name>.glbl`
+
+```bash
+# Run with staging profile
+java -jar katalan-runner-1.0.0.jar run \
+  -p /path/to/project \
+  -ts "Test Suites/MySuite" \
+  --profile staging
+
+# Run with production profile
+java -jar katalan-runner-1.0.0.jar run \
+  -p /path/to/project \
+  -ts "Test Suites/MySuite" \
+  --profile production
+```
+
+**Example profile structure:**
+```
+MyProject/
+├── Profiles/
+│   ├── default.glbl      # Default profile
+│   ├── staging.glbl      # Staging environment
+│   └── production.glbl   # Production environment
 ```
 
 ### Using KeywordUtil
