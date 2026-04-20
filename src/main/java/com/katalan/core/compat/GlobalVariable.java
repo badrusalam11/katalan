@@ -34,18 +34,23 @@ public class GlobalVariable {
     public static String sPassword = "";
     public static int iTimeOut = 10;
     
+    // Calculator project variables
+    public static String baseUrl = "";
+    
     /**
      * Set a global variable
      */
     public static void set(String name, Object value) {
         variables.put(name, value);
-        logger.debug("Set GlobalVariable.{} = {}", name, value);
+        logger.info("Set GlobalVariable.{} = {}", name, value);
         
         // Also set known static fields for direct access compatibility
         try {
             setStaticField(name, value);
+            logger.info("Set static field GlobalVariable.{} successfully", name);
         } catch (Exception e) {
             // Field doesn't exist as static, just use map
+            logger.debug("No static field for: {}", name);
         }
     }
     
@@ -150,6 +155,7 @@ public class GlobalVariable {
         sUsername = "";
         sPassword = "";
         iTimeOut = 10;
+        baseUrl = "";
         logger.debug("Cleared all global variables");
     }
     

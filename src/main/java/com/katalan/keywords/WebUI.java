@@ -51,7 +51,11 @@ public class WebUI {
             context.setWebDriver(driver);
         }
         
-        driver.get(url);
+        // Only navigate if URL is provided (non-empty)
+        if (url != null && !url.trim().isEmpty()) {
+            driver.get(url);
+        }
+        // Empty URL means just open the browser without navigating (Katalon behavior)
     }
     
     /**
@@ -1150,11 +1154,16 @@ public class WebUI {
                 throw new RuntimeException("Script file not found for test case: " + testCase.getTestCaseName());
             }
             
-            // Use reflection to call executeScript with variables
-            // This avoids circular dependency issues
-            java.lang.reflect.Method executeMethod = executorObj.getClass().getMethod("executeScriptWithVariables", 
-                java.nio.file.Path.class, java.util.Map.class);
-            executeMethod.invoke(executorObj, scriptPath, variables);
+            // Check if executor is KatalanBDDExecutor and use its executeTestCase method
+            if (executorObj instanceof KatalanBDDExecutor) {
+                KatalanBDDExecutor bddExecutor = (KatalanBDDExecutor) executorObj;
+                bddExecutor.executeTestCase(testCase, variables);
+            } else {
+                // Use reflection to call executeScriptWithVariables for GroovyScriptExecutor
+                java.lang.reflect.Method executeMethod = executorObj.getClass().getMethod("executeScriptWithVariables", 
+                    java.nio.file.Path.class, java.util.Map.class);
+                executeMethod.invoke(executorObj, scriptPath, variables);
+            }
             
             logger.info("Test case completed: {}", testCase.getTestCaseName());
         } catch (java.lang.reflect.InvocationTargetException e) {

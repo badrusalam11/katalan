@@ -82,6 +82,9 @@ public class GroovyScriptExecutor {
         // Add CustomKeywords handler
         binding.setVariable("CustomKeywords", new CustomKeywordsClosure(context));
         
+        // Add CucumberKW for BDD support
+        binding.setVariable("CucumberKW", new CucumberKWClosure(context));
+        
         // Add all global variables directly to binding for direct access (e.g. firstName instead of GlobalVariable.firstName)
         Map<String, Object> globalVars = GlobalVariable.getAllVariables();
         if (globalVars != null) {
@@ -261,10 +264,14 @@ public class GroovyScriptExecutor {
             "// ObjectRepository handled by findTestObject binding"
         );
         
-        // Static imports - findTestObject, findCheckpoint, findTestCase, findTestData
+        // Static imports - findTestObject, findWindowsObject, findCheckpoint, findTestCase, findTestData
         result = result.replaceAll(
             "import static com\\.kms\\.katalon\\.core\\.testobject\\.ObjectRepository\\.findTestObject.*",
             "// findTestObject available as binding"
+        );
+        result = result.replaceAll(
+            "import static com\\.kms\\.katalon\\.core\\.testobject\\.ObjectRepository\\.findWindowsObject.*",
+            "// findWindowsObject not supported (Windows testing)"
         );
         result = result.replaceAll(
             "import static com\\.kms\\.katalon\\.core\\.checkpoint\\.CheckpointFactory\\..*",
@@ -279,6 +286,16 @@ public class GroovyScriptExecutor {
             "// TestDataFactory functions not supported"
         );
         
+        // CucumberKW - replace with katalan Cucumber support
+        result = result.replace(
+            "import com.kms.katalon.core.cucumber.keyword.CucumberBuiltinKeywords as CucumberKW",
+            "import com.katalan.keywords.CucumberKW"
+        );
+        result = result.replaceAll(
+            "import com\\.kms\\.katalon\\.core\\.cucumber\\.keyword\\.CucumberBuiltinKeywords.*",
+            "import com.katalan.keywords.CucumberKW"
+        );
+        
         // Comment out all unsupported com.kms.katalon imports that weren't handled above
         result = result.replaceAll(
             "import com\\.kms\\.katalon\\.core\\.checkpoint\\..*",
@@ -291,10 +308,6 @@ public class GroovyScriptExecutor {
         result = result.replaceAll(
             "import com\\.kms\\.katalon\\.core\\.testdata\\..*",
             "// TestData imports not supported"
-        );
-        result = result.replaceAll(
-            "import com\\.kms\\.katalon\\.core\\.cucumber\\..*",
-            "// Cucumber integration not supported"
         );
         result = result.replaceAll(
             "import com\\.kms\\.katalon\\.core\\.annotation\\..*",
@@ -317,7 +330,8 @@ public class GroovyScriptExecutor {
         // (after imports, before class/code)
         String stubMethods = "\n// katalan stubs for unsupported Katalon methods\n" +
             "def findCheckpoint(name) { /*stub*/ null }\n" +
-            "def findTestData(name) { /*stub*/ null }\n";
+            "def findTestData(name) { /*stub*/ null }\n" +
+            "def findWindowsObject(name) { /*stub*/ null }\n";
         
         // Insert stubs after the last import statement
         int lastImportIndex = result.lastIndexOf("import ");
@@ -803,6 +817,59 @@ public class GroovyScriptExecutor {
             public Object call(Object... args) {
                 return parent.executeKeyword(fullPath, args);
             }
+        }
+    }
+    
+    /**
+     * Closure for CucumberKW - enables running Cucumber/BDD feature files
+     */
+    public static class CucumberKWClosure extends groovy.lang.GroovyObjectSupport {
+        
+        private static final Logger logger = LoggerFactory.getLogger(CucumberKWClosure.class);
+        private final ExecutionContext context;
+        
+        public CucumberKWClosure(ExecutionContext context) {
+            this.context = context;
+        }
+        
+        /**
+         * Run a feature file
+         */
+        public int runFeatureFile(String featureFile) {
+            logger.info("CucumberKW.runFeatureFile called: {}", featureFile);
+            
+            // Set project path for CucumberKW
+            com.katalan.keywords.CucumberKW.setProjectPath(context.getProjectPath());
+            
+            return com.katalan.keywords.CucumberKW.runFeatureFile(featureFile);
+        }
+        
+        /**
+         * Run a folder of feature files
+         */
+        public int runFeatureFolder(String featureFolder) {
+            logger.info("CucumberKW.runFeatureFolder called: {}", featureFolder);
+            
+            com.katalan.keywords.CucumberKW.setProjectPath(context.getProjectPath());
+            
+            return com.katalan.keywords.CucumberKW.runFeatureFolder(featureFolder);
+        }
+        
+        /**
+         * Handle method invocation dynamically
+         */
+        @Override
+        public Object invokeMethod(String name, Object args) {
+            Object[] argsArray = args instanceof Object[] ? (Object[]) args : new Object[]{args};
+            
+            if ("runFeatureFile".equals(name) && argsArray.length > 0) {
+                return runFeatureFile(String.valueOf(argsArray[0]));
+            } else if ("runFeatureFolder".equals(name) && argsArray.length > 0) {
+                return runFeatureFolder(String.valueOf(argsArray[0]));
+            }
+            
+            logger.warn("Unknown CucumberKW method: {}", name);
+            return null;
         }
     }
 }
