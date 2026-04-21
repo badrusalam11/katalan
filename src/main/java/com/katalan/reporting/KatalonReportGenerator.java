@@ -68,6 +68,88 @@ public class KatalonReportGenerator {
     }
     
     /**
+     * Compute the Katalon-style per-run report directory without generating
+     * any files. Format: {@code Reports/<timestamp>/<SuiteRelativePath>/<timestamp>}.
+     * Where {@code SuiteRelativePath} mirrors the suite's location under
+     * {@code Test Suites/} (without the {@code .ts} extension). For example,
+     * a suite at {@code Test Suites/Regresion/Nomi/BRI to BRI.ts} produces
+     * {@code Reports/<timestamp>/Regresion/Nomi/BRI to BRI/<timestamp>}.
+     */
+    public Path computeReportDirectory(ExecutionResult result) {
+        String timestamp = TIMESTAMP_FORMATTER.format(result.getStartTime());
+        String suiteRelative = resolveSuiteRelativePath(result);
+        Path reportsBaseDir = projectPath.resolve("Reports");
+        Path timestampDir = reportsBaseDir.resolve(timestamp);
+        // resolve() with a string containing '/' creates nested sub-directories
+        Path suiteDir = timestampDir;
+        for (String part : suiteRelative.split("/")) {
+            if (!part.isEmpty()) suiteDir = suiteDir.resolve(part);
+        }
+        return suiteDir.resolve(timestamp);
+    }
+    
+    /**
+     * Resolve the suite's path relative to the {@code Test Suites/} folder
+     * (Katalon-style), stripped of the {@code .ts} extension.
+     * <p>
+     * Falls back to the suite's flat name if the absolute path is unavailable
+     * or does not sit under a {@code Test Suites} ancestor.
+     */
+    private String resolveSuiteRelativePath(ExecutionResult result) {
+        if (result.getSuiteResults().isEmpty()) return "Test Suite";
+        com.katalan.core.model.TestSuiteResult sr = result.getSuiteResults().get(0);
+        String fallback = sr.getSuiteName() != null ? sr.getSuiteName() : "Test Suite";
+        Path sp = sr.getSuitePath();
+        if (sp == null) return fallback;
+        // Walk up the path to find the "Test Suites" ancestor
+        Path cursor = sp.toAbsolutePath().normalize();
+        Path testSuitesDir = null;
+        for (Path p = cursor.getParent(); p != null; p = p.getParent()) {
+            if ("Test Suites".equals(p.getFileName() == null ? null : p.getFileName().toString())) {
+                testSuitesDir = p;
+                break;
+            }
+        }
+        if (testSuitesDir == null) return fallback;
+        Path relative = testSuitesDir.relativize(cursor);
+        String rel = relative.toString().replace('\\', '/');
+        if (rel.endsWith(".ts")) rel = rel.substring(0, rel.length() - 3);
+        return rel.isEmpty() ? fallback : rel;
+    }
+    
+    /**
+     * Pre-create the Katalon-style per-run report folder and write the
+     * minimum files required by @AfterTestSuite listeners (execution.properties,
+     * execution.uuid, JUnit_Report.xml). This must be called BEFORE invoking
+     * @AfterTestSuite listeners because custom listeners (e.g. CSReport,
+     * PdfGenerator) parse these files to build their reports.
+     *
+     * @return the per-run report directory (created on disk)
+     */
+    public Path prepareReportDirectory(ExecutionResult result) throws IOException {
+        Path reportDir = computeReportDirectory(result);
+        Files.createDirectories(reportDir);
+        this.currentReportDir = reportDir;
+        
+        String suiteRelative = resolveSuiteRelativePath(result);
+        
+        // Minimum set of files required by Katalon-compatible listeners.
+        // All other files are generated later by generateReport().
+        try { generateExecutionProperties(reportDir, result, suiteRelative); } catch (Exception e) {
+            logger.warn("Failed to write execution.properties early: {}", e.getMessage());
+        }
+        try { generateExecutionUuid(reportDir); } catch (Exception e) {
+            logger.warn("Failed to write execution.uuid early: {}", e.getMessage());
+        }
+        try { generateJUnitReport(reportDir, result); } catch (Exception e) {
+            logger.warn("Failed to write JUnit_Report.xml early: {}", e.getMessage());
+        }
+        
+        logger.info("Prepared Katalon-style report directory: {}", reportDir);
+        return reportDir;
+    }
+    
+    /**
      * Generate Katalon-style reports
      * 
      * @param result The execution result
@@ -76,14 +158,11 @@ public class KatalonReportGenerator {
     public Path generateReport(ExecutionResult result) throws IOException {
         String timestamp = TIMESTAMP_FORMATTER.format(result.getStartTime());
         
-        // Create Katalon-style folder structure: Reports/<timestamp>/<SuiteName>/<timestamp>/
-        String suiteName = result.getSuiteResults().isEmpty() ? "Test Suite" 
-                : result.getSuiteResults().get(0).getSuiteName();
+        // Create Katalon-style folder structure:
+        // Reports/<timestamp>/<SuiteRelativePath>/<timestamp>/
+        String suiteRelative = resolveSuiteRelativePath(result);
         
-        Path reportsBaseDir = projectPath.resolve("Reports");
-        Path timestampDir = reportsBaseDir.resolve(timestamp);
-        Path suiteDir = timestampDir.resolve(suiteName);
-        Path reportDir = suiteDir.resolve(timestamp);
+        Path reportDir = computeReportDirectory(result);
         
         Files.createDirectories(reportDir);
         this.currentReportDir = reportDir;
@@ -94,7 +173,7 @@ public class KatalonReportGenerator {
         generateHtmlReport(reportDir, timestamp, result);
         generateCsvReport(reportDir, timestamp, result);
         generateJUnitReport(reportDir, result);
-        generateExecutionProperties(reportDir, result, suiteName);
+        generateExecutionProperties(reportDir, result, suiteRelative);
         generateExecutionUuid(reportDir);
         generateConsoleLog(reportDir, result);
         generateExecutionLog(reportDir, result);
@@ -491,38 +570,150 @@ public class KatalonReportGenerator {
     }
     
     /**
-     * Generate execution.properties file
+     * Generate execution.properties file (JSON format, matching Katalon Studio).
+     * Despite the .properties extension, Katalon writes this file as JSON and
+     * custom scripts (e.g. PdfGenerator, CSReport) parse it with JsonSlurper.
+     *
+     * Structure (flat at top level — this is what Katalon scripts expect):
+     * <pre>
+     * {
+     *   "reportFolder": "/abs/path/Reports/&lt;ts&gt;/&lt;Suite&gt;/&lt;ts&gt;",
+     *   "projectDir": "/abs/path",
+     *   "projectName": "myProject",
+     *   "hostName": "...", "os": "...", "hostAddress": "...",
+     *   "Name": "Chrome", "browserType": "Chrome",
+     *   "executedEntity": "TestSuite",
+     *   "id": "Test Suites/&lt;name&gt;",
+     *   "name": "&lt;name&gt;",
+     *   "source": "/abs/path/Test Suites/&lt;name&gt;.ts",
+     *   "timeout": 30, "actionDelay": 0, "defaultFailureHandling": "STOP_ON_FAILURE",
+     *   "katalon.versionNumber": "...",
+     *   "runningMode": "CLI",
+     *   "execution": { "general": { ... } },
+     *   "host": { ... }
+     * }
+     * </pre>
      */
     private void generateExecutionProperties(Path reportDir, ExecutionResult result, String suiteName) throws IOException {
         Map<String, Object> properties = new LinkedHashMap<>();
         
-        properties.put("Name", result.getBrowserName() != null ? result.getBrowserName() : "Chrome");
+        String reportFolder = reportDir.toString().replace("\\", "/");
+        String browserName = result.getBrowserName() != null ? result.getBrowserName() : "Chrome";
+        String projectDir = projectPath.toString().replace("\\", "/");
+        String hostName = getHostname();
+        String os = System.getProperty("os.name") + " " + System.getProperty("os.arch");
+        String hostAddress = getHostAddress();
+        String sourcePath = projectPath.resolve("Test Suites").resolve(suiteName + ".ts")
+                .toString().replace("\\", "/");
+        
+        // ===== TOP-LEVEL flat keys (what most Katalon scripts read) =====
+        properties.put("reportFolder", reportFolder);
+        properties.put("projectDir", projectDir);
         properties.put("projectName", projectPath.getFileName().toString());
-        properties.put("projectDir", projectPath.toString().replace("\\", "/"));
         
-        // Host info
-        Map<String, Object> host = new LinkedHashMap<>();
-        host.put("hostName", getHostname());
-        host.put("os", System.getProperty("os.name") + " " + System.getProperty("os.arch"));
-        host.put("hostAddress", getHostAddress());
-        properties.put("host", host);
+        // Browser / host at top level
+        properties.put("Name", browserName);
+        properties.put("browserType", browserName);
+        properties.put("hostName", hostName);
+        properties.put("os", os);
+        properties.put("hostAddress", hostAddress);
         
-        // Execution settings
-        Map<String, Object> execution = new LinkedHashMap<>();
-        Map<String, Object> general = new LinkedHashMap<>();
-        general.put("timeout", 30);
-        general.put("actionDelay", 0);
-        general.put("defaultFailureHandling", "STOP_ON_FAILURE");
-        general.put("reportFolder", reportDir.toString().replace("\\", "/"));
-        execution.put("general", general);
-        properties.put("execution", execution);
-        
+        // Execution metadata at top level
         properties.put("executedEntity", "TestSuite");
         properties.put("id", "Test Suites/" + suiteName);
         properties.put("name", suiteName);
-        properties.put("source", projectPath.resolve("Test Suites").resolve(suiteName + ".ts").toString().replace("\\", "/"));
+        properties.put("source", sourcePath);
+        
+        // General settings at top level
+        properties.put("timeout", 30);
+        properties.put("actionDelay", 0);
+        properties.put("defaultFailureHandling", "STOP_ON_FAILURE");
         properties.put("katalon.versionNumber", katalanVersion);
         properties.put("runningMode", "CLI");
+        
+        // ===== NESTED structure (for scripts that use execution.general.reportFolder) =====
+        Map<String, Object> host = new LinkedHashMap<>();
+        host.put("hostName", hostName);
+        host.put("os", os);
+        host.put("hostAddress", hostAddress);
+        properties.put("host", host);
+        
+        // Nested execution.general.* structure -- matches Katalon Studio exactly.
+        // Custom listener scripts (PdfGenerator, CSReport, etc) read e.g.
+        // execution.general.report.reportFolder and execution.general.executionProfile.
+        Map<String, Object> execution = new LinkedHashMap<>();
+        Map<String, Object> general = new LinkedHashMap<>();
+        general.put("autoApplyNeighborXpaths", false);
+        general.put("ignorePageLoadTimeoutException", false);
+        general.put("timeCapsuleEnabled", false);
+        general.put("executionProfile",
+                com.kms.katalon.core.configuration.RunConfiguration.getExecutionProfile());
+        general.put("excludeKeywords", new java.util.ArrayList<String>());
+        general.put("canvasTextExtractionEnabled", false);
+        general.put("flutterAppTestingEnabled", false);
+        general.put("timeout", 30);
+        general.put("actionDelay", 0);
+        general.put("defaultFailureHandling", "STOP_ON_FAILURE");
+        general.put("terminateDriverAfterTestCase", false);
+        general.put("defaultPageLoadTimeout", 30);
+        general.put("closedShadowDOMEnabled", false);
+
+        // Nested "report" object (what Katalon scripts access as
+        // execution.general.report.reportFolder)
+        Map<String, Object> report = new LinkedHashMap<>();
+        Map<String, Object> takeScreenshot = new LinkedHashMap<>();
+        takeScreenshot.put("enable", false);
+        report.put("takeScreenshotSettings", takeScreenshot);
+        Map<String, Object> videoRecorder = new LinkedHashMap<>();
+        videoRecorder.put("enable", false);
+        videoRecorder.put("useBrowserRecorder", true);
+        videoRecorder.put("videoFormat", "WEBM");
+        videoRecorder.put("videoQuality", "LOW");
+        videoRecorder.put("recordAllTestCases", true);
+        report.put("videoRecorderSettings", videoRecorder);
+        report.put("screenCaptureOption", false);
+        report.put("reportFolder", reportFolder);
+        general.put("report", report);
+
+        general.put("enablePageLoadTimeout", false);
+        general.put("terminateDriverAfterTestSuite", false);
+        general.put("useActionDelayInSecond", "SECONDS");
+        general.put("testDataInfo", new LinkedHashMap<>());
+        general.put("selfHealingEnabled", false);
+        execution.put("general", general);
+
+        // Nested drivers section (Katalon scripts sometimes inspect this)
+        Map<String, Object> drivers = new LinkedHashMap<>();
+        Map<String, Object> driversSystem = new LinkedHashMap<>();
+        Map<String, Object> webUiDriver = new LinkedHashMap<>();
+        webUiDriver.put("browserType", (browserName == null ? "CHROME" : browserName.toUpperCase()) + "_DRIVER");
+        driversSystem.put("WebUI", webUiDriver);
+        drivers.put("system", driversSystem);
+        Map<String, Object> driversPrefs = new LinkedHashMap<>();
+        driversPrefs.put("WebUI", new LinkedHashMap<>());
+        drivers.put("preferences", driversPrefs);
+        execution.put("drivers", drivers);
+
+        execution.put("globalSmartWaitEnabled", false);
+        execution.put("smartLocatorEnabled", false);
+        execution.put("smartLocatorSettingDefaultEnabled", true);
+        execution.put("logTestSteps", true);
+        execution.put("hideHostname", false);
+        properties.put("execution", execution);
+
+        // Additional top-level fields for Katalon parity
+        properties.put("description", "");
+        properties.put("sessionServer.host", "localhost");
+        properties.put("sessionServer.port", 0);
+        properties.put("isDebugLaunchMode", false);
+        properties.put("pluginTestListeners", new java.util.ArrayList<>());
+        properties.put("allowUsingSelfHealing", false);
+        properties.put("allowUsingTimeCapsule", true);
+        properties.put("allowCustomizeRequestTimeout", false);
+        properties.put("allowCustomizeRequestResponseSizeLimit", false);
+        properties.put("allowMobileImageBasedTesting", false);
+        properties.put("maxFailedTests", -1);
+        properties.put("testops", new LinkedHashMap<>());
         
         // Write as JSON
         String json = toJson(properties);

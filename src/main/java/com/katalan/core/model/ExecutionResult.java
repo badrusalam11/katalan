@@ -24,6 +24,7 @@ public class ExecutionResult {
     private int failedTests;
     private int errorTests;
     private int skippedTests;
+    private String reportPath;
     
     public enum ExecutionStatus {
         NOT_STARTED,
@@ -183,5 +184,13 @@ public class ExecutionResult {
     
     public int getSkippedTests() {
         return skippedTests;
+    }
+
+    public String getReportPath() {
+        return reportPath;
+    }
+
+    public void setReportPath(String reportPath) {
+        this.reportPath = reportPath;
     }
 }
