@@ -59,11 +59,21 @@ public class WebUI {
     }
     
     /**
-     * Check if WebDriver session is closed
+     * Check if WebDriver session is closed.
+     * Avoids calling driver.getTitle() which performs a network round-trip to
+     * the browser - a cheap session-id / window-handle check is enough to
+     * detect a dead session without doing any real work on a live one.
      */
     private static boolean isDriverClosed(WebDriver driver) {
         try {
-            driver.getTitle(); // Try a simple command
+            if (driver instanceof org.openqa.selenium.remote.RemoteWebDriver) {
+                org.openqa.selenium.remote.RemoteWebDriver rwd =
+                        (org.openqa.selenium.remote.RemoteWebDriver) driver;
+                if (rwd.getSessionId() == null) return true;
+            }
+            // Cheap check: getWindowHandles returns instantly on live sessions,
+            // throws NoSuchSessionException / WebDriverException on dead ones.
+            driver.getWindowHandles();
             return false;
         } catch (Exception e) {
             return true;
@@ -268,13 +278,29 @@ public class WebUI {
     }
     
     /**
-     * Set text to an input field with timeout
+     * Set text to an input field with timeout.
+     *
+     * Approach mirrors Katalon's setText behaviour but is hardened for React/Angular
+     * controlled inputs: after the native sendKeys we dispatch `input` and `change`
+     * events via JS so frameworks that listen only for synthetic events (e.g. React's
+     * onChange) see the updated value and enable submit buttons.
      */
     public static void setText(TestObject testObject, String text, int timeout) {
         logger.info("Setting text '{}' to: {}", text, testObject.getName());
         WebElement element = waitForElement(testObject, timeout);
-        element.clear();
+        try {
+            element.clear();
+        } catch (Exception ignore) { /* some inputs throw on clear - non-fatal */ }
         element.sendKeys(text);
+        // Dispatch input+change so React/Angular-controlled forms register the value
+        try {
+            ((JavascriptExecutor) getDriver()).executeScript(
+                "var el = arguments[0];" +
+                "try { el.dispatchEvent(new Event('input', {bubbles:true})); } catch(e){}" +
+                "try { el.dispatchEvent(new Event('change', {bubbles:true})); } catch(e){}" +
+                "try { el.dispatchEvent(new Event('blur', {bubbles:true})); } catch(e){}",
+                element);
+        } catch (Exception ignore) { /* best-effort */ }
     }
     
     /**

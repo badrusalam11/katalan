@@ -38,7 +38,62 @@ public class WebUiBuiltInKeywords {
         if (to == null) return null;
         return to.toKatalanTestObject();
     }
-    
+
+    // ==================== FailureHandling helpers ====================
+    // In Katalon, a keyword called with OPTIONAL or CONTINUE_ON_FAILURE must NOT
+    // throw on failure — it logs and returns a default value (false / null / no-op).
+    // Only STOP_ON_FAILURE (or null, which defaults to STOP_ON_FAILURE) propagates.
+
+    @FunctionalInterface private interface VoidOp { void run() throws Throwable; }
+    @FunctionalInterface private interface BoolOp { boolean run() throws Throwable; }
+    @FunctionalInterface private interface ObjOp<T> { T run() throws Throwable; }
+
+    private static boolean isLenient(FailureHandling fh) {
+        return fh == FailureHandling.OPTIONAL || fh == FailureHandling.CONTINUE_ON_FAILURE;
+    }
+
+    private static void runVoid(VoidOp op, FailureHandling fh) {
+        try {
+            op.run();
+        } catch (Throwable t) {
+            if (isLenient(fh)) {
+                logger.warn("Keyword failed (flowControl={}): {}", fh, t.getMessage());
+                return;
+            }
+            if (t instanceof RuntimeException) throw (RuntimeException) t;
+            if (t instanceof Error) throw (Error) t;
+            throw new RuntimeException(t);
+        }
+    }
+
+    private static boolean runBool(BoolOp op, FailureHandling fh) {
+        try {
+            return op.run();
+        } catch (Throwable t) {
+            if (isLenient(fh)) {
+                logger.warn("Keyword failed (flowControl={}): {}", fh, t.getMessage());
+                return false;
+            }
+            if (t instanceof RuntimeException) throw (RuntimeException) t;
+            if (t instanceof Error) throw (Error) t;
+            throw new RuntimeException(t);
+        }
+    }
+
+    private static <T> T runObj(ObjOp<T> op, FailureHandling fh, T fallback) {
+        try {
+            return op.run();
+        } catch (Throwable t) {
+            if (isLenient(fh)) {
+                logger.warn("Keyword failed (flowControl={}): {}", fh, t.getMessage());
+                return fallback;
+            }
+            if (t instanceof RuntimeException) throw (RuntimeException) t;
+            if (t instanceof Error) throw (Error) t;
+            throw new RuntimeException(t);
+        }
+    }
+
     // ==================== Browser Keywords ====================
     
     public static void openBrowser(String url) {
@@ -46,7 +101,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void openBrowser(String url, FailureHandling flowControl) {
-        WebUI.openBrowser(url);
+        runVoid(() -> WebUI.openBrowser(url), flowControl);
     }
 
     // ==================== Smart Wait (Katalon-specific, no-op in Katalan) ====================
@@ -72,7 +127,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void closeBrowser(FailureHandling flowControl) {
-        WebUI.closeBrowser();
+        runVoid(() -> WebUI.closeBrowser(), flowControl);
     }
     
     public static void navigateToUrl(String url) {
@@ -80,7 +135,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void navigateToUrl(String url, FailureHandling flowControl) {
-        WebUI.navigateToUrl(url);
+        runVoid(() -> WebUI.navigateToUrl(url), flowControl);
     }
     
     public static void refresh() {
@@ -88,7 +143,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void refresh(FailureHandling flowControl) {
-        WebUI.refresh();
+        runVoid(() -> WebUI.refresh(), flowControl);
     }
     
     public static void back() {
@@ -96,7 +151,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void back(FailureHandling flowControl) {
-        WebUI.back();
+        runVoid(() -> WebUI.back(), flowControl);
     }
     
     public static void forward() {
@@ -104,7 +159,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void forward(FailureHandling flowControl) {
-        WebUI.forward();
+        runVoid(() -> WebUI.forward(), flowControl);
     }
     
     public static String getUrl() {
@@ -112,7 +167,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static String getUrl(FailureHandling flowControl) {
-        return WebUI.getUrl();
+        return runObj(() -> WebUI.getUrl(), flowControl, null);
     }
     
     public static void maximizeWindow() {
@@ -120,7 +175,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void maximizeWindow(FailureHandling flowControl) {
-        WebUI.maximizeWindow();
+        runVoid(() -> WebUI.maximizeWindow(), flowControl);
     }
     
     public static void setViewPortSize(int width, int height) {
@@ -131,7 +186,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void setViewPortSize(int width, int height, FailureHandling flowControl) {
-        setViewPortSize(width, height);
+        runVoid(() -> setViewPortSize(width, height), flowControl);
     }
     
     public static WebDriver getWebDriver() {
@@ -145,7 +200,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void click(TestObject to, FailureHandling flowControl) {
-        WebUI.click(toKatalan(to));
+        runVoid(() -> WebUI.click(toKatalan(to)), flowControl);
     }
     
     public static void doubleClick(TestObject to) {
@@ -153,7 +208,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void doubleClick(TestObject to, FailureHandling flowControl) {
-        WebUI.doubleClick(toKatalan(to));
+        runVoid(() -> WebUI.doubleClick(toKatalan(to)), flowControl);
     }
     
     public static void rightClick(TestObject to) {
@@ -161,7 +216,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void rightClick(TestObject to, FailureHandling flowControl) {
-        WebUI.rightClick(toKatalan(to));
+        runVoid(() -> WebUI.rightClick(toKatalan(to)), flowControl);
     }
     
     public static void clickOffset(TestObject to, int offsetX, int offsetY) {
@@ -170,7 +225,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void clickOffset(TestObject to, int offsetX, int offsetY, FailureHandling flowControl) {
-        clickOffset(to, offsetX, offsetY);
+        runVoid(() -> clickOffset(to, offsetX, offsetY), flowControl);
     }
     
     // ==================== Text Input Keywords ====================
@@ -180,7 +235,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void setText(TestObject to, String text, FailureHandling flowControl) {
-        WebUI.setText(toKatalan(to), text);
+        runVoid(() -> WebUI.setText(toKatalan(to), text), flowControl);
     }
     
     public static void sendKeys(TestObject to, String keys) {
@@ -188,7 +243,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void sendKeys(TestObject to, String keys, FailureHandling flowControl) {
-        WebUI.sendKeys(toKatalan(to), 30, keys);
+        runVoid(() -> WebUI.sendKeys(toKatalan(to), 30, keys), flowControl);
     }
     
     public static void clearText(TestObject to) {
@@ -196,7 +251,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void clearText(TestObject to, FailureHandling flowControl) {
-        WebUI.clearText(toKatalan(to));
+        runVoid(() -> WebUI.clearText(toKatalan(to)), flowControl);
     }
     
     public static void setEncryptedText(TestObject to, String encryptedText) {
@@ -205,7 +260,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void setEncryptedText(TestObject to, String encryptedText, FailureHandling flowControl) {
-        setEncryptedText(to, encryptedText);
+        runVoid(() -> setEncryptedText(to, encryptedText), flowControl);
     }
     
     // ==================== Wait Keywords ====================
@@ -215,7 +270,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void delay(int seconds, FailureHandling flowControl) {
-        WebUI.delay(seconds);
+        runVoid(() -> WebUI.delay(seconds), flowControl);
     }
     
     public static boolean waitForElementVisible(TestObject to, int timeout) {
@@ -224,7 +279,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static boolean waitForElementVisible(TestObject to, int timeout, FailureHandling flowControl) {
-        return waitForElementVisible(to, timeout);
+        return runBool(() -> waitForElementVisible(to, timeout), flowControl);
     }
     
     public static boolean waitForElementNotVisible(TestObject to, int timeout) {
@@ -234,7 +289,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static boolean waitForElementNotVisible(TestObject to, int timeout, FailureHandling flowControl) {
-        return waitForElementNotVisible(to, timeout);
+        return runBool(() -> waitForElementNotVisible(to, timeout), flowControl);
     }
     
     public static boolean waitForElementPresent(TestObject to, int timeout) {
@@ -243,7 +298,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static boolean waitForElementPresent(TestObject to, int timeout, FailureHandling flowControl) {
-        return waitForElementPresent(to, timeout);
+        return runBool(() -> waitForElementPresent(to, timeout), flowControl);
     }
     
     public static boolean waitForElementNotPresent(TestObject to, int timeout) {
@@ -252,7 +307,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static boolean waitForElementNotPresent(TestObject to, int timeout, FailureHandling flowControl) {
-        return waitForElementNotPresent(to, timeout);
+        return runBool(() -> waitForElementNotPresent(to, timeout), flowControl);
     }
     
     public static boolean waitForElementClickable(TestObject to, int timeout) {
@@ -261,7 +316,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static boolean waitForElementClickable(TestObject to, int timeout, FailureHandling flowControl) {
-        return waitForElementClickable(to, timeout);
+        return runBool(() -> waitForElementClickable(to, timeout), flowControl);
     }
     
     public static boolean waitForPageLoad(int timeout) {
@@ -270,7 +325,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static boolean waitForPageLoad(int timeout, FailureHandling flowControl) {
-        return waitForPageLoad(timeout);
+        return runBool(() -> waitForPageLoad(timeout), flowControl);
     }
     
     public static boolean waitForAlert(int timeout) {
@@ -279,7 +334,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static boolean waitForAlert(int timeout, FailureHandling flowControl) {
-        return waitForAlert(timeout);
+        return runBool(() -> waitForAlert(timeout), flowControl);
     }
     
     // ==================== Verification Keywords ====================
@@ -289,7 +344,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static boolean verifyElementPresent(TestObject to, int timeout, FailureHandling flowControl) {
-        return verifyElementPresent(to, timeout);
+        return runBool(() -> verifyElementPresent(to, timeout), flowControl);
     }
     
     public static boolean verifyElementNotPresent(TestObject to, int timeout) {
@@ -297,7 +352,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static boolean verifyElementNotPresent(TestObject to, int timeout, FailureHandling flowControl) {
-        return verifyElementNotPresent(to, timeout);
+        return runBool(() -> verifyElementNotPresent(to, timeout), flowControl);
     }
     
     public static boolean verifyElementVisible(TestObject to) {
@@ -305,7 +360,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static boolean verifyElementVisible(TestObject to, FailureHandling flowControl) {
-        return WebUI.verifyElementVisible(toKatalan(to), 30);
+        return runBool(() -> WebUI.verifyElementVisible(toKatalan(to), 30), flowControl);
     }
     
     public static boolean verifyElementVisible(TestObject to, int timeout) {
@@ -313,7 +368,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static boolean verifyElementVisible(TestObject to, int timeout, FailureHandling flowControl) {
-        return WebUI.verifyElementVisible(toKatalan(to), timeout);
+        return runBool(() -> WebUI.verifyElementVisible(toKatalan(to), timeout), flowControl);
     }
     
     public static boolean verifyElementNotVisible(TestObject to, FailureHandling flowControl) {
@@ -331,7 +386,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static boolean verifyElementText(TestObject to, String text, FailureHandling flowControl) {
-        return verifyElementText(to, text);
+        return runBool(() -> verifyElementText(to, text), flowControl);
     }
     
     public static boolean verifyElementAttributeValue(TestObject to, String attribute, String value, int timeout) {
@@ -339,7 +394,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static boolean verifyElementAttributeValue(TestObject to, String attribute, String value, int timeout, FailureHandling flowControl) {
-        return verifyElementAttributeValue(to, attribute, value, timeout);
+        return runBool(() -> verifyElementAttributeValue(to, attribute, value, timeout), flowControl);
     }
     
     public static boolean verifyTextPresent(String text, boolean isRegex) {
@@ -347,7 +402,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static boolean verifyTextPresent(String text, boolean isRegex, FailureHandling flowControl) {
-        return verifyTextPresent(text, isRegex);
+        return runBool(() -> verifyTextPresent(text, isRegex), flowControl);
     }
     
     public static boolean verifyTextNotPresent(String text, boolean isRegex) {
@@ -356,7 +411,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static boolean verifyTextNotPresent(String text, boolean isRegex, FailureHandling flowControl) {
-        return verifyTextNotPresent(text, isRegex);
+        return runBool(() -> verifyTextNotPresent(text, isRegex), flowControl);
     }
     
     // ==================== Get/Attribute Keywords ====================
@@ -366,7 +421,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static String getText(TestObject to, FailureHandling flowControl) {
-        return getText(to);
+        return runObj(() -> getText(to), flowControl, null);
     }
     
     public static String getAttribute(TestObject to, String attribute) {
@@ -374,7 +429,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static String getAttribute(TestObject to, String attribute, FailureHandling flowControl) {
-        return getAttribute(to, attribute);
+        return runObj(() -> getAttribute(to, attribute), flowControl, null);
     }
     
     public static int getElementHeight(TestObject to) {
@@ -411,7 +466,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void selectOptionByValue(TestObject to, String value, boolean isRegex, FailureHandling flowControl) {
-        selectOptionByValue(to, value, isRegex);
+        runVoid(() -> selectOptionByValue(to, value, isRegex), flowControl);
     }
     
     public static void selectOptionByLabel(TestObject to, String label) {
@@ -423,7 +478,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void selectOptionByLabel(TestObject to, String label, boolean isRegex, FailureHandling flowControl) {
-        selectOptionByLabel(to, label, isRegex);
+        runVoid(() -> selectOptionByLabel(to, label, isRegex), flowControl);
     }
     
     public static void selectOptionByIndex(TestObject to, int index) {
@@ -431,7 +486,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void selectOptionByIndex(TestObject to, int index, FailureHandling flowControl) {
-        selectOptionByIndex(to, index);
+        runVoid(() -> selectOptionByIndex(to, index), flowControl);
     }
     
     public static void deselectAllOption(TestObject to) {
@@ -439,7 +494,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void deselectAllOption(TestObject to, FailureHandling flowControl) {
-        deselectAllOption(to);
+        runVoid(() -> deselectAllOption(to), flowControl);
     }
     
     public static void deselectOptionByValue(TestObject to, String value) {
@@ -469,7 +524,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void check(TestObject to, FailureHandling flowControl) {
-        check(to);
+        runVoid(() -> check(to), flowControl);
     }
     
     public static void uncheck(TestObject to) {
@@ -477,7 +532,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void uncheck(TestObject to, FailureHandling flowControl) {
-        uncheck(to);
+        runVoid(() -> uncheck(to), flowControl);
     }
     
     public static boolean verifyElementChecked(TestObject to, int timeout) {
@@ -485,7 +540,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static boolean verifyElementChecked(TestObject to, int timeout, FailureHandling flowControl) {
-        return verifyElementChecked(to, timeout);
+        return runBool(() -> verifyElementChecked(to, timeout), flowControl);
     }
     
     public static boolean verifyElementNotChecked(TestObject to, int timeout) {
@@ -494,7 +549,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static boolean verifyElementNotChecked(TestObject to, int timeout, FailureHandling flowControl) {
-        return verifyElementNotChecked(to, timeout);
+        return runBool(() -> verifyElementNotChecked(to, timeout), flowControl);
     }
     
     // ==================== Alert Keywords ====================
@@ -504,7 +559,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void acceptAlert(FailureHandling flowControl) {
-        acceptAlert();
+        runVoid(() -> acceptAlert(), flowControl);
     }
     
     public static void dismissAlert() {
@@ -512,7 +567,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void dismissAlert(FailureHandling flowControl) {
-        dismissAlert();
+        runVoid(() -> dismissAlert(), flowControl);
     }
     
     public static String getAlertText() {
@@ -520,7 +575,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static String getAlertText(FailureHandling flowControl) {
-        return getAlertText();
+        return runObj(() -> getAlertText(), flowControl, null);
     }
     
     public static void setAlertText(String text) {
@@ -528,7 +583,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void setAlertText(String text, FailureHandling flowControl) {
-        setAlertText(text);
+        runVoid(() -> setAlertText(text), flowControl);
     }
     
     // ==================== Frame/Window Keywords ====================
@@ -542,7 +597,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void switchToFrame(TestObject to, int timeout, FailureHandling flowControl) {
-        switchToFrame(to, timeout);
+        runVoid(() -> switchToFrame(to, timeout), flowControl);
     }
     
     public static void switchToDefaultContent() {
@@ -550,7 +605,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void switchToDefaultContent(FailureHandling flowControl) {
-        switchToDefaultContent();
+        runVoid(() -> switchToDefaultContent(), flowControl);
     }
     
     public static void switchToWindowTitle(String title) {
@@ -558,7 +613,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void switchToWindowTitle(String title, FailureHandling flowControl) {
-        switchToWindowTitle(title);
+        runVoid(() -> switchToWindowTitle(title), flowControl);
     }
     
     public static void switchToWindowIndex(int index) {
@@ -566,7 +621,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void switchToWindowIndex(int index, FailureHandling flowControl) {
-        switchToWindowIndex(index);
+        runVoid(() -> switchToWindowIndex(index), flowControl);
     }
     
     public static void switchToWindowUrl(String url) {
@@ -574,7 +629,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void switchToWindowUrl(String url, FailureHandling flowControl) {
-        switchToWindowUrl(url);
+        runVoid(() -> switchToWindowUrl(url), flowControl);
     }
     
     public static void closeWindowTitle(String title) {
@@ -582,7 +637,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void closeWindowTitle(String title, FailureHandling flowControl) {
-        closeWindowTitle(title);
+        runVoid(() -> closeWindowTitle(title), flowControl);
     }
     
     public static void closeWindowIndex(int index) {
@@ -590,7 +645,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void closeWindowIndex(int index, FailureHandling flowControl) {
-        closeWindowIndex(index);
+        runVoid(() -> closeWindowIndex(index), flowControl);
     }
     
     public static void closeWindowUrl(String url) {
@@ -598,7 +653,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void closeWindowUrl(String url, FailureHandling flowControl) {
-        closeWindowUrl(url);
+        runVoid(() -> closeWindowUrl(url), flowControl);
     }
     
     public static int getWindowIndex() {
@@ -617,7 +672,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void scrollToElement(TestObject to, int timeout, FailureHandling flowControl) {
-        scrollToElement(to, timeout);
+        runVoid(() -> scrollToElement(to, timeout), flowControl);
     }
     
     public static void scrollToPosition(int x, int y) {
@@ -625,7 +680,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void scrollToPosition(int x, int y, FailureHandling flowControl) {
-        scrollToPosition(x, y);
+        runVoid(() -> scrollToPosition(x, y), flowControl);
     }
     
     // ==================== Screenshot Keywords ====================
@@ -635,7 +690,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static String takeScreenshot(FailureHandling flowControl) {
-        return takeScreenshot();
+        return runObj(() -> takeScreenshot(), flowControl, null);
     }
     
     public static String takeScreenshot(String fileName) {
@@ -643,7 +698,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static String takeScreenshot(String fileName, FailureHandling flowControl) {
-        return takeScreenshot(fileName);
+        return runObj(() -> takeScreenshot(fileName), flowControl, null);
     }
     
     public static String takeElementScreenshot(TestObject to) {
@@ -655,7 +710,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static String takeElementScreenshot(TestObject to, String fileName, FailureHandling flowControl) {
-        return takeElementScreenshot(to, fileName);
+        return runObj(() -> takeElementScreenshot(to, fileName), flowControl, null);
     }
     
     public static String takeFullPageScreenshot() {
@@ -667,7 +722,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static String takeFullPageScreenshot(String fileName, FailureHandling flowControl) {
-        return takeFullPageScreenshot(fileName);
+        return runObj(() -> takeFullPageScreenshot(fileName), flowControl, null);
     }
     
     // ==================== Drag/Drop Keywords ====================
@@ -677,7 +732,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void dragAndDropToObject(TestObject source, TestObject target, FailureHandling flowControl) {
-        dragAndDropToObject(source, target);
+        runVoid(() -> dragAndDropToObject(source, target), flowControl);
     }
     
     public static void dragAndDropByOffset(TestObject source, int offsetX, int offsetY) {
@@ -685,7 +740,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void dragAndDropByOffset(TestObject source, int offsetX, int offsetY, FailureHandling flowControl) {
-        dragAndDropByOffset(source, offsetX, offsetY);
+        runVoid(() -> dragAndDropByOffset(source, offsetX, offsetY), flowControl);
     }
     
     // ==================== Mouse Keywords ====================
@@ -695,7 +750,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void mouseOver(TestObject to, FailureHandling flowControl) {
-        mouseOver(to);
+        runVoid(() -> mouseOver(to), flowControl);
     }
     
     public static void mouseOverOffset(TestObject to, int offsetX, int offsetY) {
@@ -704,7 +759,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void mouseOverOffset(TestObject to, int offsetX, int offsetY, FailureHandling flowControl) {
-        mouseOverOffset(to, offsetX, offsetY);
+        runVoid(() -> mouseOverOffset(to, offsetX, offsetY), flowControl);
     }
     
     // ==================== JavaScript Keywords ====================
@@ -714,7 +769,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static Object executeJavaScript(String script, FailureHandling flowControl, Object... args) {
-        return executeJavaScript(script, args);
+        return runObj(() -> executeJavaScript(script, args), flowControl, null);
     }
     
     // ==================== Focus Keywords ====================
@@ -724,7 +779,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void focus(TestObject to, FailureHandling flowControl) {
-        focus(to);
+        runVoid(() -> focus(to), flowControl);
     }
     
     // ==================== Upload Keywords ====================
@@ -734,7 +789,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void uploadFile(TestObject to, String filePath, FailureHandling flowControl) {
-        uploadFile(to, filePath);
+        runVoid(() -> uploadFile(to, filePath), flowControl);
     }
     
     public static void uploadFileWithDragAndDrop(TestObject to, String filePath) {
@@ -743,7 +798,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void uploadFileWithDragAndDrop(TestObject to, String filePath, FailureHandling flowControl) {
-        uploadFileWithDragAndDrop(to, filePath);
+        runVoid(() -> uploadFileWithDragAndDrop(to, filePath), flowControl);
     }
     
     // ==================== Comment/Log Keywords ====================
@@ -760,7 +815,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void submit(TestObject to, FailureHandling flowControl) {
-        submit(to);
+        runVoid(() -> submit(to), flowControl);
     }
     
     // ==================== Call Test Case ====================
@@ -771,7 +826,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static Object callTestCase(com.katalan.core.compat.TestCase testCase, java.util.Map<String, Object> binding, FailureHandling flowControl) {
-        return callTestCase(testCase, binding);
+        return runObj(() -> callTestCase(testCase, binding), flowControl, null);
     }
     
     // ==================== Find Element Methods ====================

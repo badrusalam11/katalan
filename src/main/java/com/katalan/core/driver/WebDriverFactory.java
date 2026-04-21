@@ -96,7 +96,9 @@ public class WebDriverFactory {
         );
         
         // Use fresh temporary profile - no saved passwords, no Google account
-        String tempProfile = System.getProperty("java.io.tmpdir") + "\\katalan-chrome-" + System.currentTimeMillis();
+        // Use File.separator for cross-platform compatibility (Mac/Linux use '/', Windows '\')
+        String tempProfile = System.getProperty("java.io.tmpdir") + java.io.File.separator
+                + "katalan-chrome-" + System.currentTimeMillis();
         options.addArguments("--user-data-dir=" + tempProfile);
         
         // Disable all password/autofill features
