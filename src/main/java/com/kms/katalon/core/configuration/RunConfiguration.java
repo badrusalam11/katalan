@@ -22,6 +22,15 @@ public class RunConfiguration {
     
     private static final Logger logger = LoggerFactory.getLogger(RunConfiguration.class);
     private static final Map<String, Object> executionProperties = new HashMap<>();
+    private static volatile String executionProfile = "default";
+
+    /**
+     * Set the active execution profile name (called by engine at startup).
+     */
+    public static void setExecutionProfile(String profile) {
+        executionProfile = (profile == null || profile.isEmpty()) ? "default" : profile;
+        logger.info("RunConfiguration.executionProfile set to: {}", executionProfile);
+    }
     
     /**
      * Get the default failure handling behavior
@@ -33,9 +42,31 @@ public class RunConfiguration {
     }
     
     /**
-     * Get the project directory path
+     * Get the project directory path (always returned as absolute path).
+     * Katalon scripts expect absolute paths (e.g. `CSWeb` checks
+     * `getProjectDir().substring(0,7) == '/Users/'`), so we resolve
+     * relative paths like "." to the real absolute directory.
      */
     public static String getProjectDir() {
+        ExecutionContext ctx = ExecutionContext.getCurrent();
+        Path p = null;
+        if (ctx != null && ctx.getProjectDir() != null) {
+            p = ctx.getProjectDir();
+        }
+        if (p == null) {
+            p = Paths.get(System.getProperty("user.dir"));
+        }
+        try {
+            return p.toAbsolutePath().normalize().toString();
+        } catch (Exception e) {
+            return p.toString();
+        }
+    }
+    
+    /**
+     * Legacy helper: returns a non-null project dir string even when no context.
+     */
+    private static String _legacyProjectDir() {
         ExecutionContext ctx = ExecutionContext.getCurrent();
         if (ctx != null && ctx.getProjectDir() != null) {
             return ctx.getProjectDir().toString();
@@ -230,7 +261,7 @@ public class RunConfiguration {
      * Get execution profile name
      */
     public static String getExecutionProfile() {
-        return "default";
+        return executionProfile != null ? executionProfile : "default";
     }
     
     /**
@@ -334,5 +365,54 @@ public class RunConfiguration {
      */
     public static boolean isWindowsMode() {
         return false;
+    }
+
+    // ============================================================
+    // WebDriver preferences (Katalon compat stubs)
+    // Scripts call these to inject driver preferences/capabilities
+    // at runtime (e.g. chrome args, prefs). We just store them in
+    // the executionProperties map; actual driver factory can read
+    // them later if needed.
+    // ============================================================
+
+    private static final String WD_PREFS_PREFIX = "webdriver.preferences.";
+    private static final String WD_CAPS_PREFIX = "webdriver.capabilities.";
+
+    public static void setWebDriverPreferencesProperty(String key, Object value) {
+        executionProperties.put(WD_PREFS_PREFIX + key, value);
+        logger.debug("setWebDriverPreferencesProperty({}, {})", key, value);
+    }
+
+    public static Object getWebDriverPreferencesProperty(String key) {
+        return executionProperties.get(WD_PREFS_PREFIX + key);
+    }
+
+    public static Map<String, Object> getWebDriverPreferencesProperties() {
+        Map<String, Object> out = new HashMap<>();
+        for (Map.Entry<String, Object> e : executionProperties.entrySet()) {
+            if (e.getKey().startsWith(WD_PREFS_PREFIX)) {
+                out.put(e.getKey().substring(WD_PREFS_PREFIX.length()), e.getValue());
+            }
+        }
+        return out;
+    }
+
+    public static void setWebDriverCapabilitiesProperty(String key, Object value) {
+        executionProperties.put(WD_CAPS_PREFIX + key, value);
+        logger.debug("setWebDriverCapabilitiesProperty({}, {})", key, value);
+    }
+
+    public static Object getWebDriverCapabilitiesProperty(String key) {
+        return executionProperties.get(WD_CAPS_PREFIX + key);
+    }
+
+    public static Map<String, Object> getWebDriverCapabilitiesProperties() {
+        Map<String, Object> out = new HashMap<>();
+        for (Map.Entry<String, Object> e : executionProperties.entrySet()) {
+            if (e.getKey().startsWith(WD_CAPS_PREFIX)) {
+                out.put(e.getKey().substring(WD_CAPS_PREFIX.length()), e.getValue());
+            }
+        }
+        return out;
     }
 }

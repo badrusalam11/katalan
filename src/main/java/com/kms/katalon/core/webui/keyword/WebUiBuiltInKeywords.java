@@ -48,6 +48,24 @@ public class WebUiBuiltInKeywords {
     public static void openBrowser(String url, FailureHandling flowControl) {
         WebUI.openBrowser(url);
     }
+
+    // ==================== Smart Wait (Katalon-specific, no-op in Katalan) ====================
+
+    public static void enableSmartWait() {
+        logger.debug("enableSmartWait() called - no-op in Katalan compatibility layer");
+    }
+
+    public static void enableSmartWait(FailureHandling flowControl) {
+        logger.debug("enableSmartWait(flowControl) called - no-op in Katalan compatibility layer");
+    }
+
+    public static void disableSmartWait() {
+        logger.debug("disableSmartWait() called - no-op in Katalan compatibility layer");
+    }
+
+    public static void disableSmartWait(FailureHandling flowControl) {
+        logger.debug("disableSmartWait(flowControl) called - no-op in Katalan compatibility layer");
+    }
     
     public static void closeBrowser() {
         WebUI.closeBrowser();

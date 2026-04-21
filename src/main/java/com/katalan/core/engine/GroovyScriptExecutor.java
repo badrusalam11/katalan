@@ -145,6 +145,17 @@ public class GroovyScriptExecutor {
                 }
             }
             
+            // Add Include/scripts/groovy folder (shared groovy step-def/helper classes)
+            Path includeGroovyPath = projectPath.resolve("Include").resolve("scripts").resolve("groovy");
+            if (Files.exists(includeGroovyPath)) {
+                try {
+                    classLoader.addClasspath(includeGroovyPath.toString());
+                    logger.debug("Added Include/scripts/groovy path to classpath: {}", includeGroovyPath);
+                } catch (Exception e) {
+                    logger.warn("Could not add Include/scripts/groovy path to classpath: {}", e.getMessage());
+                }
+            }
+            
             // Add JAR files from Drivers folder (custom libraries)
             Path driversPath = projectPath.resolve("Drivers");
             if (Files.exists(driversPath)) {

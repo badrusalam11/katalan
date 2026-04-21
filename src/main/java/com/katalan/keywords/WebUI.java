@@ -77,6 +77,20 @@ public class WebUI {
         logger.info("Navigating to URL: {}", url);
         getDriver().get(url);
     }
+
+    // ==================== Smart Wait (no-op stubs) ====================
+    public static void enableSmartWait() {
+        logger.debug("enableSmartWait() called - no-op");
+    }
+    public static void enableSmartWait(Object flowControl) {
+        logger.debug("enableSmartWait(flowControl) called - no-op");
+    }
+    public static void disableSmartWait() {
+        logger.debug("disableSmartWait() called - no-op");
+    }
+    public static void disableSmartWait(Object flowControl) {
+        logger.debug("disableSmartWait(flowControl) called - no-op");
+    }
     
     /**
      * Close browser
@@ -169,8 +183,31 @@ public class WebUI {
      */
     public static void click(TestObject testObject, int timeout) {
         logger.info("Clicking on: {}", testObject.getName());
-        WebElement element = waitForElement(testObject, timeout);
-        element.click();
+        WebDriver driver = getDriver();
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout));
+        By by = testObject.toSeleniumBy();
+        // Wait presence first (matches old behavior / logs), then clickable
+        WebElement element = wait.until(ExpectedConditions.presenceOfElementLocated(by));
+        // Scroll into view to avoid "not interactable" when the element is off-screen
+        try {
+            ((JavascriptExecutor) driver).executeScript(
+                "arguments[0].scrollIntoView({block:'center', inline:'center'});", element);
+        } catch (Exception ignored) {}
+        try {
+            element = wait.until(ExpectedConditions.elementToBeClickable(by));
+            element.click();
+        } catch (ElementNotInteractableException e) {
+            logger.warn("Native click failed ({}), retrying with JS click", e.getClass().getSimpleName());
+            try {
+                ((JavascriptExecutor) driver).executeScript("arguments[0].click();", element);
+            } catch (Exception jsEx) {
+                throw e; // rethrow original
+            }
+        } catch (org.openqa.selenium.TimeoutException te) {
+            // Fallback: element present but never clickable in time - try JS click once
+            logger.warn("elementToBeClickable timed out, attempting JS click fallback");
+            ((JavascriptExecutor) driver).executeScript("arguments[0].click();", element);
+        }
     }
     
     /**

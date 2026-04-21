@@ -118,7 +118,13 @@ public class CucumberKW {
         
         try {
             // Run Cucumber with our custom runtime that includes Groovy support
-            return runCucumberWithGroovyGlue(featurePath, stepsPath, projectPath, tags);
+            int failed = runCucumberWithGroovyGlue(featurePath, stepsPath, projectPath, tags);
+            if (failed > 0) {
+                throw new RuntimeException("Cucumber execution finished with " + failed + " failed scenario(s)");
+            }
+            return failed;
+        } catch (RuntimeException e) {
+            throw e;
         } catch (Exception e) {
             logger.error("Failed to run feature file: {}", featureFile, e);
             throw new RuntimeException("Cucumber execution failed: " + e.getMessage(), e);
