@@ -106,7 +106,34 @@ public class GroovySourcePreprocessor {
             "import io.cucumber.java.en.$1"
         );
 
+        // Groovy 4: XmlSlurper / XmlParser / XmlNodePrinter moved to groovy.xml
+        // and are no longer default imports. Inject explicit imports if the
+        // source references them without importing groovy.xml.*.
+        boolean needsXmlImports =
+                (result.contains("XmlSlurper") || result.contains("XmlParser") || result.contains("XmlNodePrinter"))
+                && !result.contains("import groovy.xml.");
+        if (needsXmlImports) {
+            StringBuilder xmlImports = new StringBuilder();
+            if (result.contains("XmlSlurper"))     xmlImports.append("import groovy.xml.XmlSlurper\n");
+            if (result.contains("XmlParser"))      xmlImports.append("import groovy.xml.XmlParser\n");
+            if (result.contains("XmlNodePrinter")) xmlImports.append("import groovy.xml.XmlNodePrinter\n");
+            result = injectAfterPackage(result, xmlImports.toString());
+        }
+
         return result;
+    }
+
+    /**
+     * Insert the given block right after the {@code package ...} line if any,
+     * otherwise at the very top of the file.
+     */
+    private static String injectAfterPackage(String source, String block) {
+        Matcher pkg = Pattern.compile("(?m)^\\s*package\\s+[A-Za-z0-9_.]+\\s*;?\\s*$").matcher(source);
+        if (pkg.find()) {
+            int insertAt = pkg.end();
+            return source.substring(0, insertAt) + "\n" + block + source.substring(insertAt);
+        }
+        return block + source;
     }
 
     /**

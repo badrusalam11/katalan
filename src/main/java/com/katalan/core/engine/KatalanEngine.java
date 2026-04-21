@@ -32,6 +32,7 @@ public class KatalanEngine {
     private final ExecutionContext context;
     private final GroovyScriptExecutor scriptExecutor;
     private final TestSuiteParser suiteParser;
+    private final TestListenerRegistry listenerRegistry;
     private ExecutionResult executionResult;
     
     public KatalanEngine(RunConfiguration config) {
@@ -42,6 +43,7 @@ public class KatalanEngine {
         com.katalan.core.compat.ObjectRepository.setContext(context);
         this.scriptExecutor = new GroovyScriptExecutor(context);
         this.suiteParser = new TestSuiteParser(config.getProjectPath());
+        this.listenerRegistry = new TestListenerRegistry();
         this.executionResult = new ExecutionResult();
     }
     
@@ -58,12 +60,25 @@ public class KatalanEngine {
             
             // Load Global Variables from Profiles
             loadGlobalVariables();
+
+            // Append project JARs (Drivers/, Libs/, bin/lib/) to the SYSTEM
+            // classloader so that keywords which internally spin up their own
+            // `new GroovyShell()` (e.g. denstoo.reporting.CSReport) can resolve
+            // project-local classes the same way they do inside Katalon Studio.
+            SystemClasspathAppender.appendProjectJars(config.getProjectPath());
         }
         
         // DO NOT create WebDriver here!
         // CSWeb library checks DriverFactory.getWebDriver() to determine if it needs to open browser.
         // If driver exists, CSWeb skips URL navigation and only logs "Starting Chrome driver".
         // By not creating driver here, CSWeb will properly call WebUI.openBrowser(url).
+        
+        // Load Test Listeners (Katalon-compatible lifecycle hooks)
+        try {
+            listenerRegistry.loadListeners(config.getProjectPath(), scriptExecutor.getGroovyClassLoader());
+        } catch (Exception e) {
+            logger.warn("Failed to load Test Listeners: {}", e.getMessage());
+        }
         
         logger.info("katalan Engine initialized");
     }
@@ -126,9 +141,23 @@ public class KatalanEngine {
         context.setCurrentTestSuiteName(suite.getName());
         
         TestSuiteResult suiteResult = new TestSuiteResult(suite.getName());
+        suiteResult.setSuitePath(suite.getSuitePath());
         suiteResult.markStarted();
         
         suite.markStarted();
+        
+        // ----- Test Listener: @BeforeTestSuite / @SetUp -----
+        com.kms.katalon.core.context.TestSuiteContext suiteCtx =
+                new com.kms.katalon.core.context.TestSuiteContext("Test Suites/" + suite.getName());
+        suiteCtx.setTestSuiteStatus("RUNNING");
+        if (config.getReportPath() != null) {
+            suiteCtx.setReportLocation(config.getReportPath().toString());
+        }
+        try {
+            listenerRegistry.invokeBeforeTestSuite(suiteCtx);
+        } catch (Exception e) {
+            logger.error("@BeforeTestSuite listener error: {}", e.getMessage(), e);
+        }
         
         for (TestCase testCase : suite.getTestCases()) {
             if (context.shouldStop()) {
@@ -154,6 +183,43 @@ public class KatalanEngine {
         
         executionResult.addSuiteResult(suiteResult);
         executionResult.markCompleted();
+        
+        // Prepare Katalon-style nested report folder BEFORE @AfterTestSuite
+        // listeners run. We only write the minimum files required (execution.properties,
+        // execution.uuid, JUnit_Report.xml) so custom listeners (CSReport, PdfGenerator)
+        // can parse them. Full report (HTML, CSV, cucumber, etc) is generated later
+        // by the CLI.
+        Path generatedReportPath = null;
+        try {
+            com.katalan.reporting.KatalonReportGenerator katalanReporter =
+                    new com.katalan.reporting.KatalonReportGenerator(config.getProjectPath());
+            generatedReportPath = katalanReporter.prepareReportDirectory(executionResult);
+            executionResult.setReportPath(generatedReportPath.toString());
+            // Expose the per-run folder to scripts via RunConfiguration.getReportFolder()
+            com.kms.katalon.core.configuration.RunConfiguration.setReportFolder(
+                    generatedReportPath.toString());
+            suiteCtx.setReportLocation(generatedReportPath.toString());
+            // Also expose as System property + common static fields on well-known
+            // Katalon listener libraries (e.g. denstoo.reporting.CSReport). Some
+            // libraries run scripts via groovy.util.Eval.me(...) in a fresh
+            // GroovyShell where class imports are lost and `RunConfiguration`
+            // resolves to null. Pre-populating the static `reportFolder` field
+            // avoids the "Cannot get property 'reportFolder' on null object" NPE.
+            System.setProperty("reportFolder", generatedReportPath.toString());
+            injectReportFolderIntoListenerLibs(generatedReportPath.toString());
+            logger.info("Report directory ready at: {}", generatedReportPath);
+        } catch (Throwable t) {
+            logger.error("Failed to prepare report directory before @AfterTestSuite: {}",
+                    t.toString(), t);
+        }
+        
+        // ----- Test Listener: @AfterTestSuite / @TearDown -----
+        suiteCtx.setTestSuiteStatus(suiteResult.isSuccess() ? "PASSED" : "FAILED");
+        try {
+            listenerRegistry.invokeAfterTestSuite(suiteCtx);
+        } catch (Exception e) {
+            logger.error("@AfterTestSuite listener error: {}", e.getMessage(), e);
+        }
         
         logger.info("Test suite completed: {} - Passed: {}, Failed: {}, Errors: {}",
                 suite.getName(),
@@ -184,6 +250,27 @@ public class KatalanEngine {
         
         context.setCurrentTestCaseName(testCase.getName());
         context.setCurrentTestCasePath(testCase.getScriptPath());
+        
+        // ----- Test Listener: @BeforeTestCase / @SetupTestCase -----
+        com.kms.katalon.core.context.TestCaseContext tcCtx =
+                new com.kms.katalon.core.context.TestCaseContext("Test Cases/" + testCase.getName());
+        tcCtx.setTestCaseStatus("RUNNING");
+        if (testCase.getVariables() != null) {
+            java.util.Map<String, Object> resolvedVars = new java.util.LinkedHashMap<>();
+            for (Map.Entry<String, Object> var : testCase.getVariables().entrySet()) {
+                Object v = var.getValue();
+                if (v instanceof TestSuiteParser.GlobalVariableReference) {
+                    try { v = ((TestSuiteParser.GlobalVariableReference) v).resolve(); } catch (Exception ignored) {}
+                }
+                resolvedVars.put(var.getKey(), v);
+            }
+            tcCtx.setTestCaseVariables(resolvedVars);
+        }
+        try {
+            listenerRegistry.invokeBeforeTestCase(tcCtx);
+        } catch (Exception e) {
+            logger.error("@BeforeTestCase listener error: {}", e.getMessage(), e);
+        }
         
         int attempts = 0;
         int maxAttempts = config.getRetryFailedTests() + 1;
@@ -263,6 +350,16 @@ public class KatalanEngine {
         }
         
         result.setRetryAttempt(attempts - 1);
+        
+        // ----- Test Listener: @AfterTestCase / @TearDownTestCase -----
+        tcCtx.setTestCaseStatus(String.valueOf(result.getStatus()));
+        tcCtx.setMessage(result.getErrorMessage());
+        try {
+            listenerRegistry.invokeAfterTestCase(tcCtx);
+        } catch (Exception e) {
+            logger.error("@AfterTestCase listener error: {}", e.getMessage(), e);
+        }
+        
         return result;
     }
     
@@ -393,6 +490,13 @@ public class KatalanEngine {
     }
     
     /**
+     * Get the Test Listener registry (Katalon-compatible lifecycle hooks)
+     */
+    public TestListenerRegistry getListenerRegistry() {
+        return listenerRegistry;
+    }
+    
+    /**
      * Clean up browser after each test case for test isolation
      */
     private void cleanupBrowserAfterTestCase() {
@@ -414,5 +518,77 @@ public class KatalanEngine {
     public void shutdown() {
         logger.info("Shutting down katalan Engine");
         context.cleanup();
+    }
+
+    // --------------------------------------------------------------------
+    // Listener-library compatibility: pre-populate `reportFolder` static
+    // fields on well-known third-party Katalon listener classes so scripts
+    // that run inside fresh GroovyShell instances (via groovy.util.Eval.me)
+    // still see the correct per-run report directory.
+    // --------------------------------------------------------------------
+
+    /** Known <className, fieldName> pairs that hold the current report folder. */
+    private static final String[][] KNOWN_REPORT_FOLDER_FIELDS = new String[][] {
+        {"denstoo.reporting.CSReport",              "reportFolder"},
+        {"com.itextpdf.text.pdf.PdfGenerator",      "reportFolder"},
+        {"denstoo.reporting.PdfGenerator",          "reportFolder"},
+    };
+
+    /**
+     * Best-effort: set the static {@code reportFolder} field on any of the
+     * well-known listener-library classes that happen to be on the classpath.
+     * Missing classes / fields are silently ignored.
+     *
+     * <p><b>Why we iterate multiple classloaders</b>: each Test Listener is
+     * compiled by its own {@link groovy.lang.GroovyClassLoader} (see
+     * {@link TestListenerRegistry}).  When that listener calls into a library
+     * JAR (e.g. {@code denstoo.reporting.CSReport}) the library class is
+     * loaded by that same GroovyClassLoader, which holds its OWN static field
+     * instance.  The thread-context classloader and the system classloader hold
+     * a <em>different</em> copy of the class whose static field we would have
+     * injected before — so the listener's copy stays {@code null}.</p>
+     *
+     * <p>By collecting classloaders from {@link TestListenerRegistry#getListenerClassLoaders()}
+     * we inject into every class instance that will actually be used at
+     * runtime.</p>
+     */
+    private void injectReportFolderIntoListenerLibs(String reportFolder) {
+        if (reportFolder == null) return;
+
+        // Collect every classloader we want to try, deduped.
+        java.util.LinkedHashSet<ClassLoader> cls = new java.util.LinkedHashSet<>();
+        // Listener-specific classloaders FIRST — these are the ones that actually
+        // loaded the JAR libs (CSReport, PdfGenerator, …) used at runtime.
+        cls.addAll(listenerRegistry.getListenerClassLoaders());
+        // Fallbacks: context CL, engine CL, system CL.
+        ClassLoader ctxCl = Thread.currentThread().getContextClassLoader();
+        if (ctxCl != null) cls.add(ctxCl);
+        cls.add(KatalanEngine.class.getClassLoader());
+        ClassLoader sysCl = ClassLoader.getSystemClassLoader();
+        if (sysCl != null) cls.add(sysCl);
+        cls.remove(null);
+
+        for (String[] pair : KNOWN_REPORT_FOLDER_FIELDS) {
+            String className = pair[0];
+            String fieldName = pair[1];
+            for (ClassLoader cl : cls) {
+                try {
+                    Class<?> klass = Class.forName(className, true, cl);
+                    java.lang.reflect.Field f = klass.getDeclaredField(fieldName);
+                    f.setAccessible(true);
+                    f.set(null, reportFolder);
+                    logger.info("Injected reportFolder into {}.{} (via {})",
+                            className, fieldName, cl.getClass().getSimpleName());
+                } catch (ClassNotFoundException e) {
+                    // library not present in this loader, skip
+                } catch (NoSuchFieldException e) {
+                    logger.debug("{} has no field {} in loader {} (skipped)",
+                            className, fieldName, cl.getClass().getSimpleName());
+                } catch (Throwable t) {
+                    logger.debug("Could not set {}.{} via {}: {}",
+                            className, fieldName, cl.getClass().getSimpleName(), t.toString());
+                }
+            }
+        }
     }
 }

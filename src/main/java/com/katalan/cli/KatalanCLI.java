@@ -163,10 +163,12 @@ public class KatalanCLI implements Callable<Integer> {
                         result = engine.executeTestSuite(suite);
                     }
                     
-                    // Generate Katalon-style report in project folder
+                    // Generate full Katalon-style report (HTML/CSV/logs).
+                    // Engine already pre-created the folder + execution.properties
+                    // before @AfterTestSuite listeners; here we fill in the rest.
                     System.out.println("\n📊 Generating HTML report...");
-                    KatalonReportGenerator katalonReporter = new KatalonReportGenerator(projectPath);
-                    Path generatedReportPath = katalonReporter.generateReport(result);
+                    KatalonReportGenerator katalanReporter = new KatalonReportGenerator(projectPath);
+                    Path generatedReportPath = katalanReporter.generateReport(result);
                     System.out.println("📁 Report generated at: " + generatedReportPath);
                     
                     // Also generate simple report at specified path for backwards compatibility

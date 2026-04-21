@@ -23,6 +23,19 @@ public class RunConfiguration {
     private static final Logger logger = LoggerFactory.getLogger(RunConfiguration.class);
     private static final Map<String, Object> executionProperties = new HashMap<>();
     private static volatile String executionProfile = "default";
+    private static volatile String reportFolderOverride;
+
+    /**
+     * Set the current report folder (called by engine after generating the
+     * Katalon-style nested folder: Reports/&lt;timestamp&gt;/&lt;SuiteName&gt;/&lt;timestamp&gt;).
+     * This is what Katalon scripts expect when they call
+     * {@code RunConfiguration.getReportFolder()} -- the ACTUAL per-run folder,
+     * not the top-level "Reports" directory.
+     */
+    public static void setReportFolder(String folder) {
+        reportFolderOverride = folder;
+        logger.info("RunConfiguration.reportFolder set to: {}", folder);
+    }
 
     /**
      * Set the active execution profile name (called by engine at startup).
@@ -75,9 +88,21 @@ public class RunConfiguration {
     }
     
     /**
-     * Get the report folder path
+     * Get the report folder path.
+     *
+     * When a test suite is running, this returns the Katalon-style per-run
+     * folder: {@code Reports/<timestamp>/<SuiteName>/<timestamp>}.
+     * Katalon scripts (e.g. CSReport, custom listeners) expect this nested
+     * path so they can read {@code execution.properties}, {@code JUnit_Report.xml},
+     * etc.
+     *
+     * Falls back to {@code <projectDir>/Reports} if no run is active.
      */
     public static String getReportFolder() {
+        String override = reportFolderOverride;
+        if (override != null && !override.isEmpty()) {
+            return override;
+        }
         return Paths.get(getProjectDir(), "Reports").toString();
     }
     

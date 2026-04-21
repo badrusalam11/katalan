@@ -32,6 +32,7 @@ public class GroovyScriptExecutor {
     private final Binding binding;
     private final ExecutionContext context;
     private final Path projectPath;
+    private GroovyClassLoader groovyClassLoader;
     
     public GroovyScriptExecutor(ExecutionContext context) {
         this.context = context;
@@ -175,6 +176,7 @@ public class GroovyScriptExecutor {
             }
         }
         
+        this.groovyClassLoader = classLoader;
         return new GroovyShell(classLoader, binding, config);
     }
     
@@ -367,7 +369,7 @@ public class GroovyScriptExecutor {
         );
         result = result.replaceAll(
             "import com\\.kms\\.katalon\\.core\\.annotation\\..*",
-            "// Annotations not needed"
+            "// Annotation kept (native Katalan support)"
         );
         result = result.replaceAll(
             "import com\\.kms\\.katalon\\.core\\.util\\..*",
@@ -450,6 +452,15 @@ public class GroovyScriptExecutor {
      */
     public Binding getBinding() {
         return binding;
+    }
+    
+    /**
+     * Get the GroovyClassLoader used to compile scripts/keywords/listeners.
+     * Exposed so that lifecycle components (e.g. {@link TestListenerRegistry})
+     * can compile additional Groovy classes using the same classpath.
+     */
+    public GroovyClassLoader getGroovyClassLoader() {
+        return groovyClassLoader;
     }
     
     /**

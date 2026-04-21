@@ -1,5 +1,6 @@
 package com.katalan.core.model;
 
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -12,6 +13,8 @@ public class TestSuiteResult {
     
     private String suiteId;
     private String suiteName;
+    /** Absolute path to the .ts source file (if loaded from disk). */
+    private Path suitePath;
     private Instant startTime;
     private Instant endTime;
     private List<TestCaseResult> testCaseResults;
@@ -105,6 +108,14 @@ public class TestSuiteResult {
     
     public void setSuiteName(String suiteName) {
         this.suiteName = suiteName;
+    }
+    
+    public Path getSuitePath() {
+        return suitePath;
+    }
+    
+    public void setSuitePath(Path suitePath) {
+        this.suitePath = suitePath;
     }
     
     public Instant getStartTime() {
