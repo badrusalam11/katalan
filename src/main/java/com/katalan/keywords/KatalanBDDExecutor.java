@@ -78,6 +78,69 @@ public class KatalanBDDExecutor {
     }
     
     /**
+     * Evaluate whether a scenario matches the tag filter expression.
+     * Supports: simple "@tag", "@a and @b", "@a or @b", "not @a", and parentheses removed.
+     * Falls back to containment check if expression parsing is too complex.
+     */
+    private boolean scenarioMatchesTagFilter(Scenario scenario, String filter) {
+        String expr = filter.trim();
+        if (expr.isEmpty()) return true;
+        List<String> tags = scenario.tags;
+        
+        // Simple fast path: single tag (most common case, e.g. "@TC01")
+        if (expr.matches("@[A-Za-z0-9_\\-]+")) {
+            return tags.contains(expr);
+        }
+        
+        // Very small boolean-expression evaluator: tokenize, then evaluate
+        try {
+            // Normalize parentheses by tokenizing
+            String normalized = expr.replace("(", " ( ").replace(")", " ) ");
+            String[] toks = normalized.trim().split("\\s+");
+            // Build postfix using shunting-yard for 'and'/'or'/'not'
+            List<String> output = new ArrayList<>();
+            Deque<String> ops = new ArrayDeque<>();
+            java.util.Map<String, Integer> prec = new HashMap<>();
+            prec.put("not", 3); prec.put("and", 2); prec.put("or", 1);
+            for (String t : toks) {
+                String lt = t.toLowerCase();
+                if (t.startsWith("@")) {
+                    output.add(t);
+                } else if (lt.equals("not") || lt.equals("and") || lt.equals("or")) {
+                    while (!ops.isEmpty() && !ops.peek().equals("(")
+                            && prec.getOrDefault(ops.peek(), 0) >= prec.get(lt)) {
+                        output.add(ops.pop());
+                    }
+                    ops.push(lt);
+                } else if (t.equals("(")) {
+                    ops.push(t);
+                } else if (t.equals(")")) {
+                    while (!ops.isEmpty() && !ops.peek().equals("(")) output.add(ops.pop());
+                    if (!ops.isEmpty()) ops.pop();
+                }
+            }
+            while (!ops.isEmpty()) output.add(ops.pop());
+            // Evaluate postfix
+            Deque<Boolean> stack = new ArrayDeque<>();
+            for (String t : output) {
+                if (t.startsWith("@")) {
+                    stack.push(tags.contains(t));
+                } else if (t.equals("not")) {
+                    stack.push(!stack.pop());
+                } else if (t.equals("and")) {
+                    boolean b = stack.pop(), a = stack.pop(); stack.push(a && b);
+                } else if (t.equals("or")) {
+                    boolean b = stack.pop(), a = stack.pop(); stack.push(a || b);
+                }
+            }
+            return stack.isEmpty() ? true : stack.peek();
+        } catch (Exception e) {
+            logger.warn("Failed to evaluate tag filter '{}': {} - defaulting to include", filter, e.getMessage());
+            return true;
+        }
+    }
+    
+    /**
      * Execute a test case script (called from WebUI.callTestCase)
      */
     public void executeTestCase(TestCase testCase, Map<String, Object> variables) throws Exception {
@@ -146,6 +209,34 @@ public class KatalanBDDExecutor {
     private void addProjectLibrariesToClassLoader(GroovyClassLoader classLoader) {
         if (projectPath == null) return;
         
+        // Add Keywords folder so that imports like `import website.CSWeb`
+        // or `import support.ExcelLocator` can be resolved from Keywords/website/CSWeb.groovy etc.
+        // Preprocess source files to fix Groovy 4 parser incompatibilities (e.g. `((x) as T)`).
+        Path keywordsPath = projectPath.resolve("Keywords");
+        if (Files.exists(keywordsPath)) {
+            try {
+                Path processed = com.katalan.core.compat.GroovySourcePreprocessor
+                        .createPreprocessedCopy(keywordsPath, "keywords");
+                classLoader.addClasspath(processed.toString());
+                logger.info("Added Keywords path to classpath (preprocessed): {}", processed);
+            } catch (Exception e) {
+                logger.warn("Could not add Keywords path: {}", e.getMessage());
+            }
+        }
+        
+        // Add Include/scripts/groovy folder (step definitions and shared groovy classes)
+        Path includeGroovyPath = projectPath.resolve("Include").resolve("scripts").resolve("groovy");
+        if (Files.exists(includeGroovyPath)) {
+            try {
+                Path processed = com.katalan.core.compat.GroovySourcePreprocessor
+                        .createPreprocessedCopy(includeGroovyPath, "include");
+                classLoader.addClasspath(processed.toString());
+                logger.info("Added Include/scripts/groovy path to classpath (preprocessed): {}", processed);
+            } catch (Exception e) {
+                logger.warn("Could not add Include/scripts/groovy path: {}", e.getMessage());
+            }
+        }
+        
         // Load from Drivers folder
         Path driversPath = projectPath.resolve("Drivers");
         if (Files.exists(driversPath)) {
@@ -207,6 +298,11 @@ public class KatalanBDDExecutor {
         int failedCount = 0;
         int scenarioIndex = 0;
         for (Scenario scenario : scenarios) {
+            // Apply tag filter - skip scenarios that don't match
+            if (tagFilter != null && !tagFilter.isEmpty() && !scenarioMatchesTagFilter(scenario, tagFilter)) {
+                logger.debug("Skipping scenario (tag filter '{}' no match): {}", tagFilter, scenario.name);
+                continue;
+            }
             logger.info("Executing scenario: {}", scenario.name);
             
             Map<String, Object> scenarioData = new LinkedHashMap<>();
@@ -367,7 +463,19 @@ public class KatalanBDDExecutor {
             
             logger.debug("    Step passed");
             return stepData;
-        } catch (Exception e) {
+        } catch (Throwable e) {
+            // Unwrap InvocationTargetException and similar wrappers to get the real cause
+            Throwable root = e;
+            while (root != null && (root instanceof java.lang.reflect.InvocationTargetException
+                    || (root.getMessage() == null && root.getCause() != null && root.getCause() != root))) {
+                if (root.getCause() == null || root.getCause() == root) break;
+                root = root.getCause();
+            }
+            String rootMsg = root != null ? root.getMessage() : null;
+            if (rootMsg == null && root != null) rootMsg = root.toString();
+            if (rootMsg == null) rootMsg = "Step failed (no message)";
+            String exType = root != null ? root.getClass().getName() : e.getClass().getName();
+
             stepData.put("type", "TEST_STEP");
             stepData.put("name", stepName);
             stepData.put("description", "");
@@ -384,12 +492,20 @@ public class KatalanBDDExecutor {
             Map<String, Object> log = new LinkedHashMap<>();
             log.put("time", formatInstant(Instant.now()));
             log.put("level", "FAILED");
-            log.put("message", e.getMessage() != null ? e.getMessage() : "Step failed");
+            log.put("message", exType + ": " + rootMsg);
             logs.add(log);
             stepData.put("logs", logs);
             
-            logger.error("    Step failed: {}", e.getMessage());
-            throw new RuntimeException("Step failed: " + step.keyword + " " + stepName, e);
+            logger.error("    Step failed: [{}] {}", exType, rootMsg);
+            if (root != null) {
+                // Print first few stack frames to help debugging
+                StackTraceElement[] trace = root.getStackTrace();
+                int limit = Math.min(trace.length, 8);
+                for (int i = 0; i < limit; i++) {
+                    logger.error("      at {}", trace[i]);
+                }
+            }
+            throw new RuntimeException("Step failed: " + step.keyword + " " + stepName + " - " + rootMsg, e);
         }
     }
     
@@ -461,34 +577,43 @@ public class KatalanBDDExecutor {
      * Load step definitions from a single Groovy file
      */
     private void loadStepDefinitionFile(Path groovyFile) {
+        Class<?> clazz = null;
         try {
             String content = Files.readString(groovyFile);
             content = preprocessStepDefinitionScript(content);
-            
-            Class<?> clazz = groovyShell.getClassLoader().parseClass(content, groovyFile.getFileName().toString());
-            Object instance = clazz.getDeclaredConstructor().newInstance();
-            
-            // Store instance for later invocation
-            stepInstances.put(clazz.getName(), instance);
-            
-            // Find all methods with step annotations
+            clazz = groovyShell.getClassLoader().parseClass(content, groovyFile.getFileName().toString());
+        } catch (Exception e) {
+            String msg = e.getMessage();
+            if (msg == null && e.getCause() != null) msg = e.getCause().toString();
+            if (msg == null) msg = e.toString();
+            logger.warn("Failed to parse step definitions from: {} - {}", groovyFile, msg);
+            return;
+        }
+
+        // Scan annotations on Class (no instantiation needed). Instance is created lazily
+        // at step invocation time to avoid field-initializer errors (e.g. GlobalVariable not set yet).
+        int count = 0;
+        try {
             for (Method method : clazz.getDeclaredMethods()) {
                 for (Annotation annotation : method.getAnnotations()) {
                     String annotationType = annotation.annotationType().getSimpleName();
                     if (isStepAnnotation(annotationType)) {
                         String patternStr = getAnnotationValue(annotation);
                         if (patternStr != null) {
-                            // Convert Cucumber expression to regex
                             Pattern pattern = convertToRegex(patternStr);
-                            stepDefinitions.add(new StepDefinition(pattern, method, instance, annotationType));
-                            logger.debug("Loaded step: {} {} -> {}.{}", annotationType, patternStr, 
+                            StepDefinition sd = new StepDefinition(pattern, method, null, annotationType);
+                            sd.ownerClass = clazz;
+                            stepDefinitions.add(sd);
+                            count++;
+                            logger.debug("Loaded step: {} {} -> {}.{}", annotationType, patternStr,
                                 clazz.getSimpleName(), method.getName());
                         }
                     }
                 }
             }
-        } catch (Exception e) {
-            logger.warn("Failed to load step definitions from: {} - {}", groovyFile, e.getMessage());
+            logger.debug("Registered {} step(s) from {}", count, groovyFile.getFileName());
+        } catch (Throwable t) {
+            logger.warn("Failed to scan step annotations from: {} - {}", groovyFile, t.toString());
         }
     }
     
@@ -540,6 +665,7 @@ public class KatalanBDDExecutor {
         List<Map<String, String>> examplesData = null;
         List<String> examplesHeaders = null;
         boolean inExamples = false;
+        List<String> pendingTags = new ArrayList<>();
         
         for (int i = 0; i < lines.length; i++) {
             String line = lines[i].trim();
@@ -550,6 +676,16 @@ public class KatalanBDDExecutor {
             
             if (line.startsWith("Feature:")) {
                 // Feature declaration, skip
+                continue;
+            }
+            
+            // Tag line - collect tags for next scenario
+            if (line.startsWith("@")) {
+                for (String tok : line.split("\\s+")) {
+                    if (tok.startsWith("@")) {
+                        pendingTags.add(tok);
+                    }
+                }
                 continue;
             }
             
@@ -566,6 +702,8 @@ public class KatalanBDDExecutor {
                 
                 String name = line.contains(":") ? line.substring(line.indexOf(":") + 1).trim() : line;
                 currentScenario = new Scenario(name);
+                currentScenario.tags.addAll(pendingTags);
+                pendingTags.clear();
                 examplesData = null;
                 examplesHeaders = null;
                 inExamples = false;
@@ -640,6 +778,7 @@ public class KatalanBDDExecutor {
         
         for (Map<String, String> example : examplesData) {
             Scenario scenario = new Scenario(outline.name);
+            scenario.tags.addAll(outline.tags);
             for (Step step : outline.steps) {
                 String expandedText = step.text;
                 for (Map.Entry<String, String> entry : example.entrySet()) {
@@ -654,118 +793,13 @@ public class KatalanBDDExecutor {
     }
     
     private String preprocessStepDefinitionScript(String script) {
-        String result = script;
-        
-        // Replace Katalon imports with katalan equivalents
-        result = result.replace(
-            "import com.kms.katalon.core.webui.keyword.WebUiBuiltInKeywords as WebUI",
-            "import com.katalan.keywords.WebUI"
-        );
-        result = result.replaceAll(
-            "import com\\.kms\\.katalon\\.core\\.webui\\.keyword\\.WebUiBuiltInKeywords.*",
-            "import com.katalan.keywords.WebUI"
-        );
-        
-        // Replace static findTestObject import with katalan version
-        result = result.replaceAll(
-            "import static com\\.kms\\.katalon\\.core\\.testobject\\.ObjectRepository\\.findTestObject",
-            "import static com.katalan.core.compat.ObjectRepository.findTestObject"
-        );
-        
-        // Replace static findTestCase import
-        result = result.replaceAll(
-            "import static com\\.kms\\.katalon\\.core\\.testcase\\.TestCaseFactory\\.findTestCase",
-            "import static com.katalan.core.compat.TestCaseFinder.findTestCase"
-        );
-        
-        result = result.replace(
-            "import internal.GlobalVariable as GlobalVariable",
-            "import com.katalan.core.compat.GlobalVariable"
-        );
-        result = result.replace(
-            "import internal.GlobalVariable",
-            "import com.katalan.core.compat.GlobalVariable"
-        );
-        result = result.replace(
-            "import com.kms.katalon.core.model.FailureHandling as FailureHandling",
-            "import com.katalan.core.compat.FailureHandling"
-        );
-        result = result.replace(
-            "import com.kms.katalon.core.model.FailureHandling",
-            "import com.katalan.core.compat.FailureHandling"
-        );
-        result = result.replace(
-            "import com.kms.katalon.core.webui.driver.DriverFactory",
-            "import com.katalan.core.compat.DriverFactory"
-        );
-        
-        // Convert old Cucumber API imports to new io.cucumber imports
-        result = result.replace(
-            "import cucumber.api.java.en.Given",
-            "import io.cucumber.java.en.Given"
-        );
-        result = result.replace(
-            "import cucumber.api.java.en.When",
-            "import io.cucumber.java.en.When"
-        );
-        result = result.replace(
-            "import cucumber.api.java.en.Then",
-            "import io.cucumber.java.en.Then"
-        );
-        result = result.replace(
-            "import cucumber.api.java.en.And",
-            "import io.cucumber.java.en.And"
-        );
-        result = result.replace(
-            "import cucumber.api.java.en.But",
-            "import io.cucumber.java.en.But"
-        );
-        
-        // Comment out apache commons lang (old version, not lang3)
-        result = result.replaceAll(
-            "import org\\.apache\\.commons\\.lang\\.([A-Z].*)",
-            "// import org.apache.commons.lang.$1 - not available"
-        );
-        
-        // Comment out Katalon utility imports that we don't have
-        result = result.replaceAll(
-            "import com\\.kms\\.katalon\\.util\\..*",
-            "// $0 - not available"
-        );
-        
-        // Replace static findTestObject imports
-        result = result.replaceAll(
-            "import static com\\.kms\\.katalon\\.core\\.testobject\\.ObjectRepository\\.findTestObject",
-            "import static com.katalan.core.compat.ObjectRepository.findTestObject"
-        );
-        
-        // Comment out unsupported Katalon imports (exceptions, mobile, etc.)
-        result = result.replaceAll(
-            "import com\\.kms\\.katalon\\.core\\.webui\\.exception\\..*",
-            "// $0 - not supported"
-        );
-        result = result.replaceAll(
-            "import com\\.kms\\.katalon\\.core\\.mobile\\..*",
-            "// $0 - not supported"
-        );
-        result = result.replaceAll(
-            "import static com\\.kms\\.katalon\\.core\\.(?!testobject\\.ObjectRepository\\.findTestObject).*",
-            "// $0"
-        );
-        result = result.replaceAll(
-            "import com\\.kms\\.katalon\\.core\\.(?!webui\\.keyword|model|testobject\\.TestObject).*",
-            "// $0"
-        );
-        result = result.replaceAll(
-            "import com\\.kms\\.katalon\\.core\\.testobject\\.(?!TestObject).*",
-            "// $0"
-        );
-        result = result.replaceAll(
-            "import com\\.kms\\.katalon\\.core\\.testobject\\.TestObject.*",
-            "import com.katalan.core.model.TestObject"
-        );
-        
-        return result;
+        // All transformations are shared with classpath preprocessing.
+        // We rely on the kms.* compatibility stubs bundled in katalan-runner
+        // to delegate to com.katalan.keywords.WebUI transparently, so we
+        // must NOT rewrite kms.* imports here - that would break class
+        // inheritance (e.g. CSWeb extends WebUI loses disableSmartWait
+        // and openBrowser(url, FailureHandling) overloads).
+        return com.katalan.core.compat.GroovySourcePreprocessor.preprocess(script);
     }
     
     private GroovyShell createGroovyShell() {
@@ -804,6 +838,12 @@ public class KatalanBDDExecutor {
         binding.setVariable("findTestCase", new FindTestCaseBinding(context));
         
         GroovyClassLoader classLoader = new GroovyClassLoader(getClass().getClassLoader(), config);
+        
+        // Add project-specific paths and libraries so that imports like
+        // `import website.CSWeb` or `import support.ExcelLocator` can be resolved
+        // from the project's Keywords/, Include/scripts/groovy/, Drivers/, Libs/, bin/lib folders.
+        addProjectLibrariesToClassLoader(classLoader);
+        
         return new GroovyShell(classLoader, binding, config);
     }
     
@@ -812,6 +852,7 @@ public class KatalanBDDExecutor {
     private static class Scenario {
         String name;
         List<Step> steps = new ArrayList<>();
+        List<String> tags = new ArrayList<>();
         
         Scenario(String name) {
             this.name = name;
@@ -833,6 +874,7 @@ public class KatalanBDDExecutor {
         Method method;
         Object instance;
         String keyword;
+        Class<?> ownerClass;
         
         StepDefinition(Pattern pattern, Method method, Object instance, String keyword) {
             this.pattern = pattern;
@@ -852,7 +894,21 @@ public class KatalanBDDExecutor {
         }
         
         void invoke() throws Exception {
-            definition.method.invoke(definition.instance, parameters.toArray());
+            Object target = definition.instance;
+            if (target == null && definition.ownerClass != null) {
+                // Lazy instantiation: only create when the step is actually executed,
+                // so that GlobalVariables/profiles are already initialized.
+                try {
+                    target = definition.ownerClass.getDeclaredConstructor().newInstance();
+                    definition.instance = target; // cache for next invocations
+                } catch (Throwable t) {
+                    Throwable root = t;
+                    while (root.getCause() != null) root = root.getCause();
+                    throw new RuntimeException("Failed to instantiate step definition class '"
+                            + definition.ownerClass.getName() + "': " + root, t);
+                }
+            }
+            definition.method.invoke(target, parameters.toArray());
         }
     }
     
@@ -1038,6 +1094,51 @@ public class KatalanBDDExecutor {
                 binding.setVariable("findTestObject", new FindTestObjectBinding(context));
                 
                 GroovyClassLoader classLoader = new GroovyClassLoader(getClass().getClassLoader(), config);
+                
+                // Add Keywords folder, Include/scripts/groovy folder, and project JAR libraries
+                // so the keyword script can resolve imports like `import website.CSWeb` or
+                // `import support.ExcelLocator` from other files in Keywords folder.
+                if (projectPath != null) {
+                    Path kwPath = projectPath.resolve("Keywords");
+                    if (Files.exists(kwPath)) {
+                        try {
+                            Path processed = com.katalan.core.compat.GroovySourcePreprocessor
+                                    .createPreprocessedCopy(kwPath, "keywords");
+                            classLoader.addClasspath(processed.toString());
+                        } catch (Exception ignored) {}
+                    }
+                    Path incGroovyPath = projectPath.resolve("Include").resolve("scripts").resolve("groovy");
+                    if (Files.exists(incGroovyPath)) {
+                        try {
+                            Path processed = com.katalan.core.compat.GroovySourcePreprocessor
+                                    .createPreprocessedCopy(incGroovyPath, "include");
+                            classLoader.addClasspath(processed.toString());
+                        } catch (Exception ignored) {}
+                    }
+                    for (String libDir : new String[]{"Drivers", "Libs"}) {
+                        Path dir = projectPath.resolve(libDir);
+                        if (Files.exists(dir)) {
+                            try {
+                                Files.walk(dir, 1)
+                                    .filter(p -> p.toString().toLowerCase().endsWith(".jar"))
+                                    .forEach(jp -> {
+                                        try { classLoader.addURL(jp.toUri().toURL()); } catch (Exception ignored) {}
+                                    });
+                            } catch (IOException ignored) {}
+                        }
+                    }
+                    Path binLib = projectPath.resolve("bin").resolve("lib");
+                    if (Files.exists(binLib)) {
+                        try {
+                            Files.walk(binLib, 1)
+                                .filter(p -> p.toString().toLowerCase().endsWith(".jar"))
+                                .forEach(jp -> {
+                                    try { classLoader.addURL(jp.toUri().toURL()); } catch (Exception ignored) {}
+                                });
+                        } catch (IOException ignored) {}
+                    }
+                }
+                
                 GroovyShell shell = new GroovyShell(classLoader, binding, config);
                 
                 Class<?> clazz = shell.getClassLoader().parseClass(script);

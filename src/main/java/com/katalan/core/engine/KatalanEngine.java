@@ -85,6 +85,10 @@ public class KatalanEngine {
                 profileName = "default";
             }
             
+            // Propagate profile name to Katalon RunConfiguration compat so scripts that
+            // call RunConfiguration.getExecutionProfile() see the actual CLI-passed value.
+            com.kms.katalon.core.configuration.RunConfiguration.setExecutionProfile(profileName);
+            
             Path profilePath = profilesPath.resolve(profileName + ".glbl");
             if (!Files.exists(profilePath)) {
                 // Try without extension

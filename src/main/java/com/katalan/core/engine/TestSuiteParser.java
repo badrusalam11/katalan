@@ -58,8 +58,17 @@ public class TestSuiteParser {
             
             // Parse test case links
             NodeList testCaseLinks = root.getElementsByTagName("testCaseLink");
+            int skipped = 0;
             for (int i = 0; i < testCaseLinks.getLength(); i++) {
                 Element link = (Element) testCaseLinks.item(i);
+                
+                // Respect <isRun>false</isRun> flag - skip disabled test cases
+                String isRunText = getElementText(link, "isRun");
+                if (isRunText != null && "false".equalsIgnoreCase(isRunText.trim())) {
+                    skipped++;
+                    logger.debug("Skipping disabled test case: {}", getElementText(link, "testCaseId"));
+                    continue;
+                }
                 
                 // Get test case ID (path)
                 String testCaseId = getElementText(link, "testCaseId");
@@ -69,6 +78,9 @@ public class TestSuiteParser {
                         suite.addTestCase(testCase);
                     }
                 }
+            }
+            if (skipped > 0) {
+                logger.info("Skipped {} test case(s) marked isRun=false", skipped);
             }
             
             logger.info("Parsed test suite: {} with {} test cases", name, suite.getTestCases().size());
