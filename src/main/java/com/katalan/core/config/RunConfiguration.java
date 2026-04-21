@@ -12,7 +12,10 @@ public class RunConfiguration {
     // Browser Configuration
     private BrowserType browserType = BrowserType.CHROME;
     private boolean headless = false;
-    private int implicitWait = 30;
+    // Katalon sets implicit wait to 0 by default. WebUI keywords use their own
+    // explicit WebDriverWait with per-call timeout, so implicit wait would only
+    // interfere (each failed findElement during polling blocks for implicit*seconds).
+    private int implicitWait = 0;
     private int pageLoadTimeout = 60;
     private int scriptTimeout = 30;
     
