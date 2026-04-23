@@ -6,6 +6,7 @@ import com.katalan.core.driver.WebDriverFactory;
 import com.katalan.core.model.*;
 import com.katalan.core.exception.StepFailedException;
 import com.katalan.core.compat.GlobalVariable;
+import com.katalan.core.logging.XmlKeywordLogger;
 import org.openqa.selenium.OutputType;
 import org.openqa.selenium.TakesScreenshot;
 import org.openqa.selenium.WebDriver;
@@ -18,6 +19,8 @@ import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.List;
 import java.util.Map;
 
@@ -259,6 +262,12 @@ public class KatalanEngine {
         
         // Note: suiteResult was already added to executionResult earlier (line 175)
         // before prepareReportDirectory() was called, so we don't add it again here
+        
+        // CRITICAL: Recalculate execution totals NOW after all test cases are added!
+        // suiteResult was added to executionResult before test cases ran (line 175),
+        // so execution counts were 0. Now that test cases have been added to suiteResult,
+        // we must recalculate the execution totals for correct reporting.
+        executionResult.recalculateTotals();
         executionResult.markCompleted();
         
         // CRITICAL: Capture driver information NOW (before driver is closed!)
@@ -414,30 +423,6 @@ public class KatalanEngine {
                     result.setConsoleOutput(capturedOutput);
                 }
                 
-                // Check if this was a BDD test and capture the info
-                Object isBddTest = context.getProperty("isBddTest");
-                if (Boolean.TRUE.equals(isBddTest)) {
-                    result.setBddTest(true);
-                    Object featureFile = context.getProperty("featureFile");
-                    if (featureFile != null) {
-                        result.setFeatureFile(featureFile.toString());
-                    }
-                    
-                    // Capture hierarchical BDD scenario data
-                    Object bddScenarioData = context.getProperty("bddScenarioData");
-                    if (bddScenarioData instanceof List) {
-                        @SuppressWarnings("unchecked")
-                        List<Map<String, Object>> scenarioData = (List<Map<String, Object>>) bddScenarioData;
-                        result.setBddScenarioData(scenarioData);
-                        logger.debug("Captured {} BDD scenarios for {}", scenarioData.size(), testCase.getName());
-                    }
-                    
-                    // Clear BDD tracking for next test case
-                    context.setProperty("isBddTest", null);
-                    context.setProperty("featureFile", null);
-                    context.setProperty("bddScenarioData", null);
-                }
-                
                 // Test passed
                 result.markPassed();
                 testCase.markPassed();
@@ -458,6 +443,30 @@ public class KatalanEngine {
                 handleTestError(testCase, result, e, attempts, maxAttempts);
                 if (result.getStatus() == TestCase.TestCaseStatus.PASSED) {
                     break; // Retry succeeded
+                }
+            } finally {
+                // ALWAYS check if this was a BDD test and capture the info (even on failure)
+                Object isBddTest = context.getProperty("isBddTest");
+                if (Boolean.TRUE.equals(isBddTest) && !result.isBddTest()) {
+                    result.setBddTest(true);
+                    Object featureFile = context.getProperty("featureFile");
+                    if (featureFile != null) {
+                        result.setFeatureFile(featureFile.toString());
+                    }
+                    
+                    // Capture hierarchical BDD scenario data
+                    Object bddScenarioData = context.getProperty("bddScenarioData");
+                    if (bddScenarioData instanceof List) {
+                        @SuppressWarnings("unchecked")
+                        List<Map<String, Object>> scenarioData = (List<Map<String, Object>>) bddScenarioData;
+                        result.setBddScenarioData(scenarioData);
+                        logger.debug("Captured {} BDD scenarios for {}", scenarioData.size(), testCase.getName());
+                    }
+                    
+                    // Clear BDD tracking for next test case
+                    context.setProperty("isBddTest", null);
+                    context.setProperty("featureFile", null);
+                    context.setProperty("bddScenarioData", null);
                 }
             }
         }
@@ -524,6 +533,9 @@ public class KatalanEngine {
             result.markFailed(errorMessage, stackTrace);
             testCase.markFailed(errorMessage, stackTrace);
             
+            // Log FAILED record to execution0.log (Katalon format)
+            logTestCaseFailure(testCase, e, errorMessage, stackTrace);
+            
             if (config.isTakeScreenshotOnFailure()) {
                 takeScreenshot(result, "failure");
             }
@@ -546,6 +558,9 @@ public class KatalanEngine {
             logger.error("Test case ERROR: {} - {}", testCase.getName(), errorMessage, e);
             result.markError(errorMessage, stackTrace);
             testCase.markError(errorMessage, stackTrace);
+            
+            // Log FAILED record to execution0.log (Katalon format - errors logged as FAILED)
+            logTestCaseFailure(testCase, e, errorMessage, stackTrace);
             
             if (config.isTakeScreenshotOnFailure()) {
                 takeScreenshot(result, "error");
@@ -582,6 +597,31 @@ public class KatalanEngine {
         } catch (Exception ex) {
             logger.warn("Failed to take screenshot: {}", ex.getMessage());
         }
+    }
+    
+    /**
+     * Log test case failure to execution0.log in Katalon format
+     */
+    private void logTestCaseFailure(TestCase testCase, Exception e, String errorMessage, String stackTrace) {
+        XmlKeywordLogger xmlLogger = XmlKeywordLogger.getInstance();
+        
+        // Build failure message (Katalon format: "Test Cases/XXX FAILED.\nReason:\n{exception}")
+        StringBuilder failureMessage = new StringBuilder();
+        failureMessage.append(testCase.getId()).append(" FAILED.\n");
+        failureMessage.append("Reason:\n");
+        failureMessage.append(errorMessage);
+        if (stackTrace != null && !stackTrace.isEmpty()) {
+            failureMessage.append("\n").append(stackTrace);
+        }
+        
+        // Build properties for FAILED record
+        Map<String, String> props = new LinkedHashMap<>();
+        props.put("failed.exception.class", e.getClass().getName());
+        props.put("failed.exception.message", e.getMessage() != null ? e.getMessage() : "");
+        props.put("failed.exception.stacktrace", stackTrace != null ? stackTrace : "");
+        
+        // Log FAILED record (nested level 0 for test case level)
+        xmlLogger.logMessage("FAILED", failureMessage.toString(), props);
     }
     
     /**

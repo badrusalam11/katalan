@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -1063,6 +1064,63 @@ public class KatalonReportGenerator {
             log.append("  <method>").append(rec.method).append("</method>\n");
             log.append("  <thread>1</thread>\n");
             log.append("  <message>").append(escapeXml(rec.message != null ? rec.message : "")).append("</message>\n");
+            
+            // Add <exception> element for FAILED records (Katalon format)
+            if ("FAILED".equals(rec.level) && rec.properties != null) {
+                String exceptionMessage = rec.properties.get("failed.exception.message");
+                String exceptionStackTrace = rec.properties.get("failed.exception.stacktrace");
+                
+                if (exceptionMessage != null && !exceptionMessage.isEmpty()) {
+                    log.append("  <exception>\n");
+                    log.append("    <message>").append(escapeXml(exceptionMessage)).append("</message>\n");
+                    
+                    // Parse stacktrace and generate <frame> elements
+                    if (exceptionStackTrace != null && !exceptionStackTrace.isEmpty()) {
+                        String[] lines = exceptionStackTrace.split("\n");
+                        for (String line : lines) {
+                            line = line.trim();
+                            // Match "at com.example.Class.method(File.java:123)" format
+                            if (line.startsWith("at ")) {
+                                String frameInfo = line.substring(3); // Remove "at "
+                                int methodEnd = frameInfo.indexOf('(');
+                                if (methodEnd > 0) {
+                                    String classAndMethod = frameInfo.substring(0, methodEnd);
+                                    int lastDot = classAndMethod.lastIndexOf('.');
+                                    String className = lastDot > 0 ? classAndMethod.substring(0, lastDot) : classAndMethod;
+                                    String methodName = lastDot > 0 ? classAndMethod.substring(lastDot + 1) : "";
+                                    
+                                    // Extract line number from (File.java:123)
+                                    String lineInfo = frameInfo.substring(methodEnd);
+                                    int colonIndex = lineInfo.lastIndexOf(':');
+                                    String lineNumber = "";
+                                    if (colonIndex > 0) {
+                                        String lineNumPart = lineInfo.substring(colonIndex + 1);
+                                        int parenIndex = lineNumPart.indexOf(')');
+                                        if (parenIndex > 0) {
+                                            lineNumber = lineNumPart.substring(0, parenIndex);
+                                        }
+                                    }
+                                    
+                                    log.append("    <frame>\n");
+                                    log.append("      <class>").append(escapeXml(className)).append("</class>\n");
+                                    log.append("      <method>").append(escapeXml(methodName)).append("</method>\n");
+                                    if (!lineNumber.isEmpty() && !lineNumber.equals("Native Method")) {
+                                        try {
+                                            log.append("      <line>").append(lineNumber).append("</line>\n");
+                                        } catch (NumberFormatException ignored) {
+                                            // Skip if not a number
+                                        }
+                                    }
+                                    log.append("    </frame>\n");
+                                }
+                            }
+                        }
+                    }
+                    
+                    log.append("  </exception>\n");
+                }
+            }
+            
             log.append("  <nestedLevel>").append(rec.nestedLevel).append("</nestedLevel>\n");
             log.append("  <escapedJava>false</escapedJava>\n");
             if (rec.properties != null) {
@@ -2023,25 +2081,82 @@ public class KatalonReportGenerator {
     }
     
     /**
-     * Generate cucumber.json file (standard Cucumber JSON format)
+     * Build the absolute filesystem URI for a BDD feature file.
+     * Guarantees the returned path is absolute (projectPath + relative feature path)
+     * and normalized (no ./ or ../ segments).
+     */
+    private String buildAbsoluteFeatureUri(TestCaseResult tcResult, FeatureMetadata metadata) {
+        // Step 1: pick best source for feature file path
+        String raw = tcResult.getFeatureFile();
+        if (raw == null || raw.isEmpty()) {
+            raw = metadata.absoluteFeatureFilePath;
+        }
+        if (raw == null || raw.isEmpty()) {
+            return "";
+        }
+        
+        // Step 2: strip leading ./ or .\ repeatedly
+        String cleaned = raw;
+        while (cleaned.startsWith("./") || cleaned.startsWith(".\\")) {
+            cleaned = cleaned.substring(2);
+        }
+        
+        Path featurePath = Paths.get(cleaned);
+        
+        // Step 3: if not absolute, glue with projectPath (also forced absolute)
+        if (!featurePath.isAbsolute()) {
+            Path base = projectPath != null ? projectPath.toAbsolutePath() : Paths.get("").toAbsolutePath();
+            featurePath = base.resolve(cleaned);
+        }
+        
+        // Step 4: force absolute + normalize
+        return featurePath.toAbsolutePath().normalize().toString();
+    }
+    
+    /**
+     * Generate cucumber.json file (standard Cucumber JSON format without UUIDs)
      */
     private void generateCucumberJson(Path featureDir, TestCaseResult tcResult) throws IOException {
         List<Map<String, Object>> features = new ArrayList<>();
         Map<String, Object> feature = new LinkedHashMap<>();
         
-        feature.put("line", 1);
-        feature.put("elements", buildCucumberElements(tcResult));
-        feature.put("name", tcResult.getTestCaseName());
-        feature.put("description", tcResult.getDescription() != null ? tcResult.getDescription() : "");
-        feature.put("id", tcResult.getTestCaseName().toLowerCase().replace(" ", "-"));
-        feature.put("keyword", "Feature");
-        feature.put("uri", tcResult.getFeatureFile() != null ? tcResult.getFeatureFile() : "");
+        // Parse .feature file for metadata
+        FeatureMetadata metadata = parseFeatureFile(tcResult);
         
-        List<Map<String, Object>> tags = new ArrayList<>();
-        feature.put("tags", tags);
+        // FORCE full absolute URI: projectPath + feature relative path, always absolute.
+        String absoluteUri = buildAbsoluteFeatureUri(tcResult, metadata);
+        
+        feature.put("line", metadata.featureLine);
+        // Use the same buildKCucumberElements but strip UUID fields for standard cucumber.json
+        List<Map<String, Object>> elements = buildKCucumberElements(tcResult, metadata);
+        stripUuidsFromElements(elements);
+        feature.put("elements", elements);
+        feature.put("name", metadata.featureName);
+        feature.put("description", metadata.featureDescription);
+        feature.put("id", metadata.featureName.toLowerCase().replace(" ", "-").replaceAll("[^a-z0-9\\-]", ""));
+        feature.put("keyword", "Feature");
+        feature.put("uri", absoluteUri);  // Use forced absolute URI
+        feature.put("tags", metadata.featureTags);
         
         features.add(feature);
         Files.writeString(featureDir.resolve("cucumber.json"), toJson(features));
+    }
+    
+    /**
+     * Remove UUID fields from cucumber elements for standard cucumber.json format
+     */
+    private void stripUuidsFromElements(List<Map<String, Object>> elements) {
+        for (Map<String, Object> element : elements) {
+            element.remove("BDD_TESTRUN_UUID");
+            
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> steps = (List<Map<String, Object>>) element.get("steps");
+            if (steps != null) {
+                for (Map<String, Object> step : steps) {
+                    step.remove("BDD_STEP_UUID");
+                }
+            }
+        }
     }
     
     /**
@@ -2112,38 +2227,61 @@ public class KatalonReportGenerator {
     }
     
     /**
-     * Generate cucumber.xml (JUnit XML format for Cucumber)
+     * Generate cucumber.xml (JUnit XML format for Cucumber - Katalon style)
      */
     private void generateCucumberXml(Path featureDir, TestCaseResult tcResult) throws IOException {
         StringBuilder xml = new StringBuilder();
-        xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n");
         
         long durationMs = tcResult.getEndTime() != null && tcResult.getStartTime() != null ?
                 Duration.between(tcResult.getStartTime(), tcResult.getEndTime()).toMillis() : 0;
+        double durationSec = durationMs / 1000.0;
         
-        int failed = tcResult.getStatus() == TestCase.TestCaseStatus.FAILED ? 1 : 0;
+        int failed = (tcResult.getStatus() == TestCase.TestCaseStatus.FAILED || 
+                      tcResult.getStatus() == TestCase.TestCaseStatus.ERROR) ? 1 : 0;
         int skipped = tcResult.getStatus() == TestCase.TestCaseStatus.SKIPPED ? 1 : 0;
         
-        xml.append("<testsuite name=\"").append(escapeXml(tcResult.getTestCaseName())).append("\" ");
-        xml.append("failures=\"").append(failed).append("\" ");
+        // Katalon uses "cucumber.runtime.formatter.JUnitFormatter" as testsuite name
+        xml.append("<testsuite failures=\"").append(failed).append("\" ");
+        xml.append("name=\"cucumber.runtime.formatter.JUnitFormatter\" ");
         xml.append("skipped=\"").append(skipped).append("\" ");
-        xml.append("time=\"").append(String.format("%.3f", durationMs / 1000.0)).append("\" ");
-        xml.append("tests=\"1\">\n");
+        xml.append("tests=\"1\" ");
+        xml.append("time=\"").append(String.format("%.6f", durationSec)).append("\">\n");
         
-        xml.append("  <testcase classname=\"").append(escapeXml(tcResult.getTestCaseName())).append("\" ");
-        xml.append("name=\"").append(escapeXml(tcResult.getScenarioName() != null ? tcResult.getScenarioName() : tcResult.getTestCaseName())).append("\" ");
-        xml.append("time=\"").append(String.format("%.3f", durationMs / 1000.0)).append("\"");
+        // Extract test suite name from test case path (e.g., "Test Suites/Regresion/Nomi/BRI to BRI" -> "BRI to BRI")
+        String testSuiteName = extractTestSuiteName(tcResult.getTestCaseName());
+        String scenarioName = tcResult.getScenarioName() != null ? tcResult.getScenarioName() : testSuiteName;
         
-        if (tcResult.getStatus() == TestCase.TestCaseStatus.FAILED) {
+        xml.append("    <testcase classname=\"").append(escapeXml(testSuiteName)).append("\" ");
+        xml.append("name=\"").append(escapeXml(scenarioName)).append("\" ");
+        xml.append("time=\"").append(String.format("%.6f", durationSec)).append("\"");
+        
+        if (tcResult.getStatus() == TestCase.TestCaseStatus.FAILED || tcResult.getStatus() == TestCase.TestCaseStatus.ERROR) {
             xml.append(">\n");
-            xml.append("    <failure message=\"").append(escapeXml(tcResult.getErrorMessage())).append("\">");
-            if (tcResult.getStackTrace() != null) {
-                xml.append(escapeXml(tcResult.getStackTrace()));
+            
+            // Build failure message with full error and stack trace
+            String errorMsg = tcResult.getErrorMessage() != null ? tcResult.getErrorMessage() : "Test failed";
+            String stackTrace = tcResult.getStackTrace() != null ? tcResult.getStackTrace() : "";
+            
+            xml.append("        <failure message=\"").append(escapeXmlAttribute(errorMsg));
+            if (!stackTrace.isEmpty()) {
+                xml.append("&#10;").append(escapeXmlAttribute(stackTrace));
             }
+            xml.append("\">");
+            
+            // Build CDATA section with step summary (Katalon style)
+            xml.append("<![CDATA[");
+            buildStepSummary(xml, tcResult);
+            xml.append("\n\nStackTrace:\n").append(errorMsg);
+            if (!stackTrace.isEmpty()) {
+                xml.append("\n").append(stackTrace);
+            }
+            xml.append("]]>");
+            
             xml.append("</failure>\n");
-            xml.append("  </testcase>\n");
+            xml.append("    </testcase>\n");
         } else if (tcResult.getStatus() == TestCase.TestCaseStatus.SKIPPED) {
-            xml.append(">\n    <skipped/>\n  </testcase>\n");
+            xml.append(">\n        <skipped/>\n    </testcase>\n");
         } else {
             xml.append("/>\n");
         }
@@ -2154,20 +2292,136 @@ public class KatalonReportGenerator {
     }
     
     /**
+     * Extract test suite name from test case path
+     * E.g., "Test Cases/BRICAMS/Transfer Fund/BRI to BRI/Standart TC/TC01..." -> "BRI to BRI"
+     * The test suite name is usually the last folder before "Standart TC" or before the TC file
+     */
+    private String extractTestSuiteName(String testCasePath) {
+        if (testCasePath == null) return "Unknown";
+        
+        String[] parts = testCasePath.split("/");
+        
+        // Look for part before "Standart TC" or TC file
+        for (int i = parts.length - 1; i >= 0; i--) {
+            String part = parts[i];
+            
+            // Skip TC files
+            if (part.startsWith("TC") && part.contains("-")) {
+                continue;
+            }
+            
+            // Skip "Standart TC", "Standard TC" folders
+            if (part.contains("Standart") || part.contains("Standard")) {
+                // Return previous part
+                if (i > 0) {
+                    return parts[i - 1];
+                }
+            }
+            
+            // If we find a specific pattern like "BRI to BRI", "VACA to VACA", return it
+            if (part.contains(" to ") && i < parts.length - 1) {
+                return part;
+            }
+        }
+        
+        // Fallback: return last folder before TC file (skip if starts with "TC" or contains "Standart")
+        for (int i = parts.length - 2; i >= 0; i--) {
+            String part = parts[i];
+            if (!part.startsWith("TC") && !part.contains("Standart") && !part.contains("Standard")) {
+                return part;
+            }
+        }
+        
+        return parts.length >= 2 ? parts[parts.length - 2] : testCasePath;
+    }
+    
+    /**
+     * Build step summary for CDATA section (Katalon style)
+     * Format: "Given Step name.......passed" or "When Step name.......failed"
+     */
+    private void buildStepSummary(StringBuilder xml, TestCaseResult tcResult) {
+        List<Map<String, Object>> bddScenarios = tcResult.getBddScenarioData();
+        
+        if (bddScenarios == null || bddScenarios.isEmpty()) {
+            return;
+        }
+        
+        for (Map<String, Object> scenario : bddScenarios) {
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> steps = (List<Map<String, Object>>) scenario.get("children");
+            
+            if (steps == null || steps.isEmpty()) {
+                continue;
+            }
+            
+            for (Map<String, Object> step : steps) {
+                String stepName = (String) step.get("name");
+                String result = (String) step.get("result");
+                
+                if (stepName == null) continue;
+                
+                // Extract keyword from step name (e.g., "Given Login..." -> keyword="Given", name="Login...")
+                String keyword = "";
+                String cleanName = stepName;
+                
+                for (String kw : new String[]{"Given ", "When ", "Then ", "And ", "But "}) {
+                    if (stepName.startsWith(kw)) {
+                        keyword = kw.trim();
+                        cleanName = stepName.substring(kw.length());
+                        break;
+                    }
+                }
+                
+                // Build line: "Given Step name.......passed" (pad to ~80 chars)
+                String line = keyword + " " + cleanName;
+                int dotsNeeded = Math.max(1, 80 - line.length() - 6); // 6 for "passed" or "failed"
+                xml.append(line);
+                for (int i = 0; i < dotsNeeded; i++) {
+                    xml.append(".");
+                }
+                
+                String status = "PASSED".equalsIgnoreCase(result) ? "passed" : "failed";
+                xml.append(status).append("\n");
+            }
+        }
+    }
+    
+    /**
+     * Escape XML attribute values (for use in attribute="..." context)
+     */
+    private String escapeXmlAttribute(String text) {
+        if (text == null) return "";
+        return text.replace("&", "&amp;")
+                   .replace("<", "&lt;")
+                   .replace(">", "&gt;")
+                   .replace("\"", "&quot;")
+                   .replace("'", "&apos;")
+                   .replace("\n", "&#10;")
+                   .replace("\r", "&#13;")
+                   .replace("\t", "&#9;");
+    }
+    
+    /**
      * Generate k-cucumber.json (Katalon enhanced Cucumber JSON with UUIDs)
      */
     private void generateKCucumberJson(Path featureDir, TestCaseResult tcResult) throws IOException {
         List<Map<String, Object>> features = new ArrayList<>();
         Map<String, Object> feature = new LinkedHashMap<>();
         
-        feature.put("line", 1);
-        feature.put("elements", buildKCucumberElements(tcResult));
-        feature.put("name", tcResult.getTestCaseName());
-        feature.put("description", tcResult.getDescription() != null ? tcResult.getDescription() : "");
-        feature.put("id", tcResult.getTestCaseName().toLowerCase().replace(" ", "-"));
+        // Parse .feature file for metadata
+        FeatureMetadata metadata = parseFeatureFile(tcResult);
+        
+        // FORCE full absolute URI: projectPath + feature relative path, always absolute.
+        String absoluteUri = buildAbsoluteFeatureUri(tcResult, metadata);
+        
+        feature.put("line", metadata.featureLine);
+        feature.put("elements", buildKCucumberElements(tcResult, metadata));
+        feature.put("name", metadata.featureName);
+        feature.put("description", metadata.featureDescription);
+        feature.put("id", metadata.featureName.toLowerCase().replace(" ", "-").replaceAll("[^a-z0-9\\-]", ""));
         feature.put("keyword", "Feature");
-        feature.put("uri", tcResult.getFeatureFile() != null ? tcResult.getFeatureFile() : "");
-        feature.put("tags", new ArrayList<>());
+        feature.put("uri", absoluteUri);  // Use forced absolute URI
+        feature.put("tags", metadata.featureTags);
         
         features.add(feature);
         Files.writeString(featureDir.resolve("k-cucumber.json"), toJson(features));
@@ -2176,8 +2430,80 @@ public class KatalonReportGenerator {
     /**
      * Build Katalon-enhanced Cucumber elements with UUIDs
      */
-    private List<Map<String, Object>> buildKCucumberElements(TestCaseResult tcResult) {
+    private List<Map<String, Object>> buildKCucumberElements(TestCaseResult tcResult, FeatureMetadata metadata) {
         List<Map<String, Object>> elements = new ArrayList<>();
+        
+        // If we have hierarchical BDD scenario data, use it
+        if (tcResult.getBddScenarioData() != null && !tcResult.getBddScenarioData().isEmpty()) {
+            logger.debug("Building k-cucumber elements from BDD hierarchical data ({} scenarios)", 
+                tcResult.getBddScenarioData().size());
+            
+            for (Map<String, Object> scenarioData : tcResult.getBddScenarioData()) {
+                Object childrenObj = scenarioData.get("children");
+                
+                Map<String, Object> scenario = new LinkedHashMap<>();
+                
+                String testRunUuid = UUID.randomUUID().toString();
+                scenario.put("BDD_TESTRUN_UUID", testRunUuid);
+                
+                String scenarioName = (String) scenarioData.getOrDefault("name", tcResult.getTestCaseName());
+                // Strip "Start Test Case : SCENARIO " prefix if present
+                if (scenarioName.startsWith("Start Test Case : SCENARIO ")) {
+                    scenarioName = scenarioName.substring("Start Test Case : SCENARIO ".length());
+                }
+                
+                // Match scenario name with metadata to get line number and keyword
+                ScenarioInfo scenarioInfo = metadata.findScenario(scenarioName);
+                scenario.put("line", scenarioInfo.line);
+                scenario.put("name", scenarioName);
+                scenario.put("description", "");
+                
+                // Create ID from feature ID + scenario name
+                String scenarioId = metadata.featureName.toLowerCase().replace(" ", "-").replaceAll("[^a-z0-9\\-]", "")
+                    + ";" + scenarioName.toLowerCase().replace(" ", "-").replaceAll("[^a-z0-9\\-;]", "");
+                if (scenarioInfo.isOutline) {
+                    scenarioId += ";;" + (scenarioInfo.exampleIndex + 2); // +2 because examples start at row 2 (after header)
+                }
+                scenario.put("id", scenarioId);
+                
+                scenario.put("type", "scenario");
+                scenario.put("keyword", scenarioInfo.keyword);
+                
+                // Combine feature tags + scenario tags (Katalon inherits feature tags)
+                List<Map<String, Object>> combinedTags = new ArrayList<>(metadata.featureTags);
+                combinedTags.addAll(scenarioInfo.tags);
+                scenario.put("tags", combinedTags);
+                
+                // Extract steps from scenario children
+                List<Map<String, Object>> steps = new ArrayList<>();
+                if (childrenObj instanceof List) {
+                    @SuppressWarnings("unchecked")
+                    List<Map<String, Object>> children = (List<Map<String, Object>>) childrenObj;
+                    
+                    // Match steps with scenario steps from metadata
+                    List<StepInfo> metadataSteps = scenarioInfo.steps;
+                    for (int i = 0; i < children.size(); i++) {
+                        Map<String, Object> stepData = children.get(i);
+                        StepInfo stepInfo = i < metadataSteps.size() ? metadataSteps.get(i) : null;
+                        int lineNum = stepInfo != null ? stepInfo.line : (scenarioInfo.line + i + 1);
+                        
+                        Map<String, Object> step = buildCucumberStepFromData(stepData, lineNum, stepInfo);
+                        if (step != null) {
+                            steps.add(step);
+                        }
+                    }
+                }
+                scenario.put("steps", steps);
+                elements.add(scenario);
+            }
+            
+            return elements;
+        }
+        
+        // Fallback to flat step results if no BDD hierarchical data
+        logger.debug("Building k-cucumber elements from flat step results ({} steps)", 
+            tcResult.getStepResults().size());
+        
         Map<String, Object> scenario = new LinkedHashMap<>();
         
         String testRunUuid = UUID.randomUUID().toString();
@@ -2243,6 +2569,165 @@ public class KatalonReportGenerator {
         
         elements.add(scenario);
         return elements;
+    }
+    
+    /**
+     * Build a Cucumber step JSON object from hierarchical step data
+     */
+    private Map<String, Object> buildCucumberStepFromData(Map<String, Object> stepData, int lineNum, StepInfo stepInfo) {
+        Map<String, Object> step = new LinkedHashMap<>();
+        
+        step.put("BDD_STEP_UUID", UUID.randomUUID().toString());
+        step.put("line", lineNum);
+        
+        // Extract step name and keyword
+        String stepName = (String) stepData.getOrDefault("name", "Unknown step");
+        String keyword = "Given ";
+        if (stepName.toLowerCase().startsWith("given ")) {
+            keyword = "Given ";
+            stepName = stepName.substring(6);
+        } else if (stepName.toLowerCase().startsWith("when ")) {
+            keyword = "When ";
+            stepName = stepName.substring(5);
+        } else if (stepName.toLowerCase().startsWith("then ")) {
+            keyword = "Then ";
+            stepName = stepName.substring(5);
+        } else if (stepName.toLowerCase().startsWith("and ")) {
+            keyword = "And ";
+            stepName = stepName.substring(4);
+        } else if (stepName.toLowerCase().startsWith("but ")) {
+            keyword = "But ";
+            stepName = stepName.substring(4);
+        }
+        
+        step.put("name", stepName);
+        step.put("keyword", keyword);
+        
+        // Build result object
+        Map<String, Object> result = new LinkedHashMap<>();
+        String status = (String) stepData.getOrDefault("result", "PASSED");
+        
+        // Map status to Cucumber format (passed/failed/skipped)
+        if ("SKIPPED".equalsIgnoreCase(status)) {
+            result.put("status", "skipped");
+        } else if ("FAILED".equalsIgnoreCase(status)) {
+            result.put("status", "failed");
+        } else {
+            result.put("status", "passed");
+        }
+        
+        // Calculate duration from startTime and endTime
+        String startTimeStr = (String) stepData.get("startTime");
+        String endTimeStr = (String) stepData.get("endTime");
+        long durationNanos = 0;
+        if (startTimeStr != null && endTimeStr != null) {
+            try {
+                Instant start = Instant.parse(startTimeStr.replace("T", "T").replaceAll("([+-]\\d{2})(\\d{2})$", "$1:$2"));
+                Instant end = Instant.parse(endTimeStr.replace("T", "T").replaceAll("([+-]\\d{2})(\\d{2})$", "$1:$2"));
+                durationNanos = Duration.between(start, end).toNanos();
+            } catch (Exception e) {
+                logger.warn("Failed to parse step timestamps: {} - {}", startTimeStr, endTimeStr);
+            }
+        }
+        result.put("duration", durationNanos);
+        
+        // Add error message if step failed
+        Object logsObj = stepData.get("logs");
+        if (!status.equalsIgnoreCase("PASSED") && logsObj instanceof List) {
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> logs = (List<Map<String, Object>>) logsObj;
+            for (Map<String, Object> log : logs) {
+                String level = (String) log.get("level");
+                if ("FAILED".equalsIgnoreCase(level)) {
+                    result.put("error_message", log.get("message"));
+                    break;
+                }
+            }
+        }
+        
+        step.put("result", result);
+        
+        // Match (with arguments extraction)
+        Map<String, Object> match = new LinkedHashMap<>();
+        match.put("location", "StepDefinitions." + stepName.replace(" ", "_").toLowerCase() + "()");
+        
+        // Extract arguments from step name (parameters that were captured)
+        // Compare stepName with stepInfo.text to find placeholders like <role>, <fitur>
+        List<Map<String, Object>> arguments = new ArrayList<>();
+        if (stepInfo != null && stepInfo.text != null) {
+            arguments = extractStepArguments(stepName, stepInfo.text);
+        }
+        if (!arguments.isEmpty()) {
+            match.put("arguments", arguments);
+        }
+        
+        step.put("match", match);
+        
+        return step;
+    }
+    
+    /**
+     * Extract arguments from step execution vs step definition
+     * Example: "Login qcash role Maker dengan All Fitur" vs "Login qcash role <role> dengan <fitur>"
+     * Returns: [{"val": "Maker", "offset": 17}, {"val": "All Fitur", "offset": 30}]
+     */
+    private List<Map<String, Object>> extractStepArguments(String executedStep, String stepDefinition) {
+        List<Map<String, Object>> arguments = new ArrayList<>();
+        
+        // Find placeholders in step definition (e.g., <role>, <fitur>)
+        java.util.regex.Pattern placeholderPattern = java.util.regex.Pattern.compile("<([^>]+)>");
+        java.util.regex.Matcher matcher = placeholderPattern.matcher(stepDefinition);
+        
+        int defIndex = 0;
+        int execIndex = 0;
+        
+        while (matcher.find()) {
+            String placeholder = matcher.group(0); // e.g., "<role>"
+            int placeholderStart = matcher.start();
+            
+            // Match text before placeholder
+            String textBefore = stepDefinition.substring(defIndex, placeholderStart);
+            execIndex = executedStep.indexOf(textBefore, execIndex);
+            if (execIndex < 0) break;
+            execIndex += textBefore.length();
+            
+            // Find end of argument value in executed step
+            // Look for next word boundary or end of string
+            int argStart = execIndex;
+            int argEnd = execIndex;
+            
+            // Find what comes after this placeholder in definition
+            int nextPlaceholderIndex = defIndex;
+            java.util.regex.Matcher nextMatcher = placeholderPattern.matcher(stepDefinition.substring(matcher.end()));
+            String textAfter = "";
+            if (nextMatcher.find()) {
+                textAfter = stepDefinition.substring(matcher.end(), matcher.end() + nextMatcher.start()).trim();
+            } else {
+                textAfter = stepDefinition.substring(matcher.end()).trim();
+            }
+            
+            // Find where textAfter appears in executed step
+            if (!textAfter.isEmpty()) {
+                argEnd = executedStep.indexOf(textAfter, argStart);
+                if (argEnd < 0) argEnd = executedStep.length();
+            } else {
+                argEnd = executedStep.length();
+            }
+            
+            String argValue = executedStep.substring(argStart, argEnd).trim();
+            
+            if (!argValue.isEmpty()) {
+                Map<String, Object> arg = new LinkedHashMap<>();
+                arg.put("val", argValue);
+                arg.put("offset", argStart);
+                arguments.add(arg);
+            }
+            
+            defIndex = matcher.end();
+            execIndex = argEnd;
+        }
+        
+        return arguments;
     }
     
     /**
@@ -2482,5 +2967,285 @@ public class KatalonReportGenerator {
         
         // Fallback: use folder name
         return projectPath.getFileName().toString();
+    }
+    
+    /**
+     * Parse .feature file to extract metadata (feature name, tags, scenarios, etc.)
+     */
+    private FeatureMetadata parseFeatureFile(TestCaseResult tcResult) {
+        FeatureMetadata metadata = new FeatureMetadata();
+        
+        // Get absolute feature file path
+        String featureFileRelative = tcResult.getFeatureFile();
+        if (featureFileRelative == null || featureFileRelative.isEmpty()) {
+            logger.warn("No feature file path in test result");
+            metadata.featureName = tcResult.getTestCaseName();
+            metadata.absoluteFeatureFilePath = "";
+            return metadata;
+        }
+        
+        // Clean up path - remove leading ./ or .\ 
+        String cleanPath = featureFileRelative;
+        while (cleanPath.startsWith("./") || cleanPath.startsWith(".\\")) {
+            cleanPath = cleanPath.substring(2);
+        }
+        
+        // Convert to absolute path
+        Path featurePath = null;
+        if (Paths.get(cleanPath).isAbsolute()) {
+            featurePath = Paths.get(cleanPath).normalize();
+            metadata.absoluteFeatureFilePath = featurePath.toString();
+        } else {
+            // Resolve relative to project path and NORMALIZE to remove . and ..
+            if (projectPath != null) {
+                featurePath = projectPath.resolve(cleanPath).normalize();
+                metadata.absoluteFeatureFilePath = featurePath.toString();
+            } else {
+                metadata.absoluteFeatureFilePath = cleanPath;
+            }
+        }
+        
+        // Parse the feature file
+        if (featurePath != null && Files.exists(featurePath)) {
+            try {
+                List<String> lines = Files.readAllLines(featurePath);
+                parseFeatureFileLines(lines, metadata);
+            } catch (IOException e) {
+                logger.warn("Failed to read feature file: {}", featurePath, e);
+                metadata.featureName = tcResult.getTestCaseName();
+            }
+        } else {
+            logger.warn("Feature file not found: {}", featurePath);
+            metadata.featureName = tcResult.getTestCaseName();
+        }
+        
+        return metadata;
+    }
+    
+    /**
+     * Parse .feature file lines to extract metadata
+     */
+    private void parseFeatureFileLines(List<String> lines, FeatureMetadata metadata) {
+        List<String> currentTags = new ArrayList<>();
+        ScenarioInfo currentScenario = null;
+        boolean inFeature = false;
+        boolean inScenario = false;
+        boolean inExamples = false;
+        int exampleRowCount = 0;
+        
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i).trim();
+            int lineNumber = i + 1;
+            
+            // Skip empty lines and comments
+            if (line.isEmpty() || line.startsWith("#")) {
+                continue;
+            }
+            
+            // Parse tags
+            if (line.startsWith("@")) {
+                String[] tags = line.split("\\s+");
+                for (String tag : tags) {
+                    if (tag.startsWith("@")) {
+                        currentTags.add(tag);
+                    }
+                }
+                continue;
+            }
+            
+            // Parse Feature
+            if (line.startsWith("Feature:")) {
+                metadata.featureLine = lineNumber;
+                metadata.featureName = line.substring("Feature:".length()).trim();
+                metadata.featureTags = convertTagsToMaps(currentTags, lineNumber - 1);
+                currentTags.clear();
+                inFeature = true;
+                continue;
+            }
+            
+            // Feature description (lines after Feature: before first Scenario)
+            // PRESERVE ORIGINAL INDENT (don't use trimmed line)
+            if (inFeature && !inScenario && !line.startsWith("Scenario") && !line.startsWith("@")) {
+                String originalLine = lines.get(i); // Get original line with indent
+                if (!originalLine.trim().isEmpty()) {
+                    if (metadata.featureDescription.isEmpty()) {
+                        metadata.featureDescription = originalLine;
+                    } else {
+                        metadata.featureDescription += "\n" + originalLine;
+                    }
+                }
+                continue;
+            }
+            
+            // Parse Scenario or Scenario Outline
+            if (line.startsWith("Scenario:") || line.startsWith("Scenario Outline:")) {
+                // Save previous scenario
+                if (currentScenario != null) {
+                    metadata.scenarios.add(currentScenario);
+                }
+                
+                // Create new scenario
+                currentScenario = new ScenarioInfo();
+                currentScenario.line = lineNumber;
+                currentScenario.isOutline = line.startsWith("Scenario Outline:");
+                currentScenario.keyword = currentScenario.isOutline ? "Scenario Outline" : "Scenario";
+                
+                String scenarioPrefix = currentScenario.isOutline ? "Scenario Outline:" : "Scenario:";
+                currentScenario.name = line.substring(scenarioPrefix.length()).trim();
+                currentScenario.tags = convertTagsToMaps(currentTags, lineNumber - 1);
+                currentTags.clear();
+                
+                inScenario = true;
+                inExamples = false;
+                exampleRowCount = 0;
+                continue;
+            }
+            
+            // Parse Examples section
+            if (line.startsWith("Examples:")) {
+                inExamples = true;
+                exampleRowCount = 0;
+                continue;
+            }
+            
+            // Skip example rows (header + data rows)
+            if (inExamples) {
+                if (line.startsWith("|")) {
+                    exampleRowCount++;
+                    // If this is a data row (not header), clone scenario for this example
+                    if (exampleRowCount > 1 && currentScenario != null && currentScenario.isOutline) {
+                        ScenarioInfo exampleScenario = new ScenarioInfo();
+                        exampleScenario.line = lineNumber; // Use actual Examples row line number
+                        exampleScenario.name = currentScenario.name;
+                        exampleScenario.keyword = currentScenario.keyword;
+                        exampleScenario.isOutline = true;
+                        exampleScenario.exampleIndex = exampleRowCount - 2; // -2 because first is header
+                        exampleScenario.tags = new ArrayList<>(currentScenario.tags);
+                        exampleScenario.steps = new ArrayList<>(currentScenario.steps);
+                        metadata.scenarios.add(exampleScenario);
+                    }
+                }
+                continue;
+            }
+            
+            // Parse steps (Given, When, Then, And, But)
+            if (inScenario && (line.startsWith("Given ") || line.startsWith("When ") || 
+                              line.startsWith("Then ") || line.startsWith("And ") || line.startsWith("But "))) {
+                if (currentScenario != null) {
+                    StepInfo step = new StepInfo();
+                    step.line = lineNumber;
+                    
+                    // Extract keyword
+                    if (line.startsWith("Given ")) {
+                        step.keyword = "Given ";
+                        step.text = line.substring(6);
+                    } else if (line.startsWith("When ")) {
+                        step.keyword = "When ";
+                        step.text = line.substring(5);
+                    } else if (line.startsWith("Then ")) {
+                        step.keyword = "Then ";
+                        step.text = line.substring(5);
+                    } else if (line.startsWith("And ")) {
+                        step.keyword = "And ";
+                        step.text = line.substring(4);
+                    } else if (line.startsWith("But ")) {
+                        step.keyword = "But ";
+                        step.text = line.substring(4);
+                    }
+                    
+                    currentScenario.steps.add(step);
+                }
+            }
+        }
+        
+        // Save last scenario
+        if (currentScenario != null) {
+            metadata.scenarios.add(currentScenario);
+        }
+        
+        // Set defaults if not parsed
+        if (metadata.featureName == null || metadata.featureName.isEmpty()) {
+            metadata.featureName = "Unknown Feature";
+        }
+    }
+    
+    /**
+     * Convert tag strings to Cucumber tag maps
+     */
+    private List<Map<String, Object>> convertTagsToMaps(List<String> tagStrings, int lineNumber) {
+        List<Map<String, Object>> tags = new ArrayList<>();
+        for (int i = 0; i < tagStrings.size(); i++) {
+            Map<String, Object> tag = new LinkedHashMap<>();
+            tag.put("name", tagStrings.get(i));
+            tag.put("type", "Tag");
+            
+            Map<String, Integer> location = new LinkedHashMap<>();
+            location.put("line", lineNumber);
+            location.put("column", i == 0 ? 1 : (tagStrings.get(i - 1).length() + 2)); // Estimate column
+            tag.put("location", location);
+            
+            tags.add(tag);
+        }
+        return tags;
+    }
+    
+    /**
+     * Feature metadata parsed from .feature file
+     */
+    private static class FeatureMetadata {
+        String featureName = "";
+        String featureDescription = "";
+        int featureLine = 1;
+        String absoluteFeatureFilePath = "";
+        List<Map<String, Object>> featureTags = new ArrayList<>();
+        List<ScenarioInfo> scenarios = new ArrayList<>();
+        
+        /**
+         * Find scenario info by matching name
+         */
+        ScenarioInfo findScenario(String scenarioName) {
+            // Try exact match first
+            for (ScenarioInfo scenario : scenarios) {
+                if (scenario.name.equals(scenarioName)) {
+                    return scenario;
+                }
+            }
+            
+            // Try partial match (scenario name might have parameters substituted)
+            for (ScenarioInfo scenario : scenarios) {
+                if (scenarioName.contains(scenario.name) || scenario.name.contains(scenarioName)) {
+                    return scenario;
+                }
+            }
+            
+            // Fallback: return default
+            ScenarioInfo fallback = new ScenarioInfo();
+            fallback.line = 3;
+            fallback.keyword = "Scenario";
+            fallback.name = scenarioName;
+            return fallback;
+        }
+    }
+    
+    /**
+     * Scenario metadata
+     */
+    private static class ScenarioInfo {
+        int line = 3;
+        String name = "";
+        String keyword = "Scenario";
+        boolean isOutline = false;
+        int exampleIndex = 0; // For Scenario Outline, which example row (0-based)
+        List<Map<String, Object>> tags = new ArrayList<>();
+        List<StepInfo> steps = new ArrayList<>();
+    }
+    
+    /**
+     * Step metadata
+     */
+    private static class StepInfo {
+        int line = 4;
+        String keyword = "Given ";
+        String text = "";
     }
 }
