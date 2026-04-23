@@ -219,6 +219,7 @@ public class KatalanEngine {
         // can parse them. Full report (HTML, CSV, cucumber, etc) is generated later
         // by the CLI.
         Path generatedReportPath = null;
+        String absReportFolder = null;
         try {
             com.katalan.reporting.KatalonReportGenerator katalanReporter =
                     new com.katalan.reporting.KatalonReportGenerator(config.getProjectPath());
@@ -226,28 +227,49 @@ public class KatalanEngine {
             // Always use the absolute, normalized path so that listener scripts
             // (PdfGenerator, CSReport) that read execution.general.report.reportFolder
             // get the same absolute path that Katalon Studio writes.
-            String absReportFolder = generatedReportPath.toAbsolutePath().normalize()
+            absReportFolder = generatedReportPath.toAbsolutePath().normalize()
                     .toString().replace("\\", "/");
             executionResult.setReportPath(absReportFolder);
             // Expose the per-run folder to scripts via RunConfiguration.getReportFolder()
             com.kms.katalon.core.configuration.RunConfiguration.setReportFolder(absReportFolder);
             suiteCtx.setReportLocation(absReportFolder);
-            // Also expose as System property + common static fields on well-known
-            // Katalon listener libraries (e.g. denstoo.reporting.CSReport). Some
-            // libraries run scripts via groovy.util.Eval.me(...) in a fresh
-            // GroovyShell where class imports are lost and `RunConfiguration`
-            // resolves to null. Pre-populating the static `reportFolder` field
-            // avoids the "Cannot get property 'reportFolder' on null object" NPE.
+            // Also expose as System property
             System.setProperty("reportFolder", absReportFolder);
-            injectReportFolderIntoListenerLibs(absReportFolder);
             logger.info("Report directory ready at: {}", generatedReportPath);
         } catch (Throwable t) {
             logger.error("Failed to prepare report directory before @AfterTestSuite: {}",
                     t.toString(), t);
         }
         
+        // ALWAYS inject reportFolder even if report preparation failed, so listeners don't crash
+        // Inject into common static fields on well-known Katalon listener libraries 
+        // (e.g. denstoo.reporting.CSReport). Some libraries run scripts via 
+        // groovy.util.Eval.me(...) in a fresh GroovyShell where class imports are 
+        // lost and `RunConfiguration` resolves to null. Pre-populating the static 
+        // `reportFolder` field avoids the "Cannot get property 'reportFolder' on null object" NPE.
+        if (absReportFolder != null) {
+            injectReportFolderIntoListenerLibs(absReportFolder);
+        } else {
+            // Fallback: try to inject whatever we can determine
+            String fallbackFolder = config.getReportPath() != null 
+                ? config.getReportPath().toAbsolutePath().toString() 
+                : System.getProperty("user.dir") + "/Reports";
+            injectReportFolderIntoListenerLibs(fallbackFolder);
+            logger.warn("Using fallback reportFolder for injection: {}", fallbackFolder);
+        }
+        
         // ----- Test Listener: @AfterTestSuite / @TearDown -----
         suiteCtx.setTestSuiteStatus(suiteResult.isSuccess() ? "PASSED" : "FAILED");
+        
+        // Re-inject into listener classloaders BEFORE invoking @AfterTestSuite
+        // This ensures any code in listeners that accesses CSReport.reportFolder will work
+        String finalReportFolder = absReportFolder != null 
+            ? absReportFolder 
+            : (config.getReportPath() != null 
+                ? config.getReportPath().toAbsolutePath().toString() 
+                : System.getProperty("user.dir") + "/Reports");
+        listenerRegistry.injectReportFolderIntoListeners(finalReportFolder);
+        
         try {
             listenerRegistry.invokeAfterTestSuite(suiteCtx);
         } catch (Exception e) {

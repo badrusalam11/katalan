@@ -57,6 +57,9 @@ public class TestListenerRegistry {
     }
 
     private final List<Entry> listenerInstances = new ArrayList<>();
+    
+    /** Last injected reportFolder path, used for per-invocation re-injection */
+    private String lastInjectedReportFolder = null;
 
     /**
      * Scan the project's {@code Test Listeners/} folder and build the listener registry.
@@ -275,6 +278,64 @@ public class TestListenerRegistry {
         return listenerInstances.isEmpty();
     }
 
+    /**
+     * Inject reportFolder into denstoo.reporting.CSReport static fields
+     * across all listener classloaders. This ensures that when @AfterTestSuite
+     * listeners call CSReport.exportKatalonReports(), the reportFolder is available.
+     * 
+     * @param reportFolderPath the absolute path to the report folder
+     */
+    public void injectReportFolderIntoListeners(String reportFolderPath) {
+        if (reportFolderPath == null || reportFolderPath.isEmpty()) {
+            logger.warn("Cannot inject null or empty reportFolder into listeners");
+            return;
+        }
+        
+        // Store for per-invocation re-injection
+        this.lastInjectedReportFolder = reportFolderPath;
+        
+        // Inject into each listener's classloader
+        for (Entry entry : listenerInstances) {
+            if (entry.loader == null) continue;
+            
+            try {
+                Class<?> csReportClass = entry.loader.loadClass("denstoo.reporting.CSReport");
+                
+                // Inject reportFolder
+                try {
+                    java.lang.reflect.Field reportFolderField = csReportClass.getDeclaredField("reportFolder");
+                    reportFolderField.setAccessible(true);
+                    reportFolderField.set(null, reportFolderPath);
+                    logger.info("✅ Injected reportFolder into listener CSReport ({}): {}", 
+                            entry.instance.getClass().getSimpleName(), reportFolderPath);
+                } catch (NoSuchFieldException e) {
+                    logger.debug("CSReport.reportFolder field not found in listener classloader");
+                }
+                
+                // Inject minimal report list if field exists
+                try {
+                    java.lang.reflect.Field reportField = csReportClass.getDeclaredField("report");
+                    reportField.setAccessible(true);
+                    Object currentValue = reportField.get(null);
+                    if (currentValue == null) {
+                        reportField.set(null, new java.util.ArrayList<>());
+                        logger.debug("Injected empty report list into listener CSReport");
+                    }
+                } catch (NoSuchFieldException e) {
+                    logger.debug("CSReport.report field not found in listener classloader");
+                }
+                
+            } catch (ClassNotFoundException e) {
+                // CSReport not used by this listener, skip
+                logger.debug("CSReport class not found in listener {} classloader", 
+                        entry.instance.getClass().getSimpleName());
+            } catch (Exception e) {
+                logger.warn("Failed to inject reportFolder into listener {}: {}", 
+                        entry.instance.getClass().getSimpleName(), e.getMessage());
+            }
+        }
+    }
+
     // ----- Test Suite hooks --------------------------------------------------
 
     public void invokeBeforeTestSuite(TestSuiteContext ctx) {
@@ -350,6 +411,32 @@ public class TestListenerRegistry {
                         for (com.katalan.core.logging.GroovySourceParser.StatementInfo stmt : statements) {
                             kwLogger.startKeyword(stmt.actionText, stmt.lineNumber, stepIndex++);
                             kwLogger.endKeyword(stmt.actionText);
+                        }
+                    }
+
+                    // Inject reportFolder into this specific listener's classloader RIGHT BEFORE invocation
+                    // This is critical because some listeners (like CSReport) create nested GroovyShells
+                    // that need access to the static reportFolder field
+                    if (lastInjectedReportFolder != null && entry.loader != null) {
+                        try {
+                            Class<?> csReportClass = entry.loader.loadClass("denstoo.reporting.CSReport");
+                            java.lang.reflect.Field reportFolderField = csReportClass.getDeclaredField("reportFolder");
+                            reportFolderField.setAccessible(true);
+                            reportFolderField.set(null, lastInjectedReportFolder);
+                            
+                            // Also inject report list if null
+                            try {
+                                java.lang.reflect.Field reportField = csReportClass.getDeclaredField("report");
+                                reportField.setAccessible(true);
+                                Object currentValue = reportField.get(null);
+                                if (currentValue == null) {
+                                    reportField.set(null, new java.util.ArrayList<>());
+                                }
+                            } catch (NoSuchFieldException ignored) {}
+                        } catch (ClassNotFoundException | NoSuchFieldException ignored) {
+                            // CSReport not used by this listener
+                        } catch (Exception e) {
+                            logger.debug("Failed to inject reportFolder before listener invocation: {}", e.getMessage());
                         }
                     }
 
