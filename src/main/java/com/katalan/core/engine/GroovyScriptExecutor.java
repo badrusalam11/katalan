@@ -131,6 +131,17 @@ public class GroovyScriptExecutor {
         
         config.addCompilationCustomizers(importCustomizer);
         
+        // Add keyword logging AST transformation
+        try {
+            com.katalan.core.engine.KeywordLoggingASTTransformation astTransform = 
+                    new com.katalan.core.engine.KeywordLoggingASTTransformation();
+            config.addCompilationCustomizers(
+                new org.codehaus.groovy.control.customizers.ASTTransformationCustomizer(astTransform)
+            );
+        } catch (Exception e) {
+            logger.warn("Could not add KeywordLoggingASTTransformation: {}", e.getMessage());
+        }
+        
         // Create class loader with project's keywords and libraries
         GroovyClassLoader classLoader = new GroovyClassLoader(getClass().getClassLoader(), config);
         

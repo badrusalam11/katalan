@@ -1,6 +1,7 @@
 package com.katalan.core.engine;
 
 import com.katalan.core.compat.GroovySourcePreprocessor;
+import com.katalan.core.logging.GroovySourceParser;
 import com.kms.katalon.core.annotation.AfterTestCase;
 import com.kms.katalon.core.annotation.AfterTestSuite;
 import com.kms.katalon.core.annotation.BeforeTestCase;
@@ -178,6 +179,21 @@ public class TestListenerRegistry {
             try {
                 Class<?> clazz = listenerLoader.parseClass(file.toFile());
                 Object instance = clazz.getDeclaredConstructor().newInstance();
+                
+                // Parse listener source to extract statement structure for detailed logging
+                try {
+                    Path originalFile = listenersDir.resolve(listenersWorkDir.relativize(file));
+                    if (Files.exists(originalFile)) {
+                        GroovySourceParser.parseListenerSource(
+                                originalFile.toString(),
+                                clazz.getName()
+                        );
+                    }
+                } catch (Exception parseEx) {
+                    logger.debug("Could not parse listener source for {}: {}", 
+                            clazz.getName(), parseEx.getMessage());
+                }
+                
                 listenerInstances.add(new Entry(instance, listenerLoader));
                 logger.info("Loaded Test Listener: {}", clazz.getName());
             } catch (Throwable t) {
@@ -314,6 +330,28 @@ public class TestListenerRegistry {
                 ClassLoader previousCL = currentThread.getContextClassLoader();
                 try {
                     currentThread.setContextClassLoader(entry.loader);
+                    
+                    // Get stored statements for this listener method
+                    String className = listener.getClass().getName();
+                    String methodName = method.getName();
+                    java.util.List<com.katalan.core.logging.GroovySourceParser.StatementInfo> statements =
+                        com.katalan.core.logging.GroovySourceParser.getListenerMethodStatements(className, methodName);
+                    
+                    com.katalan.core.logging.XmlKeywordLogger kwLogger = 
+                        com.katalan.core.logging.XmlKeywordLogger.getInstance();
+                    
+                    // Log listener method start
+                    String listenerAction = "listener action : " + methodName;
+                    kwLogger.startKeyword(listenerAction, null, null);
+                    
+                    // If we have statement-level details, log them BEFORE invoke
+                    if (statements != null && !statements.isEmpty()) {
+                        int stepIndex = 1;
+                        for (com.katalan.core.logging.GroovySourceParser.StatementInfo stmt : statements) {
+                            kwLogger.startKeyword(stmt.actionText, stmt.lineNumber, stepIndex++);
+                            kwLogger.endKeyword(stmt.actionText);
+                        }
+                    }
 
                     int paramCount = method.getParameterCount();
                     if (paramCount == 0) {
@@ -330,6 +368,10 @@ public class TestListenerRegistry {
                         logger.warn("Listener method {}#{} has unsupported arity {} - skipping",
                                 listener.getClass().getName(), method.getName(), paramCount);
                     }
+                    
+                    // Log listener method end
+                    kwLogger.endKeyword(listenerAction);
+                    
                     logger.debug("Invoked @{} on {}#{}",
                             annotationType.getSimpleName(),
                             listener.getClass().getName(), method.getName());

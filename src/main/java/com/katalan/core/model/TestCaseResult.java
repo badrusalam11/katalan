@@ -22,6 +22,9 @@ public class TestCaseResult {
     private List<String> screenshotPaths;
     private int retryAttempt;
     
+    // Console output captured during execution
+    private String consoleOutput;
+    
     // BDD-related fields
     private String featureFile;
     private String scenarioName;
@@ -341,5 +344,13 @@ public class TestCaseResult {
         public void setScreenshotPath(String screenshotPath) {
             this.screenshotPath = screenshotPath;
         }
+    }
+    
+    public String getConsoleOutput() {
+        return consoleOutput;
+    }
+    
+    public void setConsoleOutput(String consoleOutput) {
+        this.consoleOutput = consoleOutput;
     }
 }
