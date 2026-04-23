@@ -68,16 +68,6 @@ public class CucumberKW {
     public static int runFeatureFileWithTags(String featureFile, String tags) {
         logger.info("Running feature file: {} with tags: {}", featureFile, tags != null ? tags : "(none)");
         
-        // Mark current test case as BDD in the execution context
-        ExecutionContext ctx = ExecutionContext.getCurrent();
-        if (ctx != null) {
-            ctx.setProperty("isBddTest", true);
-            ctx.setProperty("featureFile", featureFile);
-            if (tags != null) {
-                ctx.setProperty("cucumberTags", tags);
-            }
-        }
-        
         Path projectPath = getProjectPath();
         if (projectPath == null) {
             logger.error("Project path not set. Cannot run feature file.");
@@ -89,6 +79,17 @@ public class CucumberKW {
         if (!Files.exists(featurePath)) {
             logger.error("Feature file not found: {}", featurePath);
             throw new RuntimeException("Feature file not found: " + featurePath);
+        }
+        
+        // Mark current test case as BDD in the execution context
+        // Store ABSOLUTE path (not relative)
+        ExecutionContext ctx = ExecutionContext.getCurrent();
+        if (ctx != null) {
+            ctx.setProperty("isBddTest", true);
+            ctx.setProperty("featureFile", featurePath.toString()); // Store absolute path
+            if (tags != null) {
+                ctx.setProperty("cucumberTags", tags);
+            }
         }
         
         // Find step definitions in Include/scripts/groovy

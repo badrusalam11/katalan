@@ -288,6 +288,19 @@ public class KatalanBDDExecutor {
     }
 
     /**
+     * Result of executing a scenario - contains steps and optional exception
+     */
+    private static class ScenarioExecutionResult {
+        final List<Map<String, Object>> steps;
+        final Exception exception;
+        
+        ScenarioExecutionResult(List<Map<String, Object>> steps, Exception exception) {
+            this.steps = steps;
+            this.exception = exception;
+        }
+    }
+    
+    /**
      * Execute a feature file
      */
     public int executeFeature(Path featurePath) throws IOException {
@@ -316,10 +329,12 @@ public class KatalanBDDExecutor {
             Map<String, Object> scenarioData = new LinkedHashMap<>();
             Instant scenarioStart = Instant.now();
             
-            try {
-                List<Map<String, Object>> stepDataList = executeScenario(scenario);
-                
-                // Build scenario data as TEST_CASE (Katalon structure)
+            // Execute scenario and get result with steps
+            ScenarioExecutionResult result = executeScenario(scenario);
+            List<Map<String, Object>> stepDataList = result.steps;
+            
+            if (result.exception == null) {
+                // Scenario passed - build success scenario data
                 scenarioData.put("entityId", "");
                 scenarioData.put("dataIterationName", "");
                 Map<String, Object> stats = new LinkedHashMap<>();
@@ -346,14 +361,14 @@ public class KatalanBDDExecutor {
                 scenarioData.put("logs", Collections.emptyList());
                 
                 logger.info("Scenario PASSED: {}", scenario.name);
-            } catch (Exception e) {
-                // Build failed scenario data
+            } else {
+                // Scenario failed - build failure scenario data with steps that were executed
                 scenarioData.put("entityId", "");
                 scenarioData.put("dataIterationName", "");
                 Map<String, Object> stats = new LinkedHashMap<>();
-                stats.put("total", 0);
-                stats.put("passed", 0);
-                stats.put("failed", 1);
+                stats.put("total", stepDataList.size());
+                stats.put("passed", (int) stepDataList.stream().filter(s -> "PASSED".equals(s.get("result"))).count());
+                stats.put("failed", (int) stepDataList.stream().filter(s -> "FAILED".equals(s.get("result"))).count());
                 stats.put("errored", 0);
                 stats.put("warned", 0);
                 stats.put("skipped", 0);
@@ -368,7 +383,7 @@ public class KatalanBDDExecutor {
                 scenarioData.put("result", "FAILED");
                 scenarioData.put("startTime", formatInstant(scenarioStart));
                 scenarioData.put("endTime", formatInstant(Instant.now()));
-                scenarioData.put("children", Collections.emptyList());
+                scenarioData.put("children", stepDataList); // Include all executed steps!
                 scenarioData.put("index", scenarioIndex++);
                 scenarioData.put("startIndex", 0);
                 
@@ -376,11 +391,11 @@ public class KatalanBDDExecutor {
                 Map<String, Object> errorLog = new LinkedHashMap<>();
                 errorLog.put("time", formatInstant(Instant.now()));
                 errorLog.put("level", "FAILED");
-                errorLog.put("message", e.getMessage());
+                errorLog.put("message", result.exception.getMessage());
                 errorLogs.add(errorLog);
                 scenarioData.put("logs", errorLogs);
                 
-                logger.error("Scenario FAILED: {} - {}", scenario.name, e.getMessage());
+                logger.error("Scenario FAILED: {} - {}", scenario.name, result.exception.getMessage());
                 failedCount++;
             }
             
@@ -388,16 +403,15 @@ public class KatalanBDDExecutor {
         }
         
         // Store hierarchical data in context for the report generator
-        logger.debug("Storing {} scenario results in context", scenarioDataList.size());
         context.setProperty("bddScenarioData", new ArrayList<>(scenarioDataList));
         
         return failedCount;
     }
     
     /**
-     * Execute a single scenario and return list of step data
+     * Execute a single scenario and return execution result with steps and exception (if any)
      */
-    private List<Map<String, Object>> executeScenario(Scenario scenario) {
+    private ScenarioExecutionResult executeScenario(Scenario scenario) {
         List<Map<String, Object>> stepDataList = new ArrayList<>();
         
         // Log BDD scenario start (Katalon-style)
@@ -406,16 +420,61 @@ public class KatalanBDDExecutor {
         kwLogger.startBddScenario(scenario.name, currentFeatureName != null ? currentFeatureName : "Unknown Feature", scenario.lineNumber, scenarioUuid);
         
         int stepIndex = 0;
+        Exception failedException = null;
+        boolean scenarioFailed = false;
         
         for (Step step : scenario.steps) {
-            Map<String, Object> stepData = executeStep(step, stepIndex++);
+            Map<String, Object> stepData;
+            
+            if (scenarioFailed) {
+                // Previous step failed - mark remaining steps as SKIPPED
+                stepData = createSkippedStepData(step, stepIndex++);
+            } else {
+                // executeStep now always returns step data (never throws)
+                stepData = executeStep(step, stepIndex++);
+                
+                // Check if step failed
+                String result = (String) stepData.get("result");
+                if ("FAILED".equals(result)) {
+                    // Step failed - mark scenario as failed and skip remaining steps
+                    String stepName = step.keyword + " " + step.text;
+                    String errorMsg = "Step failed: " + stepName;
+                    
+                    // Extract error message from logs if available
+                    @SuppressWarnings("unchecked")
+                    List<Map<String, Object>> logs = (List<Map<String, Object>>) stepData.get("logs");
+                    if (logs != null && !logs.isEmpty()) {
+                        Object msg = logs.get(0).get("message");
+                        if (msg != null) {
+                            errorMsg = msg.toString();
+                        }
+                    }
+                    
+                    failedException = new RuntimeException(errorMsg);
+                    scenarioFailed = true; // Mark to skip remaining steps
+                }
+            }
+            
             stepDataList.add(stepData);
         }
         
         // Log BDD scenario end
         kwLogger.endBddScenario(scenario.name);
         
-        return stepDataList;
+        return new ScenarioExecutionResult(stepDataList, failedException);
+    }
+    
+    /**
+     * Create step data for skipped step
+     */
+    private Map<String, Object> createSkippedStepData(Step step, int stepIndex) {
+        Map<String, Object> stepData = new LinkedHashMap<>();
+        stepData.put("name", step.keyword + " " + step.text);
+        stepData.put("result", "SKIPPED");
+        stepData.put("startTime", Instant.now().toString());
+        stepData.put("endTime", Instant.now().toString());
+        stepData.put("logs", new ArrayList<>());
+        return stepData;
     }
     
     /**
@@ -458,7 +517,8 @@ public class KatalanBDDExecutor {
             logs.add(log);
             stepData.put("logs", logs);
             
-            throw new RuntimeException("No step definition found for: " + step.keyword + " " + stepName);
+            // Return step data instead of throwing - let caller handle the failure
+            return stepData;
         }
         
         try {
@@ -531,7 +591,9 @@ public class KatalanBDDExecutor {
                     logger.error("      at {}", trace[i]);
                 }
             }
-            throw new RuntimeException("Step failed: " + step.keyword + " " + stepName + " - " + rootMsg, e);
+            
+            // Return step data instead of throwing - let caller handle the failure
+            return stepData;
         }
     }
     

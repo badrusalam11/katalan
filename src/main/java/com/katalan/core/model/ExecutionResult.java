@@ -52,7 +52,11 @@ public class ExecutionResult {
         recalculateTotals();
     }
     
-    private void recalculateTotals() {
+    /**
+     * Recalculate execution totals by summing up all suite results.
+     * Should be called after test cases are added to suite results.
+     */
+    public void recalculateTotals() {
         this.totalTests = 0;
         this.passedTests = 0;
         this.failedTests = 0;
