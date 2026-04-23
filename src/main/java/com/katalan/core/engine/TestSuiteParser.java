@@ -129,8 +129,8 @@ public class TestSuiteParser {
                 
                 if (groovyScript != null) {
                     TestCase testCase = new TestCase();
-                    testCase.setName(testCaseId);
-                    testCase.setId(testCaseId);
+                    testCase.setName(relativePath);  // Use relativePath (without prefix) for console log
+                    testCase.setId(testCaseId);  // Keep full ID with prefix for testCaseBinding
                     testCase.setScriptPath(groovyScript);
                     testCase.setScriptContent(Files.readString(groovyScript));
                     return testCase;
@@ -160,9 +160,15 @@ public class TestSuiteParser {
         if (name == null) {
             name = extractTestCaseName(testCaseId);
         }
-        // Use full testCaseId as name for proper report display
-        testCase.setName(testCaseId);
-        testCase.setId(testCaseId);
+        
+        // Strip "Test Cases/" prefix from testCaseId to get relative path for console log
+        String testCaseName = testCaseId;
+        if (testCaseName.startsWith("Test Cases/")) {
+            testCaseName = testCaseName.substring("Test Cases/".length());
+        }
+        
+        testCase.setName(testCaseName);  // Use relative path (without prefix) for console log
+        testCase.setId(testCaseId);  // Keep full ID with prefix for testCaseBinding
         testCase.setDescription(getElementText(root, "description"));
         
         // Parse variables from .tc file

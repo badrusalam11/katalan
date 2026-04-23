@@ -283,7 +283,7 @@ public class KatalanCLI implements Callable<Integer> {
             seconds = seconds % 60;
             
             if (minutes < 60) {
-                return String.format("%dm %ds", minutes, seconds);
+               return String.format("%dm %ds", minutes, seconds);
             }
             
             long hours = minutes / 60;

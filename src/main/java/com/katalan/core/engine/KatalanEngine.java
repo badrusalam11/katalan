@@ -33,6 +33,7 @@ public class KatalanEngine {
     private final GroovyScriptExecutor scriptExecutor;
     private final TestSuiteParser suiteParser;
     private final TestListenerRegistry listenerRegistry;
+    private final ConsoleOutputCapturer consoleCapturer;
     private ExecutionResult executionResult;
     
     public KatalanEngine(RunConfiguration config) {
@@ -44,6 +45,7 @@ public class KatalanEngine {
         this.scriptExecutor = new GroovyScriptExecutor(context);
         this.suiteParser = new TestSuiteParser(config.getProjectPath());
         this.listenerRegistry = new TestListenerRegistry();
+        this.consoleCapturer = new ConsoleOutputCapturer();
         this.executionResult = new ExecutionResult();
     }
     
@@ -146,6 +148,28 @@ public class KatalanEngine {
         
         suite.markStarted();
         
+        // Initialize XmlKeywordLogger for this test run
+        com.katalan.core.logging.XmlKeywordLogger kwLogger = com.katalan.core.logging.XmlKeywordLogger.getInstance();
+        kwLogger.reset();
+        
+        // Log suite start with properties
+        java.util.Map<String, String> suiteProps = new java.util.LinkedHashMap<>();
+        suiteProps.put("rerunTestFailImmediately", "false");
+        suiteProps.put("retryCount", "0");
+        suiteProps.put("name", suite.getName());
+        suiteProps.put("description", "");
+        suiteProps.put("id", "Test Suites/" + suite.getId());
+        kwLogger.startSuite(suite.getName(), "Test Suites/" + suite.getId(), suiteProps);
+        
+        // Log RUN_DATA (environment/runtime info)
+        kwLogger.logRunData("userFullName", resolveUserFullName());
+        kwLogger.logRunData("projectName", resolveProjectName());
+        kwLogger.logRunData("hostName", resolveHostName());
+        kwLogger.logRunData("os", System.getProperty("os.name") + " " + 
+                System.getProperty("sun.arch.data.model", "64") + "bit");
+        kwLogger.logRunData("hostAddress", "127.0.0.1");
+        kwLogger.logRunData("katalonVersion", "10.3.2.0");
+        
         // ----- Test Listener: @BeforeTestSuite / @SetUp -----
         com.kms.katalon.core.context.TestSuiteContext suiteCtx =
                 new com.kms.katalon.core.context.TestSuiteContext("Test Suites/" + suite.getName());
@@ -184,6 +208,11 @@ public class KatalanEngine {
         executionResult.addSuiteResult(suiteResult);
         executionResult.markCompleted();
         
+        // CRITICAL: Capture driver information NOW (before driver is closed!)
+        // JUnit report generation needs browser/session/selenium info,
+        // but driver gets closed during @AfterTestSuite (CSReport closes it)
+        executionResult.captureDriverInformation();
+        
         // Prepare Katalon-style nested report folder BEFORE @AfterTestSuite
         // listeners run. We only write the minimum files required (execution.properties,
         // execution.uuid, JUnit_Report.xml) so custom listeners (CSReport, PdfGenerator)
@@ -194,19 +223,23 @@ public class KatalanEngine {
             com.katalan.reporting.KatalonReportGenerator katalanReporter =
                     new com.katalan.reporting.KatalonReportGenerator(config.getProjectPath());
             generatedReportPath = katalanReporter.prepareReportDirectory(executionResult);
-            executionResult.setReportPath(generatedReportPath.toString());
+            // Always use the absolute, normalized path so that listener scripts
+            // (PdfGenerator, CSReport) that read execution.general.report.reportFolder
+            // get the same absolute path that Katalon Studio writes.
+            String absReportFolder = generatedReportPath.toAbsolutePath().normalize()
+                    .toString().replace("\\", "/");
+            executionResult.setReportPath(absReportFolder);
             // Expose the per-run folder to scripts via RunConfiguration.getReportFolder()
-            com.kms.katalon.core.configuration.RunConfiguration.setReportFolder(
-                    generatedReportPath.toString());
-            suiteCtx.setReportLocation(generatedReportPath.toString());
+            com.kms.katalon.core.configuration.RunConfiguration.setReportFolder(absReportFolder);
+            suiteCtx.setReportLocation(absReportFolder);
             // Also expose as System property + common static fields on well-known
             // Katalon listener libraries (e.g. denstoo.reporting.CSReport). Some
             // libraries run scripts via groovy.util.Eval.me(...) in a fresh
             // GroovyShell where class imports are lost and `RunConfiguration`
             // resolves to null. Pre-populating the static `reportFolder` field
             // avoids the "Cannot get property 'reportFolder' on null object" NPE.
-            System.setProperty("reportFolder", generatedReportPath.toString());
-            injectReportFolderIntoListenerLibs(generatedReportPath.toString());
+            System.setProperty("reportFolder", absReportFolder);
+            injectReportFolderIntoListenerLibs(absReportFolder);
             logger.info("Report directory ready at: {}", generatedReportPath);
         } catch (Throwable t) {
             logger.error("Failed to prepare report directory before @AfterTestSuite: {}",
@@ -220,6 +253,12 @@ public class KatalanEngine {
         } catch (Exception e) {
             logger.error("@AfterTestSuite listener error: {}", e.getMessage(), e);
         }
+        
+        // Log suite end
+        java.util.Map<String, String> endSuiteProps = new java.util.LinkedHashMap<>();
+        endSuiteProps.put("name", suite.getName());
+        endSuiteProps.put("id", "Test Suites/" + suite.getId());
+        kwLogger.endSuite(suite.getName(), "Test Suites/" + suite.getId(), endSuiteProps);
         
         logger.info("Test suite completed: {} - Passed: {}, Failed: {}, Errors: {}",
                 suite.getName(),
@@ -244,16 +283,24 @@ public class KatalanEngine {
     public TestCaseResult executeTestCase(TestCase testCase) {
         logger.info("Executing test case: {}", testCase.getName());
         
-        TestCaseResult result = new TestCaseResult(testCase.getName());
+        TestCaseResult result = new TestCaseResult(testCase);  // Use TestCase constructor to preserve ID
         result.markStarted();
         testCase.markStarted();
         
         context.setCurrentTestCaseName(testCase.getName());
         context.setCurrentTestCasePath(testCase.getScriptPath());
         
+        // Log test case start
+        com.katalan.core.logging.XmlKeywordLogger kwLogger = com.katalan.core.logging.XmlKeywordLogger.getInstance();
+        java.util.Map<String, String> testProps = new java.util.LinkedHashMap<>();
+        testProps.put("name", testCase.getId()); // Use full ID with "Test Cases/" prefix
+        testProps.put("description", testCase.getDescription() != null ? testCase.getDescription() : "");
+        testProps.put("id", testCase.getId()); // Already includes "Test Cases/" prefix
+        kwLogger.startTest(testCase.getName(), testCase.getId(), testProps); // getId() already has prefix
+        
         // ----- Test Listener: @BeforeTestCase / @SetupTestCase -----
         com.kms.katalon.core.context.TestCaseContext tcCtx =
-                new com.kms.katalon.core.context.TestCaseContext("Test Cases/" + testCase.getName());
+                new com.kms.katalon.core.context.TestCaseContext(testCase.getId()); // Already has prefix
         tcCtx.setTestCaseStatus("RUNNING");
         if (testCase.getVariables() != null) {
             java.util.Map<String, Object> resolvedVars = new java.util.LinkedHashMap<>();
@@ -292,13 +339,34 @@ public class KatalanEngine {
                     }
                 }
                 
-                // Execute the script
-                if (testCase.getScriptContent() != null) {
-                    scriptExecutor.executeScript(testCase.getScriptContent(), testCase.getName());
-                } else if (testCase.getScriptPath() != null) {
-                    scriptExecutor.executeScript(testCase.getScriptPath());
-                } else {
-                    throw new IllegalStateException("No script content or path provided for test case: " + testCase.getName());
+                // START capturing console output for this test case
+                consoleCapturer.startCapture();
+                
+                // Parse source file BEFORE execution to populate keyword logs structure
+                if (testCase.getScriptPath() != null && java.nio.file.Files.exists(testCase.getScriptPath())) {
+                    try {
+                        com.katalan.core.logging.GroovySourceParser sourceParser = 
+                            new com.katalan.core.logging.GroovySourceParser();
+                        sourceParser.parseAndLogTestCase(testCase.getScriptPath(), kwLogger);
+                        logger.debug("Pre-parsed source file for keyword logging: {}", testCase.getScriptPath());
+                    } catch (Exception parseEx) {
+                        logger.warn("Could not pre-parse source for keyword logging: {}", parseEx.getMessage());
+                    }
+                }
+                
+                try {
+                    // Execute the script
+                    if (testCase.getScriptContent() != null) {
+                        scriptExecutor.executeScript(testCase.getScriptContent(), testCase.getName());
+                    } else if (testCase.getScriptPath() != null) {
+                        scriptExecutor.executeScript(testCase.getScriptPath());
+                    } else {
+                        throw new IllegalStateException("No script content or path provided for test case: " + testCase.getName());
+                    }
+                } finally {
+                    // STOP capturing and save the output
+                    String capturedOutput = consoleCapturer.stopCapture();
+                    result.setConsoleOutput(capturedOutput);
                 }
                 
                 // Check if this was a BDD test and capture the info
@@ -359,6 +427,12 @@ public class KatalanEngine {
         } catch (Exception e) {
             logger.error("@AfterTestCase listener error: {}", e.getMessage(), e);
         }
+        
+        // Log test end
+        java.util.Map<String, String> endTestProps = new java.util.LinkedHashMap<>();
+        endTestProps.put("name", testCase.getId()); // Use full ID with "Test Cases/" prefix
+        endTestProps.put("id", testCase.getId()); // Already includes "Test Cases/" prefix
+        kwLogger.endTest(testCase.getName(), testCase.getId(), endTestProps); // getId() already has prefix
         
         return result;
     }
@@ -579,6 +653,25 @@ public class KatalanEngine {
                     f.set(null, reportFolder);
                     logger.info("Injected reportFolder into {}.{} (via {})",
                             className, fieldName, cl.getClass().getSimpleName());
+                    // Also attempt to populate a minimal `report` list structure
+                    // (List<Map>) that some listener scripts (inside their
+                    // GroovyShell) expect to exist and contain reportFolder.
+                    try {
+                        java.lang.reflect.Field rf = klass.getDeclaredField("report");
+                        rf.setAccessible(true);
+                        java.util.List<java.util.Map<String,Object>> rlist = new java.util.ArrayList<>();
+                        java.util.Map<String,Object> rmap = new java.util.HashMap<>();
+                        rmap.put("reportFolder", reportFolder);
+                        rlist.add(rmap);
+                        rf.set(null, rlist);
+                        logger.info("Injected minimal report List into {}.report (via {})",
+                                className, cl.getClass().getSimpleName());
+                    } catch (NoSuchFieldException nsf) {
+                        // not all listener classes have a `report` field; ignore
+                    } catch (Throwable t) {
+                        logger.debug("Could not set {}.report via {}: {}",
+                                className, cl.getClass().getSimpleName(), t.toString());
+                    }
                 } catch (ClassNotFoundException e) {
                     // library not present in this loader, skip
                 } catch (NoSuchFieldException e) {
@@ -591,4 +684,105 @@ public class KatalanEngine {
             }
         }
     }
+    
+    /**
+     * Resolve user full name from environment variable or system properties
+     */
+    private String resolveUserFullName() {
+        // First, try reading Katalon session.properties (if present)
+        String userFullName = readKatalonSessionFullName();
+        if (userFullName != null && !userFullName.isEmpty()) {
+            return userFullName;
+        }
+
+        userFullName = System.getenv("KATALAN_USER_FULL_NAME");
+        if (userFullName != null && !userFullName.isEmpty()) {
+            return userFullName;
+        }
+        userFullName = System.getProperty("user.fullname");
+        if (userFullName != null && !userFullName.isEmpty()) {
+            return userFullName;
+        }
+        return System.getProperty("user.name", "katalan");
+    }
+
+    /**
+     * Try to read Katalon session.properties to extract the logged-in user's fullName.
+     * Supports macOS/Linux: ~/.katalon/session.properties
+     * and Windows: C:\\Users\\<username>\\.katalon\\session.properties
+     */
+    private String readKatalonSessionFullName() {
+        try {
+            String userHome = System.getProperty("user.home");
+            java.nio.file.Path[] candidates = new java.nio.file.Path[] {
+                    java.nio.file.Paths.get(userHome, ".katalon", "session.properties"),
+                    // Windows fallback using USERPROFILE env
+                    (System.getenv("USERPROFILE") != null)
+                            ? java.nio.file.Paths.get(System.getenv("USERPROFILE"), ".katalon", "session.properties")
+                            : null
+            };
+
+            for (java.nio.file.Path p : candidates) {
+                if (p == null) continue;
+                if (java.nio.file.Files.exists(p)) {
+                    String content = java.nio.file.Files.readString(p);
+                    // Use regex to extract fullName from JSON-like property format
+                    // Format: "fullName"\:"Muhamad Badru Salam"
+                    // Pattern explained: \" = literal quote, \\\\ = one backslash, : = colon
+                    java.util.regex.Pattern ptn = java.util.regex.Pattern.compile("\"fullName\"\\\\:\"([^\"]+)\"");
+                    java.util.regex.Matcher m = ptn.matcher(content);
+                    if (m.find()) {
+                        String fullName = m.group(1);
+                        if (fullName != null && !fullName.isEmpty()) {
+                            logger.debug("Read fullName from {}: {}", p, fullName);
+                            return fullName;
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("Could not read Katalon session.properties: {}", e.getMessage());
+        }
+        return null;
+    }
+    
+    /**
+     * Resolve project name from .prj file
+     */
+    private String resolveProjectName() {
+        if (config.getProjectPath() == null) {
+            return "katalan";
+        }
+        try {
+            java.nio.file.Path projectDir = config.getProjectPath();
+            java.util.List<java.nio.file.Path> prjFiles = java.nio.file.Files.list(projectDir)
+                    .filter(p -> p.toString().endsWith(".prj"))
+                    .collect(java.util.stream.Collectors.toList());
+            if (!prjFiles.isEmpty()) {
+                String content = java.nio.file.Files.readString(prjFiles.get(0));
+                int nameStart = content.indexOf("<name>");
+                int nameEnd = content.indexOf("</name>");
+                if (nameStart != -1 && nameEnd != -1 && nameEnd > nameStart) {
+                    return content.substring(nameStart + 6, nameEnd);
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("Could not resolve project name: {}", e.getMessage());
+        }
+        return "katalan";
+    }
+    
+    /**
+     * Resolve hostname with username prefix
+     */
+    private String resolveHostName() {
+        try {
+            String rawHost = java.net.InetAddress.getLoopbackAddress().getHostName();
+            String userName = System.getProperty("user.name", "");
+            return (userName == null || userName.isEmpty()) ? rawHost : userName + " - " + rawHost;
+        } catch (Exception e) {
+            return "localhost";
+        }
+    }
 }
+

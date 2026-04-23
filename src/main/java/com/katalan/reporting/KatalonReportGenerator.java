@@ -58,9 +58,24 @@ public class KatalonReportGenerator {
     private static final DateTimeFormatter ISO_TIMESTAMP_FORMATTER = DateTimeFormatter
             .ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSXXX")
             .withZone(ZoneId.systemDefault());
+
+    // ISO-8601 UTC timestamp (e.g. 2026-04-22T04:08:50.006Z) — used for
+    // the JUnit <testsuite timestamp="..."> attribute, matching Katalon's format.
+    private static final DateTimeFormatter JUNIT_ISO_UTC_TIMESTAMP_FORMATTER = DateTimeFormatter
+            .ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
+            .withZone(ZoneId.of("UTC"));
+
+    // ISO-8601 UTC timestamp with microsecond precision (e.g. 2026-04-21T05:55:04.241869Z)
+    // — used for <date> inside execution0.log <record> elements (Katalon XmlKeywordLogger format).
+    private static final DateTimeFormatter LOG_RECORD_DATE_FORMATTER = DateTimeFormatter
+            .ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSSSS'Z'")
+            .withZone(ZoneId.of("UTC"));
+
+    // Katalon XmlKeywordLogger class name, emitted as <class> in every record.
+    private static final String LOG_RECORD_CLASS = "com.kms.katalon.core.logging.XmlKeywordLogger";
     
     private final Path projectPath;
-    private final String katalanVersion = "1.0.0";
+    private final String katalanVersion = "10.3.2.0";  // Match Katalon Studio version exactly
     private Path currentReportDir;
     
     public KatalonReportGenerator(Path projectPath) {
@@ -172,11 +187,11 @@ public class KatalonReportGenerator {
         // Generate all report files
         generateHtmlReport(reportDir, timestamp, result);
         generateCsvReport(reportDir, timestamp, result);
-        generateJUnitReport(reportDir, result);
         generateExecutionProperties(reportDir, result, suiteRelative);
         generateExecutionUuid(reportDir);
-        generateConsoleLog(reportDir, result);
+        generateConsoleLog(reportDir, result);  // Generate console FIRST
         generateExecutionLog(reportDir, result);
+        generateJUnitReport(reportDir, result);  // Generate JUnit AFTER console so we can read it
         generateTestCaseBinding(reportDir, result);
         generateTscIdFile(reportDir);
         
@@ -490,53 +505,128 @@ public class KatalonReportGenerator {
     }
     
     /**
-     * Generate JUnit XML report
+     * Generate JUnit XML report (Katalon-compatible format)
      */
     private void generateJUnitReport(Path reportDir, ExecutionResult result) throws IOException {
         StringBuilder xml = new StringBuilder();
-        
+
         xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-        
-        String suiteName = result.getSuiteResults().isEmpty() ? "Test Suite" 
+
+        String suiteName = result.getSuiteResults().isEmpty() ? "Test Suite"
                 : result.getSuiteResults().get(0).getSuiteName();
-        
+
         double totalTime = result.getDuration() != null ? result.getDuration().toMillis() / 1000.0 : 0;
-        
+
         xml.append("<testsuites name=\"").append(escapeXml(suiteName)).append("\" ");
         xml.append("time=\"").append(String.format("%.3f", totalTime)).append("\" ");
         xml.append("tests=\"").append(result.getTotalTests()).append("\" ");
         xml.append("failures=\"").append(result.getFailedTests()).append("\" ");
         xml.append("errors=\"").append(result.getErrorTests()).append("\">\n");
-        
+
+        // Pre-compute shared values used by properties block
+        String suiteRelative = resolveSuiteRelativePath(result);
+        String suiteId = "Test Suites/" + suiteRelative;
+        String reportFolder = reportDir.toAbsolutePath().normalize().toString().replace("\\", "/");
+        String logFiles = reportFolder + "/execution0.log, " + reportFolder + "/console0.log";
+        String rawHost = getHostname();
+        String userName = System.getProperty("user.name", "");
+        String hostNameProp = (userName == null || userName.isEmpty())
+                ? rawHost
+                : userName + " - " + rawHost;
+        String hostAddress = getHostAddress();
+        String osBitness = System.getProperty("sun.arch.data.model", "64") + "bit";
+        String osLabel = System.getProperty("os.name") + " " + osBitness;
+
         for (TestSuiteResult suiteResult : result.getSuiteResults()) {
             double suiteTime = suiteResult.getDuration() != null ? suiteResult.getDuration().toMillis() / 1000.0 : 0;
-            
+
             xml.append("   <testsuite name=\"").append(escapeXml(suiteResult.getSuiteName())).append("\" ");
             xml.append("tests=\"").append(suiteResult.getTotalTests()).append("\" ");
             xml.append("failures=\"").append(suiteResult.getFailedTests()).append("\" ");
             xml.append("errors=\"").append(suiteResult.getErrorTests()).append("\" ");
             xml.append("time=\"").append(String.format("%.3f", suiteTime)).append("\" ");
             xml.append("skipped=\"").append(suiteResult.getSkippedTests()).append("\" ");
-            xml.append("timestamp=\"").append(JUNIT_TIMESTAMP_FORMATTER.format(suiteResult.getStartTime())).append("\" ");
-            xml.append("hostname=\"").append(escapeXml(getHostname())).append("\" ");
-            xml.append("id=\"").append(escapeXml(suiteResult.getSuiteId())).append("\">\n");
-            
-            // Properties
+            xml.append("timestamp=\"")
+               .append(JUNIT_ISO_UTC_TIMESTAMP_FORMATTER.format(suiteResult.getStartTime()))
+               .append("\" ");
+            xml.append("hostname=\"").append(escapeXml(hostNameProp)).append("\" ");
+            xml.append("id=\"").append(escapeXml(suiteId)).append("\">\n");
+
+            // Properties (Katalon-compatible layout - EXACT order from Katalon 10.3.2)
             xml.append("      <properties>\n");
-            xml.append("         <property name=\"os\" value=\"").append(escapeXml(System.getProperty("os.name"))).append("\"/>\n");
-            xml.append("         <property name=\"katalanVersion\" value=\"").append(katalanVersion).append("\"/>\n");
-            xml.append("         <property name=\"browser\" value=\"").append(escapeXml(result.getBrowserName() != null ? result.getBrowserName() : "Chrome")).append("\"/>\n");
-            xml.append("         <property name=\"platform\" value=\"").append(escapeXml(System.getProperty("os.name"))).append("\"/>\n");
-            xml.append("      </properties>\n");
+            xml.append("         <property name=\"deviceName\" value=\"\"/>\n");
+            xml.append("         <property name=\"devicePlatform\"/>\n");
+            xml.append("         <property name=\"logFolder\" value=\"")
+               .append(escapeXml(reportFolder)).append("\"/>\n");
+            xml.append("         <property name=\"logFiles\" value=\"")
+               .append(escapeXml(logFiles)).append("\"/>\n");
+            xml.append("         <property name=\"attachments\" value=\"\"/>\n");
             
+            // userFullName comes BEFORE hostName in Katalon
+            xml.append("         <property name=\"userFullName\" value=\"")
+               .append(escapeXml(resolveUserFullName())).append("\"/>\n");
+            
+            xml.append("         <property name=\"hostName\" value=\"")
+               .append(escapeXml(hostNameProp)).append("\"/>\n");
+            xml.append("         <property name=\"hostAddress\" value=\"")
+               .append(escapeXml(hostAddress)).append("\"/>\n");
+            xml.append("         <property name=\"projectName\" value=\"")
+               .append(escapeXml(resolveProjectName())).append("\"/>\n");
+            xml.append("         <property name=\"os\" value=\"")
+               .append(escapeXml(osLabel)).append("\"/>\n");
+            xml.append("         <property name=\"katalonVersion\" value=\"")
+               .append(escapeXml(katalanVersion)).append("\"/>\n");
+            
+            // Browser version (e.g. "Chrome 147.0.7727.57") - from ExecutionResult
+            String browserInfo = getBrowserInfo(result);
+            if (browserInfo != null && !browserInfo.isEmpty()) {
+                xml.append("         <property name=\"browser\" value=\"")
+                   .append(escapeXml(browserInfo)).append("\"/>\n");
+            }
+            
+            // SessionId (WebDriver session ID from ExecutionResult)
+            String sessionId = result.getSessionId();
+            if (sessionId != null && !sessionId.isEmpty()) {
+                xml.append("         <property name=\"sessionId\" value=\"")
+                   .append(escapeXml(sessionId)).append("\"/>\n");
+            }
+            
+            // Selenium version - from ExecutionResult
+            if (browserInfo != null && !browserInfo.isEmpty()) {
+                String seleniumVer = result.getSeleniumVersion();
+                if (seleniumVer != null && !seleniumVer.isEmpty()) {
+                    xml.append("         <property name=\"seleniumVersion\" value=\"")
+                       .append(escapeXml(seleniumVer)).append("\"/>\n");
+                }
+            }
+            
+            // Proxy information - from ExecutionResult
+            String proxyInfo = result.getProxyInformation();
+            if (proxyInfo != null && !proxyInfo.isEmpty()) {
+                xml.append("         <property name=\"proxyInformation\" value=\"")
+                   .append(escapeXml(proxyInfo)).append("\"/>\n");
+            }
+            
+            // Platform (e.g. "Mac OS X") - from ExecutionResult
+            String platformName = result.getPlatformName();
+            if (platformName != null && !platformName.isEmpty()) {
+                xml.append("         <property name=\"platform\" value=\"")
+                   .append(escapeXml(platformName)).append("\"/>\n");
+            }
+            
+            xml.append("      </properties>\n");
+
             for (TestCaseResult tcResult : suiteResult.getTestCaseResults()) {
                 double tcTime = tcResult.getDuration().toMillis() / 1000.0;
                 
-                xml.append("      <testcase name=\"").append(escapeXml(tcResult.getTestCaseName())).append("\" ");
+                // Use testCaseId (full path with "Test Cases/" prefix) for JUnit XML
+                String testCaseFullPath = tcResult.getTestCaseId();
+
+                xml.append("      <testcase name=\"").append(escapeXml(testCaseFullPath)).append("\" ");
                 xml.append("time=\"").append(String.format("%.3f", tcTime)).append("\" ");
-                xml.append("classname=\"").append(escapeXml(tcResult.getTestCaseName())).append("\" ");
+                xml.append("classname=\"").append(escapeXml(testCaseFullPath)).append("\" ");
                 xml.append("status=\"").append(tcResult.getStatus()).append("\">\n");
-                
+
                 if (tcResult.getStatus() == TestCase.TestCaseStatus.FAILED) {
                     xml.append("         <failure message=\"").append(escapeXml(tcResult.getErrorMessage())).append("\">\n");
                     if (tcResult.getStackTrace() != null) {
@@ -544,126 +634,209 @@ public class KatalonReportGenerator {
                     }
                     xml.append("         </failure>\n");
                 } else if (tcResult.getStatus() == TestCase.TestCaseStatus.ERROR) {
-                    xml.append("         <error message=\"").append(escapeXml(tcResult.getErrorMessage())).append("\">\n");
-                    if (tcResult.getStackTrace() != null) {
-                        xml.append(escapeXml(tcResult.getStackTrace())).append("\n");
+                    // Katalon format: "Test Cases/X FAILED.\nReason:\n<error>\n<stacktrace>"
+                    // Build full error message with stack trace
+                    StringBuilder fullError = new StringBuilder();
+                    fullError.append(testCaseFullPath).append(" FAILED.\n");
+                    fullError.append("Reason:\n");
+                    
+                    // Extract root cause from stack trace (skip RuntimeException wrapper)
+                    String errorMsg = tcResult.getErrorMessage();
+                    String stackTrace = tcResult.getStackTrace();
+                    
+                    // If error message starts with "Script execution failed:", extract the actual error
+                    if (errorMsg != null && errorMsg.startsWith("Script execution failed: ")) {
+                        errorMsg = errorMsg.substring("Script execution failed: ".length());
                     }
-                    xml.append("         </error>\n");
+                    
+                    if (errorMsg != null) {
+                        fullError.append(errorMsg);
+                    }
+                    
+                    // Extract "Caused by:" section from stack trace if present
+                    if (stackTrace != null && !stackTrace.isEmpty()) {
+                        if (errorMsg != null && !errorMsg.endsWith("\n")) {
+                            fullError.append("\n");
+                        }
+                        
+                        // Find "Caused by:" section which contains the real root cause
+                        if (stackTrace.contains("Caused by: ")) {
+                            String causedBySection = stackTrace.substring(stackTrace.indexOf("Caused by: "));
+                            fullError.append(causedBySection);
+                        } else {
+                            fullError.append(stackTrace);
+                        }
+                    }
+                    
+                    // Escape XML and encode newlines as &#xa;
+                    String finalErrorMsg = escapeXml(fullError.toString()).replace("\n", "&#xa;");
+                    xml.append("         <error type=\"ERROR\" message=\"").append(finalErrorMsg).append("\"/>\n");
                 } else if (tcResult.getStatus() == TestCase.TestCaseStatus.SKIPPED) {
                     xml.append("         <skipped/>\n");
                 }
+
+                // Build testcase log once to reuse for system-out and system-err
+                String testCaseLog = buildTestCaseLog(tcResult);
                 
                 // System output (test steps log)
                 xml.append("         <system-out><![CDATA[");
-                xml.append(buildTestCaseLog(tcResult));
+                xml.append(testCaseLog);
                 xml.append("]]></system-out>\n");
                 
+                // System error: For ERROR testcases, extract only ERROR-level lines from log
+                // (Katalon duplicates error content in system-err)
+                xml.append("         <system-err><![CDATA[");
+                if (tcResult.getStatus() == TestCase.TestCaseStatus.ERROR) {
+                    xml.append(extractErrorLines(testCaseLog));
+                }
+                xml.append("]]></system-err>\n");
+
                 xml.append("      </testcase>\n");
             }
+
+            // Suite-level <system-out>/<system-err> (Katalon emits listener logs
+            // here, e.g. beforeSuite/afterTestSuite actions). We emit at minimum
+            // the TEST_SUITE status marker in the same format so downstream
+            // tooling can parse it.
+            String suiteLog = buildSuiteLog(suiteResult);
+            xml.append("      <system-out><![CDATA[");
+            xml.append(suiteLog);
+            xml.append("]]></system-out>\n");
             
+            // Suite system-err: Extract ERROR-level lines from suite log
+            xml.append("      <system-err><![CDATA[");
+            xml.append(extractErrorLines(suiteLog));
+            xml.append("]]></system-err>\n");
+
             xml.append("   </testsuite>\n");
         }
-        
+
         xml.append("</testsuites>\n");
-        
+
         Files.writeString(reportDir.resolve("JUnit_Report.xml"), xml.toString());
     }
     
     /**
-     * Generate execution.properties file (JSON format, matching Katalon Studio).
-     * Despite the .properties extension, Katalon writes this file as JSON and
-     * custom scripts (e.g. PdfGenerator, CSReport) parse it with JsonSlurper.
-     *
-     * Structure (flat at top level — this is what Katalon scripts expect):
-     * <pre>
-     * {
-     *   "reportFolder": "/abs/path/Reports/&lt;ts&gt;/&lt;Suite&gt;/&lt;ts&gt;",
-     *   "projectDir": "/abs/path",
-     *   "projectName": "myProject",
-     *   "hostName": "...", "os": "...", "hostAddress": "...",
-     *   "Name": "Chrome", "browserType": "Chrome",
-     *   "executedEntity": "TestSuite",
-     *   "id": "Test Suites/&lt;name&gt;",
-     *   "name": "&lt;name&gt;",
-     *   "source": "/abs/path/Test Suites/&lt;name&gt;.ts",
-     *   "timeout": 30, "actionDelay": 0, "defaultFailureHandling": "STOP_ON_FAILURE",
-     *   "katalon.versionNumber": "...",
-     *   "runningMode": "CLI",
-     *   "execution": { "general": { ... } },
-     *   "host": { ... }
-     * }
-     * </pre>
+     * Generate execution.properties file (JSON format, matching Katalon Studio 10.3.2).
+     * Despite the .properties extension, Katalon writes this file as JSON.
+     * Custom scripts (PdfGenerator, CSReport) parse it with JsonSlurper.
+     * 
+     * CRITICAL: Property order MUST match Katalon exactly for compatibility.
      */
     private void generateExecutionProperties(Path reportDir, ExecutionResult result, String suiteName) throws IOException {
         Map<String, Object> properties = new LinkedHashMap<>();
         
-        String reportFolder = reportDir.toString().replace("\\", "/");
+        String reportFolder = reportDir.toAbsolutePath().normalize().toString().replace("\\", "/");
         String browserName = result.getBrowserName() != null ? result.getBrowserName() : "Chrome";
-        String projectDir = projectPath.toString().replace("\\", "/");
-        String hostName = getHostname();
-        String os = System.getProperty("os.name") + " " + System.getProperty("os.arch");
+        
+        // projectDir: MUST be absolute path
+        String projectDir = projectPath.toAbsolutePath().normalize().toString().replace("\\", "/");
+        
+        // projectName: from .prj file (NOT folder name)
+        String projectName = findProjectName(projectPath);
+        
+        String userFullName = resolveUserFullName();
+        String systemUserName = System.getProperty("user.name", "");
+        String rawHostName = getHostname();
+        // hostName uses SYSTEM username, not fullName
+        String hostNameWithUser = systemUserName.isEmpty() ? rawHostName : systemUserName + " - " + rawHostName;
+        String osBitness = System.getProperty("sun.arch.data.model", "64") + "bit";
+        String os = System.getProperty("os.name") + " " + osBitness;
         String hostAddress = getHostAddress();
-        String sourcePath = projectPath.resolve("Test Suites").resolve(suiteName + ".ts")
+        
+        // sourcePath: MUST be absolute path to .ts file
+        String sourcePath = projectPath.toAbsolutePath().normalize()
+                .resolve("Test Suites").resolve(suiteName + ".ts")
                 .toString().replace("\\", "/");
+        String executionProfile = com.kms.katalon.core.configuration.RunConfiguration.getExecutionProfile();
         
-        // ===== TOP-LEVEL flat keys (what most Katalon scripts read) =====
-        properties.put("reportFolder", reportFolder);
-        properties.put("projectDir", projectDir);
-        properties.put("projectName", projectPath.getFileName().toString());
-        
-        // Browser / host at top level
+        // ===== EXACT Katalon property order (CRITICAL!) =====
+        // 1. Name (browser)
         properties.put("Name", browserName);
-        properties.put("browserType", browserName);
-        properties.put("hostName", hostName);
-        properties.put("os", os);
-        properties.put("hostAddress", hostAddress);
         
-        // Execution metadata at top level
-        properties.put("executedEntity", "TestSuite");
-        properties.put("id", "Test Suites/" + suiteName);
-        properties.put("name", suiteName);
-        properties.put("source", sourcePath);
+        // 2. userFullName
+        properties.put("userFullName", userFullName);
         
-        // General settings at top level
-        properties.put("timeout", 30);
-        properties.put("actionDelay", 0);
-        properties.put("defaultFailureHandling", "STOP_ON_FAILURE");
-        properties.put("katalon.versionNumber", katalanVersion);
-        properties.put("runningMode", "CLI");
+        // 3. projectName
+        properties.put("projectName", projectName);
         
-        // ===== NESTED structure (for scripts that use execution.general.reportFolder) =====
+        // 4. projectDir
+        properties.put("projectDir", projectDir);
+        
+        // 5. host object
         Map<String, Object> host = new LinkedHashMap<>();
-        host.put("hostName", hostName);
+        host.put("hostName", hostNameWithUser);
         host.put("os", os);
+        host.put("hostPort", 0); // Katalon sets this dynamically
         host.put("hostAddress", hostAddress);
         properties.put("host", host);
         
-        // Nested execution.general.* structure -- matches Katalon Studio exactly.
-        // Custom listener scripts (PdfGenerator, CSReport, etc) read e.g.
-        // execution.general.report.reportFolder and execution.general.executionProfile.
+        // 6. execution object
         Map<String, Object> execution = new LinkedHashMap<>();
         Map<String, Object> general = new LinkedHashMap<>();
+        
         general.put("autoApplyNeighborXpaths", false);
         general.put("ignorePageLoadTimeoutException", false);
         general.put("timeCapsuleEnabled", false);
-        general.put("executionProfile",
-                com.kms.katalon.core.configuration.RunConfiguration.getExecutionProfile());
-        general.put("excludeKeywords", new java.util.ArrayList<String>());
+        general.put("executionProfile", executionProfile);
+        
+        // excludeKeywords - Katalon has long list of verify/wait keywords
+        java.util.List<String> excludeKeywords = java.util.Arrays.asList(
+            "verifyOptionNotPresentByLabel", "verifyOptionNotPresentByValue", "verifyOptionNotSelectedByIndex",
+            "verifyOptionNotSelectedByLabel", "verifyOptionNotSelectedByValue", "verifyOptionPresentByLabel",
+            "verifyOptionPresentByValue", "verifyOptionSelectedByIndex", "verifyOptionSelectedByLabel",
+            "verifyOptionSelectedByValue", "verifyOptionsPresent", "verifyTextNotPresent", "verifyTextPresent",
+            "verifyElementAttributeValue", "verifyElementChecked", "verifyElementClickable", "verifyElementHasAttribute",
+            "verifyElementNotChecked", "verifyElementNotClickable", "verifyElementNotHasAttribute", "verifyElementNotPresent",
+            "verifyElementNotVisibleInViewport", "verifyElementNotVisible", "verifyElementPresent", "verifyElementText",
+            "verifyElementVisibleInViewport", "verifyElementVisible", "waitForElementAttributeValue", "waitForElementClickable",
+            "waitForElementHasAttribute", "waitForElementNotClickable", "waitForElementNotHasAttribute",
+            "waitForElementNotPresent", "waitForElementNotVisible", "waitForElementPresent", "waitForElementVisible"
+        );
+        general.put("excludeKeywords", excludeKeywords);
+        
         general.put("canvasTextExtractionEnabled", false);
         general.put("flutterAppTestingEnabled", false);
+        
+        // xpathsPriority
+        java.util.List<Map<String, Object>> xpathsPriority = new java.util.ArrayList<>();
+        xpathsPriority.add(createPair("xpath:attributes", true));
+        xpathsPriority.add(createPair("xpath:idRelative", true));
+        xpathsPriority.add(createPair("dom:name", true));
+        xpathsPriority.add(createPair("xpath:link", true));
+        xpathsPriority.add(createPair("xpath:neighbor", true));
+        xpathsPriority.add(createPair("xpath:href", true));
+        xpathsPriority.add(createPair("xpath:img", true));
+        xpathsPriority.add(createPair("xpath:position", true));
+        xpathsPriority.add(createPair("xpath:customAttributes", true));
+        general.put("xpathsPriority", xpathsPriority);
+        
         general.put("timeout", 30);
         general.put("actionDelay", 0);
+        
+        // methodsPriorityOrder
+        java.util.List<Map<String, Object>> methodsPriority = new java.util.ArrayList<>();
+        methodsPriority.add(createPair("XPATH", true));
+        methodsPriority.add(createPair("SMART_LOCATOR", true));
+        methodsPriority.add(createPair("BASIC", true));
+        methodsPriority.add(createPair("CSS", true));
+        methodsPriority.add(createPair("IMAGE", true));
+        general.put("methodsPriorityOrder", methodsPriority);
+        
+        // proxy (as JSON string!)
+        general.put("proxy", "{\"proxyOption\":\"NO_PROXY\",\"proxyServerType\":\"HTTP\",\"username\":\"\",\"password\":\"\",\"proxyServerAddress\":\"\",\"proxyServerPort\":0,\"exceptionList\":\"\",\"applyToDesiredCapabilities\":true}");
+        
         general.put("defaultFailureHandling", "STOP_ON_FAILURE");
         general.put("terminateDriverAfterTestCase", false);
         general.put("defaultPageLoadTimeout", 30);
         general.put("closedShadowDOMEnabled", false);
-
-        // Nested "report" object (what Katalon scripts access as
-        // execution.general.report.reportFolder)
+        
+        // report object
         Map<String, Object> report = new LinkedHashMap<>();
         Map<String, Object> takeScreenshot = new LinkedHashMap<>();
         takeScreenshot.put("enable", false);
         report.put("takeScreenshotSettings", takeScreenshot);
+        
         Map<String, Object> videoRecorder = new LinkedHashMap<>();
         videoRecorder.put("enable", false);
         videoRecorder.put("useBrowserRecorder", true);
@@ -671,48 +844,89 @@ public class KatalonReportGenerator {
         videoRecorder.put("videoQuality", "LOW");
         videoRecorder.put("recordAllTestCases", true);
         report.put("videoRecorderSettings", videoRecorder);
+        
         report.put("screenCaptureOption", false);
         report.put("reportFolder", reportFolder);
         general.put("report", report);
-
+        
         general.put("enablePageLoadTimeout", false);
         general.put("terminateDriverAfterTestSuite", false);
         general.put("useActionDelayInSecond", "SECONDS");
         general.put("testDataInfo", new LinkedHashMap<>());
         general.put("selfHealingEnabled", false);
         execution.put("general", general);
-
-        // Nested drivers section (Katalon scripts sometimes inspect this)
+        
+        // drivers object
         Map<String, Object> drivers = new LinkedHashMap<>();
         Map<String, Object> driversSystem = new LinkedHashMap<>();
         Map<String, Object> webUiDriver = new LinkedHashMap<>();
-        webUiDriver.put("browserType", (browserName == null ? "CHROME" : browserName.toUpperCase()) + "_DRIVER");
+        // chromeDriverPath - hardcoded Katalon path for compatibility
+        webUiDriver.put("chromeDriverPath", "/Applications/Katalon Studio.app/Contents/Eclipse/configuration/resources/drivers/chromedriver_mac/chromedriver");
+        webUiDriver.put("browserType", "CHROME_DRIVER");
         driversSystem.put("WebUI", webUiDriver);
         drivers.put("system", driversSystem);
+        
         Map<String, Object> driversPrefs = new LinkedHashMap<>();
         driversPrefs.put("WebUI", new LinkedHashMap<>());
         drivers.put("preferences", driversPrefs);
         execution.put("drivers", drivers);
-
+        
         execution.put("globalSmartWaitEnabled", false);
         execution.put("smartLocatorEnabled", false);
         execution.put("smartLocatorSettingDefaultEnabled", true);
         execution.put("logTestSteps", true);
         execution.put("hideHostname", false);
         properties.put("execution", execution);
-
-        // Additional top-level fields for Katalon parity
+        
+        // 7. executedEntity
+        properties.put("executedEntity", "TestSuite");
+        
+        // 8. id
+        properties.put("id", "Test Suites/" + suiteName);
+        
+        // 9. name (just the suite name, without folder path)
+        String justSuiteName = suiteName.contains("/") ? suiteName.substring(suiteName.lastIndexOf('/') + 1) : suiteName;
+        properties.put("name", justSuiteName);
+        
+        // 10. description
         properties.put("description", "");
+        
+        // 11. source
+        properties.put("source", sourcePath);
+        
+        // 12. sessionServer.host & port
         properties.put("sessionServer.host", "localhost");
         properties.put("sessionServer.port", 0);
+        
+        // 13. isDebugLaunchMode
         properties.put("isDebugLaunchMode", false);
+        
+        // 14. logbackConfigFileLocation
+        properties.put("logbackConfigFileLocation", "/Applications/Katalon Studio.app/Contents/Eclipse/configuration/org.eclipse.osgi/125/0/.cp/resources/logback/logback-console.xml");
+        
+        // 15. katalon.versionNumber (WITHOUT .0 suffix)
+        properties.put("katalon.versionNumber", "10.3.2");
+        
+        // 16. katalon.buildNumber
+        properties.put("katalon.buildNumber", "0");
+        
+        // 17. runningMode (GUI not CLI!)
+        properties.put("runningMode", "GUI");
+        
+        // 18. pluginTestListeners
         properties.put("pluginTestListeners", new java.util.ArrayList<>());
+        
+        // 19. allow* flags
         properties.put("allowUsingSelfHealing", false);
         properties.put("allowUsingTimeCapsule", true);
         properties.put("allowCustomizeRequestTimeout", false);
         properties.put("allowCustomizeRequestResponseSizeLimit", false);
         properties.put("allowMobileImageBasedTesting", false);
+        
+        // 20. maxFailedTests
         properties.put("maxFailedTests", -1);
+        
+        // 21. testops
         properties.put("testops", new LinkedHashMap<>());
         
         // Write as JSON
@@ -759,27 +973,20 @@ public class KatalonReportGenerator {
                 log.append(" INFO  c.k.katalan.core.main.TestCaseExecutor   - --------------------\n");
                 
                 log.append(LOG_TIMESTAMP_FORMATTER.format(tcResult.getStartTime()));
-                log.append(" INFO  c.k.katalan.core.main.TestCaseExecutor   - START ").append(tcResult.getTestCaseName()).append("\n");
+                log.append(" INFO  c.k.katalan.core.main.TestCaseExecutor   - START Test Cases/").append(tcResult.getTestCaseName()).append("\n");
                 
-                // Log each step
-                for (TestCaseResult.StepResult step : tcResult.getStepResults()) {
-                    Instant stepTime = step.getStartTime() != null ? step.getStartTime() : tcResult.getStartTime();
-                    log.append(LOG_TIMESTAMP_FORMATTER.format(stepTime));
-                    log.append(" DEBUG testcase.").append(tcResult.getTestCaseName().replace("/", "."));
-                    log.append("                   - ").append(step.getStepNumber()).append(": ").append(step.getDescription() != null ? step.getDescription() : step.getStepName()).append("\n");
-                    
-                    Instant stepEndTime = step.getEndTime() != null ? step.getEndTime() : tcResult.getEndTime();
-                    if (step.isPassed()) {
-                        log.append(LOG_TIMESTAMP_FORMATTER.format(stepEndTime));
-                        log.append(" INFO  [MESSAGE][PASSED] - ").append(step.getDescription() != null ? step.getDescription() : step.getStepName()).append("\n");
-                    } else if (step.getErrorMessage() != null) {
-                        log.append(LOG_TIMESTAMP_FORMATTER.format(stepEndTime));
-                        log.append(" ERROR [MESSAGE][FAILED] - ").append(step.getErrorMessage()).append("\n");
+                // Insert the CAPTURED CONSOLE OUTPUT from test execution
+                String consoleOutput = tcResult.getConsoleOutput();
+                if (consoleOutput != null && !consoleOutput.trim().isEmpty()) {
+                    log.append(consoleOutput);
+                    // Ensure it ends with newline
+                    if (!consoleOutput.endsWith("\n")) {
+                        log.append("\n");
                     }
                 }
                 
                 log.append(LOG_TIMESTAMP_FORMATTER.format(tcResult.getEndTime()));
-                log.append(" INFO  c.k.katalan.core.main.TestCaseExecutor   - END ").append(tcResult.getTestCaseName());
+                log.append(" INFO  c.k.katalan.core.main.TestCaseExecutor   - END Test Cases/").append(tcResult.getTestCaseName());
                 log.append(" - ").append(tcResult.getStatus()).append("\n");
             }
         }
@@ -791,44 +998,112 @@ public class KatalonReportGenerator {
     }
     
     /**
-     * Generate execution log file (similar to console but more detailed)
+     * Generate execution0.log in Katalon's XmlKeywordLogger format.
+     *
+     * Structure:
+     *   <?xml version="1.0" encoding="UTF-8" standalone="no"?>
+     *   <!DOCTYPE log SYSTEM "logger.dtd">
+     *   <log>
+     *     <record>... startSuite ...</record>
+     *     <record>... logRunData  (userFullName, projectName, hostName, os, hostAddress, katalonVersion) ...</record>
+     *     for each test case:
+     *       <record>... startTest ...</record>
+     *       for each step:
+     *         <record>... startKeyword (Start action : <stepName>) ...</record>
+     *         [<record>... logMessage PASSED/FAILED ...</record>]
+     *         <record>... endKeyword (End action : <stepName>) ...</record>
+     *       <record>... endTest ...</record>
+     *     <record>... endSuite ...</record>
+     *   </log>
      */
     private void generateExecutionLog(Path reportDir, ExecutionResult result) throws IOException {
         StringBuilder log = new StringBuilder();
+        log.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n");
+        log.append("<!DOCTYPE log SYSTEM \"logger.dtd\">\n");
+        log.append("<log>\n");
+
+        // Get buffered records from XmlKeywordLogger
+        com.katalan.core.logging.XmlKeywordLogger logger = com.katalan.core.logging.XmlKeywordLogger.getInstance();
+        java.util.List<com.katalan.core.logging.XmlKeywordLogger.LogRecord> records = logger.getRecords();
         
-        log.append("================================================================================\n");
-        log.append("                           KATALAN EXECUTION LOG\n");
-        log.append("================================================================================\n\n");
-        
-        log.append("Start Time: ").append(REPORT_DATE_FORMATTER.format(result.getStartTime())).append("\n");
-        log.append("End Time: ").append(REPORT_DATE_FORMATTER.format(result.getEndTime())).append("\n");
-        log.append("Duration: ").append(formatDuration(result.getDuration())).append("\n");
-        log.append("Total: ").append(result.getTotalTests()).append(" | ");
-        log.append("Passed: ").append(result.getPassedTests()).append(" | ");
-        log.append("Failed: ").append(result.getFailedTests()).append(" | ");
-        log.append("Errors: ").append(result.getErrorTests()).append("\n\n");
-        
-        for (TestSuiteResult suiteResult : result.getSuiteResults()) {
-            log.append("--------------------------------------------------------------------------------\n");
-            log.append("Suite: ").append(suiteResult.getSuiteName()).append("\n");
-            log.append("--------------------------------------------------------------------------------\n\n");
-            
-            for (TestCaseResult tcResult : suiteResult.getTestCaseResults()) {
-                log.append("  Test Case: ").append(tcResult.getTestCaseName()).append("\n");
-                log.append("  Status: ").append(tcResult.getStatus()).append("\n");
-                log.append("  Duration: ").append(tcResult.getDurationFormatted()).append("\n");
-                
-                if (tcResult.getErrorMessage() != null && !tcResult.getErrorMessage().isEmpty()) {
-                    log.append("  Error: ").append(tcResult.getErrorMessage()).append("\n");
+        // Emit all buffered records
+        for (com.katalan.core.logging.XmlKeywordLogger.LogRecord rec : records) {
+            log.append("<record>\n");
+            log.append("  <date>").append(LOG_RECORD_DATE_FORMATTER.format(rec.timestamp)).append("</date>\n");
+            log.append("  <millis>").append(rec.timestamp.toEpochMilli()).append("</millis>\n");
+            log.append("  <nanos>").append(rec.timestamp.getNano() % 1_000_000L).append("</nanos>\n");
+            log.append("  <sequence>").append(rec.sequence).append("</sequence>\n");
+            log.append("  <level>").append(rec.level).append("</level>\n");
+            log.append("  <class>").append(LOG_RECORD_CLASS).append("</class>\n");
+            log.append("  <method>").append(rec.method).append("</method>\n");
+            log.append("  <thread>1</thread>\n");
+            log.append("  <message>").append(escapeXml(rec.message != null ? rec.message : "")).append("</message>\n");
+            log.append("  <nestedLevel>").append(rec.nestedLevel).append("</nestedLevel>\n");
+            log.append("  <escapedJava>false</escapedJava>\n");
+            if (rec.properties != null) {
+                for (java.util.Map.Entry<String, String> e : rec.properties.entrySet()) {
+                    log.append("  <property name=\"").append(escapeXml(e.getKey())).append("\">")
+                       .append(escapeXml(e.getValue() != null ? e.getValue() : ""))
+                       .append("</property>\n");
                 }
-                
-                log.append("\n");
+            }
+            log.append("</record>\n");
+        }
+
+        log.append("</log>\n");
+        Files.writeString(reportDir.resolve("execution0.log"), log.toString());
+    }
+
+    /**
+     * Append a single Katalon-style <record> entry to the execution log buffer.
+     */
+    private void appendLogRecord(StringBuilder log, int[] seq, Instant when,
+                                 String level, String method, int thread,
+                                 String message, int nestedLevel,
+                                 Map<String, String> properties) {
+        Instant ts = when != null ? when : Instant.now();
+        long millis = ts.toEpochMilli();
+        // Remaining sub-millisecond portion expressed as nanoseconds (Katalon does the same).
+        long nanos = (ts.getNano() % 1_000_000L);
+
+        log.append("<record>\n");
+        log.append("  <date>").append(LOG_RECORD_DATE_FORMATTER.format(ts)).append("</date>\n");
+        log.append("  <millis>").append(millis).append("</millis>\n");
+        log.append("  <nanos>").append(nanos).append("</nanos>\n");
+        log.append("  <sequence>").append(seq[0]++).append("</sequence>\n");
+        log.append("  <level>").append(level).append("</level>\n");
+        log.append("  <class>").append(LOG_RECORD_CLASS).append("</class>\n");
+        log.append("  <method>").append(method).append("</method>\n");
+        log.append("  <thread>").append(thread).append("</thread>\n");
+        log.append("  <message>").append(escapeXml(message != null ? message : "")).append("</message>\n");
+        log.append("  <nestedLevel>").append(nestedLevel).append("</nestedLevel>\n");
+        log.append("  <escapedJava>false</escapedJava>\n");
+        if (properties != null) {
+            for (Map.Entry<String, String> e : properties.entrySet()) {
+                log.append("  <property name=\"").append(escapeXml(e.getKey())).append("\">")
+                   .append(escapeXml(e.getValue() != null ? e.getValue() : ""))
+                   .append("</property>\n");
             }
         }
-        
-        log.append("================================================================================\n");
-        
-        Files.writeString(reportDir.resolve("execution0.log"), log.toString());
+        log.append("</record>\n");
+    }
+
+    /**
+     * Emit a RUN_DATA record in Katalon's exact format:
+     *   <level>RUN_DATA</level>
+     *   <method>logMessage</method>
+     *   <message>name = value</message>
+     *   <property name="KEY">VALUE</property>
+     * (i.e. a single property whose XML attribute name IS the data key and whose
+     * body is the value — NOT two properties named "name"/"value".)
+     */
+    private void appendRunDataRecord(StringBuilder log, int[] seq, Instant when,
+                                     String name, String value) {
+        String safeValue = value != null ? value : "";
+        Map<String, String> props = new LinkedHashMap<>();
+        props.put(name, safeValue);
+        appendLogRecord(log, seq, when, "RUN_DATA", "logMessage", 1,
+                name + " = " + safeValue, 0, props);
     }
     
     /**
@@ -839,11 +1114,42 @@ public class KatalonReportGenerator {
         
         for (TestSuiteResult suiteResult : result.getSuiteResults()) {
             for (TestCaseResult tcResult : suiteResult.getTestCaseResults()) {
-                binding.append(tcResult.getTestCaseName()).append("=").append(tcResult.getStatus()).append("\n");
+                String tcName = tcResult.getTestCaseName() == null ? "" : tcResult.getTestCaseName();
+                String tcId = tcResult.getTestCaseId() != null ? tcResult.getTestCaseId() : tcName;
+                binding.append("{\"testCaseName\":\"").append(escapeJson(tcId))
+                       .append("\",\"testCaseId\":\"").append(escapeJson(tcId))
+                       .append("\",\"iterationVariableName\":\"\"}\n");
             }
         }
         
         Files.writeString(reportDir.resolve("testCaseBinding"), binding.toString());
+    }
+    
+    /**
+     * Escape a string for safe inclusion in a JSON value.
+     */
+    private String escapeJson(String s) {
+        if (s == null) return "";
+        StringBuilder sb = new StringBuilder(s.length() + 8);
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '\\': sb.append("\\\\"); break;
+                case '"':  sb.append("\\\""); break;
+                case '\b': sb.append("\\b"); break;
+                case '\f': sb.append("\\f"); break;
+                case '\n': sb.append("\\n"); break;
+                case '\r': sb.append("\\r"); break;
+                case '\t': sb.append("\\t"); break;
+                default:
+                    if (c < 0x20) {
+                        sb.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+            }
+        }
+        return sb.toString();
     }
     
     /**
@@ -854,25 +1160,235 @@ public class KatalonReportGenerator {
     }
     
     /**
-     * Build test case log for JUnit system-out
+     * Build test case log for JUnit system-out (Katalon format)
+     * Format: DD-MM-YYYYTHH:MM:SS - [LEVEL][STATUS] - message: detail
      */
     private String buildTestCaseLog(TestCaseResult tcResult) {
-        StringBuilder log = new StringBuilder();
-        
-        log.append(JUNIT_TIMESTAMP_FORMATTER.format(tcResult.getStartTime()));
-        log.append(" - [TEST_CASE][").append(tcResult.getStatus()).append("] - ");
-        log.append(tcResult.getTestCaseName()).append(": ").append(tcResult.getTestCaseName()).append("\n\n");
-        
-        for (TestCaseResult.StepResult step : tcResult.getStepResults()) {
-            Instant stepTime = step.getStartTime() != null ? step.getStartTime() : tcResult.getStartTime();
-            log.append(JUNIT_TIMESTAMP_FORMATTER.format(stepTime));
-            log.append(" - [TEST_STEP][").append(step.isPassed() ? "PASSED" : "FAILED").append("] - ");
-            log.append(step.getDescription() != null ? step.getDescription() : step.getStepName()).append(": ");
-            log.append(step.isPassed() ? "Step passed" : (step.getErrorMessage() != null ? step.getErrorMessage() : "Step failed"));
-            log.append("\n\n");
+        // Read from console0.log (already generated) and extract logs for this test case
+        Path consoleLog = currentReportDir.resolve("console0.log");
+        if (!Files.exists(consoleLog)) {
+            // Fallback: no console log yet
+            return tcResult.getTestCaseName() + "\n";
         }
         
-        return log.toString();
+        try {
+            String consoleContent = Files.readString(consoleLog);
+            StringBuilder tcLog = new StringBuilder();
+            
+            // First line: TEST_CASE entry (Katalon always starts with this)
+            String tcName = tcResult.getTestCaseName();
+            // tcName is just "0 - Catatan Badru", need to add "Test Cases/" prefix for display
+            String tcPath = "Test Cases/" + tcName;
+            String tcStatus = tcResult.getStatus().toString();
+            String tcTimestamp = JUNIT_TIMESTAMP_FORMATTER.format(ZonedDateTime.ofInstant(tcResult.getStartTime(), ZoneId.systemDefault()));
+            tcLog.append(tcTimestamp).append(" - [TEST_CASE][").append(tcStatus).append("] - ")
+                 .append(tcPath).append(": ").append(tcPath).append("\n\n");
+            
+            // Parse console log and extract lines between START and END of this test case
+            // Console log has: "START Test Cases/0 - Catatan Badru" so search for full path
+            String startMarker = "START Test Cases/" + tcName;
+            String endMarker = "END Test Cases/" + tcName;
+            
+            boolean inTestCase = false;
+            String[] lines = consoleContent.split("\n");
+            
+            for (String line : lines) {
+                if (line.contains(startMarker)) {
+                    inTestCase = true;
+                    continue;  // Don't include the START line itself
+                }
+                if (line.contains(endMarker)) {
+                    break;  // Stop at END
+                }
+                if (inTestCase) {
+                    // Convert console log format to JUnit format
+                    // Console: "2026-04-22 13:37:42.189 DEBUG testcase.0 - Catatan Badru - 1: CSReport.export..."
+                    // JUnit:   "22-04-2026T13:37:42 - [TEST_STEP][PASSED] - CSReport.export...: ..."
+                    
+                    String junitLine = convertConsoleToJUnitFormat(line);
+                    if (junitLine != null) {
+                        tcLog.append(junitLine).append("\n");
+                        // Add extra newline after TEST_STEP entries for readability (Katalon format)
+                        if (junitLine.contains("[TEST_STEP]")) {
+                            tcLog.append("\n");
+                        }
+                    }
+                }
+            }
+            
+            return tcLog.toString();
+            
+        } catch (Exception e) {
+            // Fallback on error
+            return tcResult.getTestCaseName() + "\n";
+        }
+    }
+    
+    /**
+     * Convert console log line to JUnit system-out format matching Katalon Studio
+     */
+    private String convertConsoleToJUnitFormat(String consoleLine) {
+        // Skip empty lines
+        if (consoleLine == null || consoleLine.trim().isEmpty()) {
+            return null;
+        }
+        
+        // Parse console format variations:
+        // 1. "2026-04-22 13:37:42.189 DEBUG testcase.0 - Catatan Badru - 1: CSReport.export..." -> TEST_STEP
+        // 2. "2026-04-22 13:37:55.861 INFO c.k.k.c.keyword.builtin.CommentKeyword - /Users/..." -> MESSAGE
+        // 3. "Starting compile report /Users/..." (plain println output) -> MESSAGE
+        
+        // Check if line has timestamp pattern
+        if (!consoleLine.matches("^\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}:\\d{2}\\.\\d+.*")) {
+            // Plain output (no timestamp) - treat as MESSAGE
+            // Don't add timestamp, keep original Katalon behavior
+            return consoleLine.trim();
+        }
+        
+        // Parse: "2026-04-22 13:37:42.189 LEVEL logger - message"
+        String[] parts = consoleLine.split(" - ", 2);
+        if (parts.length < 2) {
+            return consoleLine.trim();  // Return as-is if can't parse
+        }
+        
+        String headerPart = parts[0];  // "2026-04-22 13:37:42.189 DEBUG testcase.0"
+        String messagePart = parts[1].trim();
+        
+        // Extract timestamp from header
+        String[] headerTokens = headerPart.trim().split("\\s+");
+        if (headerTokens.length < 3) {
+            return consoleLine.trim();
+        }
+        
+        String date = headerTokens[0];  // "2026-04-22"
+        String time = headerTokens[1];  // "13:37:42.189"
+        String level = headerTokens[2];  // "INFO", "DEBUG", "ERROR"
+        String logger = headerTokens.length > 3 ? headerTokens[3] : "";  // "testcase.0" or "c.k.k.c.keyword..."
+        
+        // Convert to JUnit timestamp format: "22-04-2026T13:37:42"
+        String[] dateParts = date.split("-");
+        String junitDate = dateParts[2] + "-" + dateParts[1] + "-" + dateParts[0];  // DD-MM-YYYY
+        String junitTime = time.substring(0, 8);  // HH:MM:SS (strip milliseconds)
+        String junitTimestamp = junitDate + "T" + junitTime;
+        
+        // Determine category based on logger and message content
+        String category = "MESSAGE";
+        String status = "INFO";
+        
+        if (level.equals("DEBUG") && logger.startsWith("testcase.")) {
+            // This is a TEST_STEP from Groovy AST transformation
+            // Format: "1: CSReport.exportKatalonReports(...)"
+            category = "TEST_STEP";
+            status = "PASSED";
+            
+            // Extract the step message (remove step number prefix if present)
+            if (messagePart.matches("^\\d+:\\s+.*")) {
+                messagePart = messagePart.replaceFirst("^\\d+:\\s+", "");
+            }
+        } else if (logger.contains("CommentKeyword") || logger.contains("KeywordUtil")) {
+            // KeywordUtil.logInfo() calls
+            category = "MESSAGE";
+            status = "INFO";
+        } else if (level.equals("ERROR")) {
+            category = "MESSAGE";
+            status = "ERROR";
+        } else if (level.equals("WARN")) {
+            category = "MESSAGE";
+            status = "WARNING";
+        }
+        
+        // Format: "22-04-2026T13:37:42 - [CATEGORY][STATUS] - message"
+        // For MESSAGE category, check if message already has detail after colon
+        String detail = "null";
+        if (messagePart.contains(": ")) {
+            // Message already has detail part, use it
+            return junitTimestamp + " - [" + category + "][" + status + "] - " + messagePart;
+        } else {
+            // Add ": null" suffix for Katalon compatibility
+            return junitTimestamp + " - [" + category + "][" + status + "] - " + messagePart + ": " + detail;
+        }
+    }
+    
+    private String getCurrentTimeJunitFormat() {
+        return JUNIT_TIMESTAMP_FORMATTER.format(ZonedDateTime.now(ZoneId.systemDefault()));
+    }
+
+    /**
+     * Build suite-level log for the JUnit <testsuite><system-out>
+     * block. Katalon writes beforeSuite/afterTestSuite listener actions here.
+     */
+    private String buildSuiteLog(TestSuiteResult suiteResult) {
+        // Read from console0.log (already generated) and extract suite-level logs
+        Path consoleLog = currentReportDir.resolve("console0.log");
+        if (!Files.exists(consoleLog)) {
+            return "";
+        }
+        
+        try {
+            String consoleContent = Files.readString(consoleLog);
+            StringBuilder suiteLog = new StringBuilder();
+            
+            // Extract lines BEFORE first "START Test Cases/" and AFTER last "END Test Cases/"
+            String[] lines = consoleContent.split("\n");
+            boolean inTestCase = false;
+            boolean seenAnyTest = false;
+            
+            for (String line : lines) {
+                if (line.contains("START Test Cases/")) {
+                    inTestCase = true;
+                    seenAnyTest = true;
+                    continue;
+                }
+                if (line.contains("END Test Cases/")) {
+                    inTestCase = false;
+                    continue;
+                }
+                
+                // Include lines outside test cases (suite-level listeners)
+                if (!inTestCase) {
+                    String junitLine = convertConsoleToJUnitFormat(line);
+                    if (junitLine != null) {
+                        suiteLog.append(junitLine).append("\n\n");
+                    }
+                }
+            }
+            
+            return suiteLog.toString();
+            
+        } catch (Exception e) {
+            return "";
+        }
+    }
+    
+    /**
+     * Extract ERROR-level lines from log content.
+     * Used for <system-err> sections in JUnit XML (Katalon compatibility).
+     * Katalon puts ERROR-level messages in system-err while keeping full log in system-out.
+     */
+    private String extractErrorLines(String logContent) {
+        if (logContent == null || logContent.isEmpty()) {
+            return "";
+        }
+        
+        StringBuilder errorLog = new StringBuilder();
+        String[] lines = logContent.split("\n");
+        boolean inErrorBlock = false;
+        
+        for (String line : lines) {
+            // Detect ERROR-level log lines: contains [ERROR] or [TEST_CASE][ERROR] or [TEST_SUITE][ERROR]
+            if (line.contains("[ERROR]")) {
+                errorLog.append(line).append("\n");
+                inErrorBlock = true;
+            } else if (inErrorBlock && !line.trim().isEmpty() && !line.matches("^\\d{2}-\\d{2}-\\d{4}T.*")) {
+                // Continue multi-line error message (stack trace, etc)
+                errorLog.append(line).append("\n");
+            } else if (line.matches("^\\d{2}-\\d{2}-\\d{4}T.*") && !line.contains("[ERROR]")) {
+                // New timestamped line that's not ERROR = end of error block
+                inErrorBlock = false;
+            }
+        }
+        
+        return errorLog.toString();
     }
     
     /**
@@ -970,6 +1486,16 @@ public class KatalonReportGenerator {
                    .replace("'", "&#39;");
     }
     
+    /**
+     * Helper method to create left/right pair for xpathsPriority and methodsPriorityOrder
+     */
+    private Map<String, Object> createPair(String left, boolean right) {
+        Map<String, Object> pair = new LinkedHashMap<>();
+        pair.put("left", left);
+        pair.put("right", right);
+        return pair;
+    }
+    
     private String escapeXml(String text) {
         if (text == null) return "";
         return text.replace("&", "&amp;")
@@ -980,19 +1506,145 @@ public class KatalonReportGenerator {
     }
     
     private String getHostname() {
+        // Katalon emits "localhost" here (loopback hostname), not the LAN
+        // machine name. Mirror that behaviour for byte-identical reports.
         try {
-            return java.net.InetAddress.getLocalHost().getHostName();
+            return java.net.InetAddress.getLoopbackAddress().getHostName();
         } catch (Exception e) {
-            return "unknown";
+            return "localhost";
         }
     }
-    
+
     private String getHostAddress() {
+        // Katalon emits "127.0.0.1" (loopback), not the LAN interface IP.
         try {
-            return java.net.InetAddress.getLocalHost().getHostAddress();
+            return java.net.InetAddress.getLoopbackAddress().getHostAddress();
         } catch (Exception e) {
             return "127.0.0.1";
         }
+    }
+
+    /**
+     * Resolve the project name the way Katalon does: read the <name> element
+     * from the project's <code>.prj</code> file. Falls back to the directory
+     * name when no <code>.prj</code> file (or <name> tag) is found.
+     */
+    private String resolveProjectName() {
+        try {
+            if (projectPath != null && Files.isDirectory(projectPath)) {
+                try (java.util.stream.Stream<Path> stream = Files.list(projectPath)) {
+                    java.util.Optional<Path> prj = stream
+                            .filter(p -> p.getFileName().toString().toLowerCase().endsWith(".prj"))
+                            .findFirst();
+                    if (prj.isPresent()) {
+                        String xml = Files.readString(prj.get());
+                        java.util.regex.Matcher m = java.util.regex.Pattern
+                                .compile("<name>([^<]*)</name>")
+                                .matcher(xml);
+                        if (m.find()) {
+                            String name = m.group(1).trim();
+                            if (!name.isEmpty()) return name;
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignored) { /* fall through */ }
+        return projectPath != null && projectPath.getFileName() != null
+                ? projectPath.getFileName().toString()
+                : "";
+    }
+
+    /**
+     * Resolve the "full name" of the running user. Prefers the
+     * KATALAN_USER_FULL_NAME environment variable (so it can be configured to
+     * match the Katalon license holder), then the {@code user.fullname}
+     * system property, and finally falls back to {@code user.name}.
+     */
+    private String resolveUserFullName() {
+        // Prefer Katalon session.properties fullName when available
+        try {
+            String userHome = System.getProperty("user.home");
+            java.nio.file.Path[] candidates = new java.nio.file.Path[] {
+                    java.nio.file.Paths.get(userHome, ".katalon", "session.properties"),
+                    (System.getenv("USERPROFILE") != null) ? java.nio.file.Paths.get(System.getenv("USERPROFILE"), ".katalon", "session.properties") : null
+            };
+            for (java.nio.file.Path p : candidates) {
+                if (p == null) continue;
+                if (java.nio.file.Files.exists(p)) {
+                    String content = java.nio.file.Files.readString(p);
+                    // Format: "fullName"\:"Muhamad Badru Salam"
+                    // Pattern explained: \" = literal quote, \\\\ = one backslash, : = colon
+                    java.util.regex.Pattern ptn = java.util.regex.Pattern.compile("\"fullName\"\\\\:\"([^\"]+)\"");
+                    java.util.regex.Matcher m = ptn.matcher(content);
+                    if (m.find()) {
+                        String fullName = m.group(1);
+                        System.out.println("✅ [KatalonReportGenerator] Read fullName from session.properties: " + fullName);
+                        return fullName;
+                    } else {
+                        System.out.println("⚠️ [KatalonReportGenerator] Pattern did not match in: " + p);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.out.println("❌ [KatalonReportGenerator] Error reading session.properties: " + e.getMessage());
+        }
+
+        String env = System.getenv("KATALAN_USER_FULL_NAME");
+        if (env != null && !env.isEmpty()) return env;
+        String prop = System.getProperty("user.fullname");
+        if (prop != null && !prop.isEmpty()) return prop;
+        return System.getProperty("user.name", "");
+    }
+    
+    /**
+     * Get browser information (name + version) from ExecutionResult
+     * Format: "Chrome 147.0.7727.57"
+     */
+    private String getBrowserInfo(ExecutionResult result) {
+        if (result.getBrowserName() != null && result.getBrowserVersion() != null) {
+            return result.getBrowserName() + " " + result.getBrowserVersion();
+        }
+        return "";
+    }
+    
+    /**
+     * Get WebDriver session ID (DEPRECATED - use ExecutionResult.getSessionId())
+     */
+    private String getWebDriverSessionId() {
+        try {
+            org.openqa.selenium.WebDriver driver = com.kms.katalon.core.webui.driver.DriverFactory.getWebDriverOrNull();
+            if (driver != null) {
+                return ((org.openqa.selenium.remote.RemoteWebDriver) driver).getSessionId().toString();
+            }
+        } catch (Exception e) {
+            // Driver not available
+        }
+        return "";
+    }
+    
+    /**
+     * Get Selenium version from dependencies
+     */
+    private String getSeleniumVersion() {
+        try {
+            // Try to get version from Selenium's package
+            Package pkg = org.openqa.selenium.WebDriver.class.getPackage();
+            if (pkg != null && pkg.getImplementationVersion() != null) {
+                return pkg.getImplementationVersion();
+            }
+            // Fallback: common Selenium 4.x version
+            return "4.28.1";
+        } catch (Exception e) {
+            return "4.28.1";
+        }
+    }
+    
+    /**
+     * Get proxy information string (Katalon format)
+     */
+    private String getProxyInformation() {
+        // Format: "ProxyInformation { proxyOption=NO_PROXY, proxyServerType=HTTP, username=, password=********, proxyServerAddress=, proxyServerPort=0, executionList=\"\", isApplyToDesiredCapabilities=true }"
+        return "ProxyInformation { proxyOption=NO_PROXY, proxyServerType=HTTP, username=, password=********, proxyServerAddress=, proxyServerPort=0, executionList=\"\", isApplyToDesiredCapabilities=true }";
     }
     
     /**
@@ -1214,13 +1866,14 @@ public class KatalonReportGenerator {
             }
         }
         
-        Path cucumberDir = reportDir.resolve("cucumber_report");
-        Files.createDirectories(cucumberDir);
-        
+        // CRITICAL: Only create cucumber_report folder if there are BDD tests
+        // Katalon does NOT create this folder for non-BDD tests
         if (bddTestCases.isEmpty()) {
-            // Create empty cucumber_report folder to match Katalon behavior
             return;
         }
+        
+        Path cucumberDir = reportDir.resolve("cucumber_report");
+        Files.createDirectories(cucumberDir);
         
         // Generate one folder per BDD test case/feature
         for (TestCaseResult tcResult : bddTestCases) {
@@ -1716,5 +2369,31 @@ public class KatalonReportGenerator {
                "  };\n" +
                "  w.$.ready = function(fn) { $(d).ready(fn); };\n" +
                "})(window, document);\n";
+    }
+    
+    /**
+     * Find project name from .prj file in project directory.
+     * Katalon projects have a .prj file with the project name (e.g., "bricams-addons-katalon.prj").
+     */
+    private String findProjectName(Path projectPath) {
+        try {
+            // List all .prj files in project root
+            java.util.stream.Stream<Path> prjFiles = Files.list(projectPath)
+                    .filter(path -> path.toString().endsWith(".prj"));
+            
+            // Get first .prj file
+            java.util.Optional<Path> prjFile = prjFiles.findFirst();
+            
+            if (prjFile.isPresent()) {
+                // Extract filename without .prj extension
+                String fileName = prjFile.get().getFileName().toString();
+                return fileName.substring(0, fileName.length() - 4); // Remove ".prj"
+            }
+        } catch (IOException e) {
+            // Fallback to folder name if can't read directory
+        }
+        
+        // Fallback: use folder name
+        return projectPath.getFileName().toString();
     }
 }

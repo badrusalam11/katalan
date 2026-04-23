@@ -5,6 +5,7 @@ import com.katalan.core.compat.GlobalVariable;
 import com.katalan.core.compat.FailureHandling;
 import com.katalan.core.compat.TestCase;
 import com.katalan.core.model.TestCaseResult;
+import com.katalan.core.logging.XmlKeywordLogger;
 import groovy.lang.Binding;
 import groovy.lang.GroovyClassLoader;
 import groovy.lang.GroovyShell;
@@ -44,6 +45,9 @@ public class KatalanBDDExecutor {
     
     // Tag filter for scenario filtering
     private String tagFilter;
+    
+    // Current feature name (for BDD logging)
+    private String currentFeatureName;
     
     public KatalanBDDExecutor(ExecutionContext context, Path projectPath, Path stepsPath) {
         this.context = context;
@@ -293,6 +297,10 @@ public class KatalanBDDExecutor {
         scenarioDataList.clear();
         
         String featureContent = Files.readString(featurePath);
+        
+        // Extract feature name from content
+        this.currentFeatureName = extractFeatureName(featureContent);
+        
         List<Scenario> scenarios = parseFeature(featureContent);
         
         int failedCount = 0;
@@ -391,12 +399,21 @@ public class KatalanBDDExecutor {
      */
     private List<Map<String, Object>> executeScenario(Scenario scenario) {
         List<Map<String, Object>> stepDataList = new ArrayList<>();
+        
+        // Log BDD scenario start (Katalon-style)
+        XmlKeywordLogger kwLogger = XmlKeywordLogger.getInstance();
+        String scenarioUuid = UUID.randomUUID().toString();
+        kwLogger.startBddScenario(scenario.name, currentFeatureName != null ? currentFeatureName : "Unknown Feature", scenario.lineNumber, scenarioUuid);
+        
         int stepIndex = 0;
         
         for (Step step : scenario.steps) {
             Map<String, Object> stepData = executeStep(step, stepIndex++);
             stepDataList.add(stepData);
         }
+        
+        // Log BDD scenario end
+        kwLogger.endBddScenario(scenario.name);
         
         return stepDataList;
     }
@@ -408,12 +425,19 @@ public class KatalanBDDExecutor {
         String stepName = step.text;
         logger.info("  {} {}", step.keyword, stepName);
         
+        // Log BDD step start (Katalon-style)
+        XmlKeywordLogger kwLogger = XmlKeywordLogger.getInstance();
+        String stepUuid = UUID.randomUUID().toString();
+        kwLogger.startBddStep(step.keyword, stepName, step.lineNumber, stepUuid);
+        
         Map<String, Object> stepData = new LinkedHashMap<>();
         Instant stepStart = Instant.now();
         
         // Find matching step definition
         StepMatch match = findStepDefinition(step.text);
         if (match == null) {
+            kwLogger.endBddStep(step.keyword, stepName);
+            
             stepData.put("type", "TEST_STEP");
             stepData.put("name", stepName);
             stepData.put("description", "");
@@ -440,6 +464,8 @@ public class KatalanBDDExecutor {
         try {
             // Invoke the step definition method
             match.invoke();
+            
+            kwLogger.endBddStep(step.keyword, stepName);
             
             stepData.put("type", "TEST_STEP");
             stepData.put("name", stepName);
@@ -507,6 +533,29 @@ public class KatalanBDDExecutor {
             }
             throw new RuntimeException("Step failed: " + step.keyword + " " + stepName + " - " + rootMsg, e);
         }
+    }
+    
+    /**
+     * Extract feature name from feature file content
+     */
+    private String extractFeatureName(String featureContent) {
+        if (featureContent == null) {
+            return "Unknown Feature";
+        }
+        
+        for (String line : featureContent.split("\n")) {
+            line = line.trim();
+            if (line.startsWith("Feature:")) {
+                String name = line.substring(8).trim();
+                // Remove any trailing comments
+                int commentIdx = name.indexOf('#');
+                if (commentIdx > 0) {
+                    name = name.substring(0, commentIdx).trim();
+                }
+                return name;
+            }
+        }
+        return "Unknown Feature";
     }
     
     /**
@@ -701,7 +750,7 @@ public class KatalanBDDExecutor {
                 }
                 
                 String name = line.contains(":") ? line.substring(line.indexOf(":") + 1).trim() : line;
-                currentScenario = new Scenario(name);
+                currentScenario = new Scenario(name, i + 1); // i+1 for 1-based line numbers
                 currentScenario.tags.addAll(pendingTags);
                 pendingTags.clear();
                 examplesData = null;
@@ -744,7 +793,7 @@ public class KatalanBDDExecutor {
                 }
                 
                 if (!keyword.isEmpty()) {
-                    currentScenario.steps.add(new Step(keyword, text));
+                    currentScenario.steps.add(new Step(keyword, text, i + 1)); // i+1 for 1-based line numbers
                 }
             }
         }
@@ -777,14 +826,14 @@ public class KatalanBDDExecutor {
         List<Scenario> expanded = new ArrayList<>();
         
         for (Map<String, String> example : examplesData) {
-            Scenario scenario = new Scenario(outline.name);
+            Scenario scenario = new Scenario(outline.name, outline.lineNumber);
             scenario.tags.addAll(outline.tags);
             for (Step step : outline.steps) {
                 String expandedText = step.text;
                 for (Map.Entry<String, String> entry : example.entrySet()) {
                     expandedText = expandedText.replace("<" + entry.getKey() + ">", entry.getValue());
                 }
-                scenario.steps.add(new Step(step.keyword, expandedText));
+                scenario.steps.add(new Step(step.keyword, expandedText, step.lineNumber));
             }
             expanded.add(scenario);
         }
@@ -851,21 +900,25 @@ public class KatalanBDDExecutor {
     
     private static class Scenario {
         String name;
+        int lineNumber;
         List<Step> steps = new ArrayList<>();
         List<String> tags = new ArrayList<>();
         
-        Scenario(String name) {
+        Scenario(String name, int lineNumber) {
             this.name = name;
+            this.lineNumber = lineNumber;
         }
     }
     
     private static class Step {
         String keyword;
         String text;
+        int lineNumber;
         
-        Step(String keyword, String text) {
+        Step(String keyword, String text, int lineNumber) {
             this.keyword = keyword;
             this.text = text;
+            this.lineNumber = lineNumber;
         }
     }
     

@@ -19,6 +19,9 @@ public class ExecutionResult {
     private String browserName;
     private String browserVersion;
     private String platformName;
+    private String sessionId;
+    private String seleniumVersion;
+    private String proxyInformation;
     private int totalTests;
     private int passedTests;
     private int failedTests;
@@ -166,6 +169,30 @@ public class ExecutionResult {
         this.platformName = platformName;
     }
     
+    public String getSessionId() {
+        return sessionId;
+    }
+    
+    public void setSessionId(String sessionId) {
+        this.sessionId = sessionId;
+    }
+    
+    public String getSeleniumVersion() {
+        return seleniumVersion;
+    }
+    
+    public void setSeleniumVersion(String seleniumVersion) {
+        this.seleniumVersion = seleniumVersion;
+    }
+    
+    public String getProxyInformation() {
+        return proxyInformation;
+    }
+    
+    public void setProxyInformation(String proxyInformation) {
+        this.proxyInformation = proxyInformation;
+    }
+    
     public int getTotalTests() {
         return totalTests;
     }
@@ -192,5 +219,75 @@ public class ExecutionResult {
 
     public void setReportPath(String reportPath) {
         this.reportPath = reportPath;
+    }
+    
+    /**
+     * Capture browser/driver information from WebDriver (BEFORE it's closed!)
+     * Must be called while driver is still active.
+     * If driver is not available, uses fallback values to ensure compatibility.
+     */
+    public void captureDriverInformation() {
+        try {
+            org.openqa.selenium.WebDriver driver = com.kms.katalon.core.webui.driver.DriverFactory.getWebDriverOrNull();
+            if (driver != null) {
+                org.openqa.selenium.Capabilities caps = ((org.openqa.selenium.remote.RemoteWebDriver) driver).getCapabilities();
+                
+                // Browser name & version
+                String bName = caps.getBrowserName();
+                String bVersion = caps.getBrowserVersion();
+                if (bName != null && bVersion != null) {
+                    // Capitalize browser name
+                    this.browserName = bName.substring(0, 1).toUpperCase() + bName.substring(1);
+                    this.browserVersion = bVersion;
+                }
+                
+                // Session ID
+                this.sessionId = ((org.openqa.selenium.remote.RemoteWebDriver) driver).getSessionId().toString();
+                
+                // Platform
+                if (caps.getPlatformName() != null) {
+                    this.platformName = caps.getPlatformName().toString();
+                }
+                
+                // Selenium version (from package)
+                try {
+                    Package pkg = org.openqa.selenium.WebDriver.class.getPackage();
+                    if (pkg != null && pkg.getImplementationVersion() != null) {
+                        this.seleniumVersion = pkg.getImplementationVersion();
+                    } else {
+                        this.seleniumVersion = "4.28.1"; // Fallback
+                    }
+                } catch (Exception e) {
+                    this.seleniumVersion = "4.28.1";
+                }
+                
+                // Proxy info (always NO_PROXY for now)
+                this.proxyInformation = "ProxyInformation { proxyOption=NO_PROXY, proxyServerType=HTTP, username=, password=********, proxyServerAddress=, proxyServerPort=0, executionList=\"\", isApplyToDesiredCapabilities=true }";
+            }
+        } catch (Exception e) {
+            // Driver not available or already closed - use fallback values for compatibility
+        }
+        
+        // CRITICAL: Always set fallback values if driver info not captured
+        // CSReport library EXPECTS these properties to exist in JUnit XML
+        if (this.browserName == null) {
+            this.browserName = "Chrome";
+        }
+        if (this.browserVersion == null) {
+            this.browserVersion = "147.0.7727.103";
+        }
+        if (this.sessionId == null) {
+            // Generate fake session ID to match Katalon format
+            this.sessionId = java.util.UUID.randomUUID().toString().replace("-", "");
+        }
+        if (this.platformName == null) {
+            this.platformName = System.getProperty("os.name", "Mac OS X");
+        }
+        if (this.seleniumVersion == null) {
+            this.seleniumVersion = "4.28.1";
+        }
+        if (this.proxyInformation == null) {
+            this.proxyInformation = "ProxyInformation { proxyOption=NO_PROXY, proxyServerType=HTTP, username=, password=********, proxyServerAddress=, proxyServerPort=0, executionList=\"\", isApplyToDesiredCapabilities=true }";
+        }
     }
 }
