@@ -170,13 +170,61 @@ public class KatalanEngine {
         kwLogger.logRunData("hostAddress", "127.0.0.1");
         kwLogger.logRunData("katalonVersion", "10.3.2.0");
         
+        // Add suiteResult to executionResult EARLY so prepareReportDirectory()
+        // can determine correct folder structure (e.g. "Testing QIMSol" not "Test Suite")
+        executionResult.addSuiteResult(suiteResult);
+        
+        // Prepare Katalon-style nested report folder BEFORE test cases run
+        // This creates the folder structure + 4 essential files:
+        // 1. execution.properties (full config)
+        // 2. execution0.log (XML header, will be appended live during test execution)
+        // 3. testCaseBinding (list of test cases to execute)
+        // 4. console0.log (empty, will be appended during test execution)
+        Path generatedReportPath = null;
+        String absReportFolder = null;
+        try {
+            com.katalan.reporting.KatalonReportGenerator katalanReporter =
+                    new com.katalan.reporting.KatalonReportGenerator(config.getProjectPath());
+            generatedReportPath = katalanReporter.prepareReportDirectory(executionResult, suite);
+            absReportFolder = generatedReportPath.toAbsolutePath().normalize()
+                    .toString().replace("\\", "/");
+            executionResult.setReportPath(absReportFolder);
+            com.kms.katalon.core.configuration.RunConfiguration.setReportFolder(absReportFolder);
+            System.setProperty("reportFolder", absReportFolder);
+            logger.info("Report directory ready at: {}", generatedReportPath);
+        } catch (Throwable t) {
+            logger.error("Failed to prepare report directory: {}", t.toString(), t);
+        }
+        
+        // Inject reportFolder into listener libraries
+        if (absReportFolder != null) {
+            injectReportFolderIntoListenerLibs(absReportFolder);
+        } else {
+            String fallbackFolder = config.getReportPath() != null 
+                ? config.getReportPath().toAbsolutePath().toString() 
+                : System.getProperty("user.dir") + "/Reports";
+            injectReportFolderIntoListenerLibs(fallbackFolder);
+            logger.warn("Using fallback reportFolder for injection: {}", fallbackFolder);
+        }
+        
         // ----- Test Listener: @BeforeTestSuite / @SetUp -----
         com.kms.katalon.core.context.TestSuiteContext suiteCtx =
                 new com.kms.katalon.core.context.TestSuiteContext("Test Suites/" + suite.getName());
         suiteCtx.setTestSuiteStatus("RUNNING");
-        if (config.getReportPath() != null) {
+        if (absReportFolder != null) {
+            suiteCtx.setReportLocation(absReportFolder);
+        } else if (config.getReportPath() != null) {
             suiteCtx.setReportLocation(config.getReportPath().toString());
         }
+        
+        // Inject into listener classloaders before @BeforeTestSuite
+        String finalReportFolder = absReportFolder != null 
+            ? absReportFolder 
+            : (config.getReportPath() != null 
+                ? config.getReportPath().toAbsolutePath().toString() 
+                : System.getProperty("user.dir") + "/Reports");
+        listenerRegistry.injectReportFolderIntoListeners(finalReportFolder);
+        
         try {
             listenerRegistry.invokeBeforeTestSuite(suiteCtx);
         } catch (Exception e) {
@@ -205,7 +253,8 @@ public class KatalanEngine {
         suite.markCompleted();
         suiteResult.markCompleted();
         
-        executionResult.addSuiteResult(suiteResult);
+        // Note: suiteResult was already added to executionResult earlier (line 175)
+        // before prepareReportDirectory() was called, so we don't add it again here
         executionResult.markCompleted();
         
         // CRITICAL: Capture driver information NOW (before driver is closed!)
@@ -213,61 +262,31 @@ public class KatalanEngine {
         // but driver gets closed during @AfterTestSuite (CSReport closes it)
         executionResult.captureDriverInformation();
         
-        // Prepare Katalon-style nested report folder BEFORE @AfterTestSuite
-        // listeners run. We only write the minimum files required (execution.properties,
-        // execution.uuid, JUnit_Report.xml) so custom listeners (CSReport, PdfGenerator)
-        // can parse them. Full report (HTML, CSV, cucumber, etc) is generated later
-        // by the CLI.
-        Path generatedReportPath = null;
-        String absReportFolder = null;
-        try {
-            com.katalan.reporting.KatalonReportGenerator katalanReporter =
-                    new com.katalan.reporting.KatalonReportGenerator(config.getProjectPath());
-            generatedReportPath = katalanReporter.prepareReportDirectory(executionResult);
-            // Always use the absolute, normalized path so that listener scripts
-            // (PdfGenerator, CSReport) that read execution.general.report.reportFolder
-            // get the same absolute path that Katalon Studio writes.
-            absReportFolder = generatedReportPath.toAbsolutePath().normalize()
-                    .toString().replace("\\", "/");
-            executionResult.setReportPath(absReportFolder);
-            // Expose the per-run folder to scripts via RunConfiguration.getReportFolder()
-            com.kms.katalon.core.configuration.RunConfiguration.setReportFolder(absReportFolder);
-            suiteCtx.setReportLocation(absReportFolder);
-            // Also expose as System property
-            System.setProperty("reportFolder", absReportFolder);
-            logger.info("Report directory ready at: {}", generatedReportPath);
-        } catch (Throwable t) {
-            logger.error("Failed to prepare report directory before @AfterTestSuite: {}",
-                    t.toString(), t);
+        // CRITICAL: FLUSH execution0.log NOW before @AfterTestSuite!
+        // Custom report listeners (CSReport, PdfGenerator) need to READ execution0.log,
+        // but XmlKeywordLogger buffers all records in memory until generateReport().
+        // We must write execution0.log NOW so listeners can parse it.
+        if (generatedReportPath != null) {
+            try {
+                com.katalan.reporting.KatalonReportGenerator katalanReporter =
+                        new com.katalan.reporting.KatalonReportGenerator(config.getProjectPath());
+                katalanReporter.flushExecutionLog(generatedReportPath, executionResult);
+                logger.info("Flushed execution0.log with {} log records before @AfterTestSuite", 
+                    com.katalan.core.logging.XmlKeywordLogger.getInstance().getRecords().size());
+            } catch (Exception e) {
+                logger.warn("Failed to flush execution0.log: {}", e.getMessage());
+            }
         }
         
-        // ALWAYS inject reportFolder even if report preparation failed, so listeners don't crash
-        // Inject into common static fields on well-known Katalon listener libraries 
-        // (e.g. denstoo.reporting.CSReport). Some libraries run scripts via 
-        // groovy.util.Eval.me(...) in a fresh GroovyShell where class imports are 
-        // lost and `RunConfiguration` resolves to null. Pre-populating the static 
-        // `reportFolder` field avoids the "Cannot get property 'reportFolder' on null object" NPE.
-        if (absReportFolder != null) {
-            injectReportFolderIntoListenerLibs(absReportFolder);
-        } else {
-            // Fallback: try to inject whatever we can determine
-            String fallbackFolder = config.getReportPath() != null 
-                ? config.getReportPath().toAbsolutePath().toString() 
-                : System.getProperty("user.dir") + "/Reports";
-            injectReportFolderIntoListenerLibs(fallbackFolder);
-            logger.warn("Using fallback reportFolder for injection: {}", fallbackFolder);
-        }
+        // Note: testCaseBinding was already generated at the beginning (in prepareReportDirectory)
+        // so we don't need to update it here. It contains the list of test cases from the suite.
         
         // ----- Test Listener: @AfterTestSuite / @TearDown -----
         suiteCtx.setTestSuiteStatus(suiteResult.isSuccess() ? "PASSED" : "FAILED");
         
         // Re-inject into listener classloaders BEFORE invoking @AfterTestSuite
         // This ensures any code in listeners that accesses CSReport.reportFolder will work
-        String finalReportFolder = absReportFolder != null 
-            ? absReportFolder 
-            : (config.getReportPath() != null 
-                ? config.getReportPath().toAbsolutePath().toString() 
-                : System.getProperty("user.dir") + "/Reports");
+        // (finalReportFolder already declared earlier at line 217)
         listenerRegistry.injectReportFolderIntoListeners(finalReportFolder);
         
         try {
