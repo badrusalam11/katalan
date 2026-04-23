@@ -581,7 +581,11 @@ public class KatalonReportGenerator {
                .append(escapeXml(reportFolder)).append("\"/>\n");
             xml.append("         <property name=\"logFiles\" value=\"")
                .append(escapeXml(logFiles)).append("\"/>\n");
-            xml.append("         <property name=\"attachments\" value=\"\"/>\n");
+            
+            // Collect all screenshot attachments from the report directory
+            String attachments = collectScreenshotAttachments(reportDir);
+            xml.append("         <property name=\"attachments\" value=\"")
+               .append(escapeXml(attachments)).append("\"/>\n");
             
             // userFullName comes BEFORE hostName in Katalon
             xml.append("         <property name=\"userFullName\" value=\"")
@@ -1665,6 +1669,29 @@ public class KatalonReportGenerator {
             return result.getBrowserName() + " " + result.getBrowserVersion();
         }
         return "";
+    }
+    
+    /**
+     * Collect all screenshot attachments (.png files) from the report directory.
+     * Returns a comma-separated list of absolute paths to screenshots.
+     */
+    private String collectScreenshotAttachments(Path reportDir) {
+        List<String> screenshots = new ArrayList<>();
+        try {
+            // Find all .png files in the report directory (not in subdirectories)
+            if (Files.exists(reportDir) && Files.isDirectory(reportDir)) {
+                try (java.util.stream.Stream<Path> files = Files.list(reportDir)) {
+                    files.filter(f -> Files.isRegularFile(f) && f.toString().toLowerCase().endsWith(".png"))
+                         .sorted() // Sort by filename
+                         .forEach(f -> screenshots.add(f.toAbsolutePath().toString()));
+                }
+            }
+        } catch (IOException e) {
+            logger.warn("Failed to collect screenshot attachments from {}: {}", reportDir, e.getMessage());
+        }
+        
+        // Return comma-separated list (Katalon format)
+        return String.join(", ", screenshots);
     }
     
     /**

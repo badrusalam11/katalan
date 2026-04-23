@@ -191,6 +191,10 @@ public class KatalanEngine {
             executionResult.setReportPath(absReportFolder);
             com.kms.katalon.core.configuration.RunConfiguration.setReportFolder(absReportFolder);
             System.setProperty("reportFolder", absReportFolder);
+            
+            // Set screenshot path to report directory so screenshots are saved there
+            config.setScreenshotPath(generatedReportPath);
+            
             logger.info("Report directory ready at: {}", generatedReportPath);
         } catch (Throwable t) {
             logger.error("Failed to prepare report directory: {}", t.toString(), t);

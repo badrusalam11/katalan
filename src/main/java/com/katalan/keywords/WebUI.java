@@ -18,6 +18,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -1044,13 +1045,24 @@ public class WebUI {
      * Take screenshot
      */
     public static String takeScreenshot() {
-        return takeScreenshot("screenshot_" + System.currentTimeMillis());
+        // Use timestamp in milliseconds as filename (Katalon format)
+        long timestamp = System.currentTimeMillis();
+        return takeScreenshotInternal(String.valueOf(timestamp), "com.kms.katalon.core.webui.keyword.builtin.TakeScreenshotKeyword.takeScreenshot");
     }
     
     /**
      * Take screenshot with filename
      */
     public static String takeScreenshot(String filename) {
+        // If filename is provided, use timestamp-based naming (Katalon format)
+        long timestamp = System.currentTimeMillis();
+        return takeScreenshotInternal(String.valueOf(timestamp), "com.kms.katalon.core.webui.keyword.builtin.TakeScreenshotKeyword.takeScreenshot");
+    }
+    
+    /**
+     * Internal screenshot method with logging
+     */
+    private static String takeScreenshotInternal(String filename, String methodName) {
         logger.info("Taking screenshot: {}", filename);
         try {
             TakesScreenshot ts = (TakesScreenshot) getDriver();
@@ -1058,9 +1070,28 @@ public class WebUI {
             Path destination = Path.of(getScreenshotPath(), filename + ".png");
             Files.createDirectories(destination.getParent());
             Files.copy(source.toPath(), destination, StandardCopyOption.REPLACE_EXISTING);
+            
+            // Log to XmlKeywordLogger with attachment property (Katalon format)
+            com.katalan.core.logging.XmlKeywordLogger kwLogger = 
+                com.katalan.core.logging.XmlKeywordLogger.getInstance();
+            Map<String, String> props = new java.util.LinkedHashMap<>();
+            props.put("attachment", filename + ".png");
+            props.put("testops-method-name", methodName);
+            props.put("testops-execution-stacktrace", "");
+            kwLogger.logMessage("PASSED", "Taking screenshot successfully", props);
+            
             return destination.toString();
         } catch (IOException e) {
             logger.error("Failed to take screenshot", e);
+            
+            // Log failure to XmlKeywordLogger
+            com.katalan.core.logging.XmlKeywordLogger kwLogger = 
+                com.katalan.core.logging.XmlKeywordLogger.getInstance();
+            Map<String, String> props = new java.util.LinkedHashMap<>();
+            props.put("testops-method-name", methodName);
+            props.put("testops-execution-stacktrace", e.toString());
+            kwLogger.logMessage("FAILED", "Failed to take screenshot: " + e.getMessage(), props);
+            
             throw new RuntimeException("Failed to take screenshot", e);
         }
     }
@@ -1071,14 +1102,37 @@ public class WebUI {
     public static String takeElementScreenshot(TestObject testObject, String filename) {
         logger.info("Taking element screenshot: {}", filename);
         try {
+            // Use timestamp for element screenshots too
+            long timestamp = System.currentTimeMillis();
+            String screenshotFilename = String.valueOf(timestamp);
+            
             WebElement element = findElement(testObject);
             File source = element.getScreenshotAs(OutputType.FILE);
-            Path destination = Path.of(getScreenshotPath(), filename + ".png");
+            Path destination = Path.of(getScreenshotPath(), screenshotFilename + ".png");
             Files.createDirectories(destination.getParent());
-            Files.copy(source.toPath(), destination);
+            Files.copy(source.toPath(), destination, StandardCopyOption.REPLACE_EXISTING);
+            
+            // Log to XmlKeywordLogger with attachment property
+            com.katalan.core.logging.XmlKeywordLogger kwLogger = 
+                com.katalan.core.logging.XmlKeywordLogger.getInstance();
+            Map<String, String> props = new java.util.LinkedHashMap<>();
+            props.put("attachment", screenshotFilename + ".png");
+            props.put("testops-method-name", "com.kms.katalon.core.webui.keyword.builtin.TakeElementScreenshotKeyword.takeElementScreenshot");
+            props.put("testops-execution-stacktrace", "");
+            kwLogger.logMessage("PASSED", "Taking element screenshot successfully", props);
+            
             return destination.toString();
         } catch (IOException e) {
             logger.error("Failed to take element screenshot", e);
+            
+            // Log failure to XmlKeywordLogger
+            com.katalan.core.logging.XmlKeywordLogger kwLogger = 
+                com.katalan.core.logging.XmlKeywordLogger.getInstance();
+            Map<String, String> props = new java.util.LinkedHashMap<>();
+            props.put("testops-method-name", "com.kms.katalon.core.webui.keyword.builtin.TakeElementScreenshotKeyword.takeElementScreenshot");
+            props.put("testops-execution-stacktrace", e.toString());
+            kwLogger.logMessage("FAILED", "Failed to take element screenshot: " + e.getMessage(), props);
+            
             throw new RuntimeException("Failed to take element screenshot", e);
         }
     }
@@ -1089,7 +1143,9 @@ public class WebUI {
      */
     public static String takeScreenshotAsCheckpoint(String checkpointName) {
         logger.info("Taking screenshot checkpoint: {}", checkpointName);
-        return takeScreenshot("checkpoint_" + checkpointName.replaceAll("\\s+", "_"));
+        // Use timestamp for checkpoint screenshots
+        long timestamp = System.currentTimeMillis();
+        return takeScreenshotInternal(String.valueOf(timestamp), "com.kms.katalon.core.webui.keyword.builtin.TakeScreenshotAsCheckpointKeyword.takeScreenshotAsCheckpoint");
     }
     
     /**
@@ -1099,7 +1155,9 @@ public class WebUI {
     public static String takeFullPageScreenshotAsCheckpoint(String checkpointName, List<TestObject> ignoredElements) {
         logger.info("Taking full page screenshot checkpoint: {} (ignoring {} elements)", checkpointName, 
             ignoredElements != null ? ignoredElements.size() : 0);
-        return takeScreenshot("checkpoint_fullpage_" + checkpointName.replaceAll("\\s+", "_"));
+        // Use timestamp for full page checkpoint screenshots
+        long timestamp = System.currentTimeMillis();
+        return takeScreenshotInternal(String.valueOf(timestamp), "com.kms.katalon.core.webui.keyword.builtin.TakeFullPageScreenshotAsCheckpointKeyword.takeFullPageScreenshotAsCheckpoint");
     }
     
     /**

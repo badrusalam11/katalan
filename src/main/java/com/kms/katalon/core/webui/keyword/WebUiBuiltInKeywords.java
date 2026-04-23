@@ -725,6 +725,22 @@ public class WebUiBuiltInKeywords {
         return runObj(() -> takeFullPageScreenshot(fileName), flowControl, null);
     }
     
+    public static String takeScreenshotAsCheckpoint(String checkpointName) {
+        return WebUI.takeScreenshotAsCheckpoint(checkpointName);
+    }
+    
+    public static String takeScreenshotAsCheckpoint(String checkpointName, FailureHandling flowControl) {
+        return runObj(() -> takeScreenshotAsCheckpoint(checkpointName), flowControl, null);
+    }
+    
+    public static String takeFullPageScreenshotAsCheckpoint(String checkpointName) {
+        return WebUI.takeFullPageScreenshotAsCheckpoint(checkpointName);
+    }
+    
+    public static String takeFullPageScreenshotAsCheckpoint(String checkpointName, FailureHandling flowControl) {
+        return runObj(() -> takeFullPageScreenshotAsCheckpoint(checkpointName), flowControl, null);
+    }
+    
     // ==================== Drag/Drop Keywords ====================
     
     public static void dragAndDropToObject(TestObject source, TestObject target) {
