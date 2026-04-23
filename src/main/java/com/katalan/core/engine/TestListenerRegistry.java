@@ -414,29 +414,54 @@ public class TestListenerRegistry {
                         }
                     }
 
-                    // Inject reportFolder into this specific listener's classloader RIGHT BEFORE invocation
+                    // Inject reportFolder into ALL classloaders RIGHT BEFORE invocation
                     // This is critical because some listeners (like CSReport) create nested GroovyShells
-                    // that need access to the static reportFolder field
-                    if (lastInjectedReportFolder != null && entry.loader != null) {
-                        try {
-                            Class<?> csReportClass = entry.loader.loadClass("denstoo.reporting.CSReport");
-                            java.lang.reflect.Field reportFolderField = csReportClass.getDeclaredField("reportFolder");
-                            reportFolderField.setAccessible(true);
-                            reportFolderField.set(null, lastInjectedReportFolder);
-                            
-                            // Also inject report list if null
+                    // that load CSReport in completely new classloader contexts
+                    if (lastInjectedReportFolder != null) {
+                        // CRITICAL: Set as system property so nested GroovyShells can access it
+                        System.setProperty("katalan.reportFolder", lastInjectedReportFolder);
+                        
+                        // Inject into EVERY classloader we can find
+                        java.util.LinkedHashSet<ClassLoader> classloaders = new java.util.LinkedHashSet<>();
+                        classloaders.add(entry.loader); // This listener's classloader
+                        classloaders.add(Thread.currentThread().getContextClassLoader());
+                        classloaders.add(ClassLoader.getSystemClassLoader());
+                        classloaders.add(getClass().getClassLoader());
+                        classloaders.remove(null);
+                        
+                        for (ClassLoader cl : classloaders) {
                             try {
-                                java.lang.reflect.Field reportField = csReportClass.getDeclaredField("report");
-                                reportField.setAccessible(true);
-                                Object currentValue = reportField.get(null);
-                                if (currentValue == null) {
-                                    reportField.set(null, new java.util.ArrayList<>());
-                                }
-                            } catch (NoSuchFieldException ignored) {}
-                        } catch (ClassNotFoundException | NoSuchFieldException ignored) {
-                            // CSReport not used by this listener
-                        } catch (Exception e) {
-                            logger.debug("Failed to inject reportFolder before listener invocation: {}", e.getMessage());
+                                Class<?> csReportClass = cl.loadClass("denstoo.reporting.CSReport");
+                                
+                                // Inject reportFolder field
+                                try {
+                                    java.lang.reflect.Field reportFolderField = csReportClass.getDeclaredField("reportFolder");
+                                    reportFolderField.setAccessible(true);
+                                    reportFolderField.set(null, lastInjectedReportFolder);
+                                } catch (NoSuchFieldException ignored) {}
+                                
+                                // Inject report list with reportFolder inside
+                                try {
+                                    java.lang.reflect.Field reportField = csReportClass.getDeclaredField("report");
+                                    reportField.setAccessible(true);
+                                    
+                                    // Create a list with one map containing reportFolder
+                                    java.util.List<java.util.Map<String,Object>> reportList = new java.util.ArrayList<>();
+                                    java.util.Map<String,Object> reportMap = new java.util.HashMap<>();
+                                    reportMap.put("reportFolder", lastInjectedReportFolder);
+                                    reportMap.put("testCaseName", "dummy");
+                                    reportMap.put("testCaseId", "dummy");
+                                    reportList.add(reportMap);
+                                    
+                                    reportField.set(null, reportList);
+                                    logger.debug("Injected report list into CSReport via {}", cl.getClass().getSimpleName());
+                                } catch (NoSuchFieldException ignored) {}
+                            } catch (ClassNotFoundException ignored) {
+                                // CSReport not loaded in this classloader yet
+                            } catch (Exception e) {
+                                logger.debug("Failed to inject into classloader {}: {}", 
+                                        cl.getClass().getSimpleName(), e.getMessage());
+                            }
                         }
                     }
 

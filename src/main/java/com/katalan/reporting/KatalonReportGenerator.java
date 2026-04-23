@@ -135,32 +135,53 @@ public class KatalonReportGenerator {
     /**
      * Pre-create the Katalon-style per-run report folder and write the
      * minimum files required by @AfterTestSuite listeners (execution.properties,
-     * execution.uuid, JUnit_Report.xml). This must be called BEFORE invoking
-     * @AfterTestSuite listeners because custom listeners (e.g. CSReport,
-     * PdfGenerator) parse these files to build their reports.
+     * execution.uuid, execution0.log, testCaseBinding, console0.log).
+     * This must be called BEFORE test cases run because:
+     * 1. Test cases need to WRITE to execution0.log during execution (live logging)
+     * 2. @AfterTestSuite listeners (CSReport, PdfGenerator) need to READ these files
      *
+     * @param result ExecutionResult (with suiteResult already added)
+     * @param suite TestSuite definition (for generating testCaseBinding)
      * @return the per-run report directory (created on disk)
      */
-    public Path prepareReportDirectory(ExecutionResult result) throws IOException {
+    public Path prepareReportDirectory(ExecutionResult result, com.katalan.core.model.TestSuite suite) throws IOException {
         Path reportDir = computeReportDirectory(result);
         Files.createDirectories(reportDir);
         this.currentReportDir = reportDir;
         
         String suiteRelative = resolveSuiteRelativePath(result);
         
-        // Minimum set of files required by Katalon-compatible listeners.
-        // All other files are generated later by generateReport().
+        // CRITICAL: Generate these 4 files BEFORE test cases run!
+        // Custom report listeners (CSReport, PdfGenerator) parse these files.
         try { generateExecutionProperties(reportDir, result, suiteRelative); } catch (Exception e) {
             logger.warn("Failed to write execution.properties early: {}", e.getMessage());
         }
         try { generateExecutionUuid(reportDir); } catch (Exception e) {
             logger.warn("Failed to write execution.uuid early: {}", e.getMessage());
         }
-        try { generateJUnitReport(reportDir, result); } catch (Exception e) {
-            logger.warn("Failed to write JUnit_Report.xml early: {}", e.getMessage());
+        // Create EMPTY console0.log - will be appended during test execution
+        try { 
+            Files.writeString(reportDir.resolve("console0.log"), ""); 
+        } catch (Exception e) {
+            logger.warn("Failed to create console0.log early: {}", e.getMessage());
+        }
+        // Create execution0.log with XML header - will be appended during test execution
+        try { 
+            String logHeader = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n" +
+                              "<!DOCTYPE log SYSTEM \"logger.dtd\">\n" +
+                              "<log>\n";
+            Files.writeString(reportDir.resolve("execution0.log"), logHeader);
+        } catch (Exception e) {
+            logger.warn("Failed to create execution0.log early: {}", e.getMessage());
+        }
+        // Generate testCaseBinding from TestSuite definition (list of test cases to run)
+        try { 
+            generateTestCaseBindingFromSuite(reportDir, suite);
+        } catch (Exception e) {
+            logger.warn("Failed to create testCaseBinding early: {}", e.getMessage());
         }
         
-        logger.info("Prepared Katalon-style report directory: {}", reportDir);
+        logger.info("Prepared Katalon-style report directory with 4 essential files: {}", reportDir);
         return reportDir;
     }
     
@@ -1055,6 +1076,15 @@ public class KatalonReportGenerator {
     }
 
     /**
+     * FLUSH execution0.log BEFORE @AfterTestSuite runs.
+     * Custom report listeners (CSReport, PdfGenerator) need to READ execution0.log,
+     * so we must write all buffered XmlKeywordLogger records NOW.
+     */
+    public void flushExecutionLog(Path reportDir, ExecutionResult result) throws IOException {
+        generateExecutionLog(reportDir, result);
+    }
+
+    /**
      * Append a single Katalon-style <record> entry to the execution log buffer.
      */
     private void appendLogRecord(StringBuilder log, int[] seq, Instant when,
@@ -1107,7 +1137,29 @@ public class KatalonReportGenerator {
     }
     
     /**
-     * Generate testCaseBinding file
+     * Generate testCaseBinding file from TestSuite definition (BEFORE test cases run).
+     * This lists all test cases that WILL BE executed, not the results.
+     */
+    public void generateTestCaseBindingFromSuite(Path reportDir, com.katalan.core.model.TestSuite suite) throws IOException {
+        StringBuilder binding = new StringBuilder();
+        
+        for (com.katalan.core.model.TestCase testCase : suite.getTestCases()) {
+            String tcId = testCase.getId() != null ? testCase.getId() : testCase.getName();
+            // Ensure ID starts with "Test Cases/" if it doesn't already
+            if (!tcId.startsWith("Test Cases/")) {
+                tcId = "Test Cases/" + tcId;
+            }
+            binding.append("{\"testCaseName\":\"").append(escapeJson(tcId))
+                   .append("\",\"testCaseId\":\"").append(escapeJson(tcId))
+                   .append("\",\"iterationVariableName\":\"\"}\n");
+        }
+        
+        Files.writeString(reportDir.resolve("testCaseBinding"), binding.toString());
+    }
+    
+    /**
+     * Generate testCaseBinding file from ExecutionResult (AFTER test cases complete).
+     * This is kept for compatibility but generateTestCaseBindingFromSuite() should be preferred.
      */
     private void generateTestCaseBinding(Path reportDir, ExecutionResult result) throws IOException {
         StringBuilder binding = new StringBuilder();
@@ -1123,6 +1175,14 @@ public class KatalonReportGenerator {
         }
         
         Files.writeString(reportDir.resolve("testCaseBinding"), binding.toString());
+    }
+    
+    /**
+     * Update testCaseBinding file AFTER test cases have completed.
+     * Called by KatalanEngine after test case loop finishes but before @AfterTestSuite.
+     */
+    public void updateTestCaseBinding(Path reportDir, ExecutionResult result) throws IOException {
+        generateTestCaseBinding(reportDir, result);
     }
     
     /**
