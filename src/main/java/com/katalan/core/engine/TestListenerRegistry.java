@@ -402,8 +402,8 @@ public class TestListenerRegistry {
                         com.katalan.core.logging.XmlKeywordLogger.getInstance();
                     
                     // Log listener method start
-                    String listenerAction = "listener action : " + methodName;
-                    kwLogger.startKeyword(listenerAction, null, null);
+                    String listenerAction = methodName;
+                    kwLogger.startListener(listenerAction);
                     
                     // If we have statement-level details, log them BEFORE invoke
                     if (statements != null && !statements.isEmpty()) {
@@ -482,7 +482,7 @@ public class TestListenerRegistry {
                     }
                     
                     // Log listener method end
-                    kwLogger.endKeyword(listenerAction);
+                    kwLogger.endListener(listenerAction);
                     
                     logger.debug("Invoked @{} on {}#{}",
                             annotationType.getSimpleName(),

@@ -79,22 +79,28 @@ public class GroovySourceParser {
             if (moduleNode != null) {
                 // Try to get script body first (for script files without class definitions)
                 Statement scriptStatement = moduleNode.getStatementBlock();
-                if (scriptStatement != null) {
-                    log.debug("Processing script body with {} statements", 
-                        scriptStatement instanceof BlockStatement ? 
-                        ((BlockStatement)scriptStatement).getStatements().size() : 1);
+                boolean handled = false;
+                if (scriptStatement instanceof BlockStatement
+                        && !((BlockStatement) scriptStatement).getStatements().isEmpty()) {
+                    log.debug("Processing script body with {} statements",
+                            ((BlockStatement) scriptStatement).getStatements().size());
                     visitStatement(scriptStatement);
+                    handled = true;
                 }
                 
-                // Also process classes (for test cases that define classes)
-                List<ClassNode> classes = moduleNode.getClasses();
-                for (ClassNode classNode : classes) {
-                    // Find the main run() method or script body
-                    for (MethodNode method : classNode.getMethods()) {
-                        if (method.getName().equals("run") || method.getName().equals("runScript")) {
-                            Statement code = method.getCode();
-                            if (code != null) {
-                                visitStatement(code);
+                // Only process classes if script body had no statements
+                // (Groovy wraps script body inside a generated class' run() method,
+                //  so visiting both would double-log every statement.)
+                if (!handled) {
+                    List<ClassNode> classes = moduleNode.getClasses();
+                    for (ClassNode classNode : classes) {
+                        // Find the main run() method or script body
+                        for (MethodNode method : classNode.getMethods()) {
+                            if (method.getName().equals("run") || method.getName().equals("runScript")) {
+                                Statement code = method.getCode();
+                                if (code != null) {
+                                    visitStatement(code);
+                                }
                             }
                         }
                     }
@@ -511,8 +517,19 @@ public class GroovySourceParser {
                 return method + "(" + args + ")";
             } else {
                 String object = methodCall.getObjectExpression().getText();
+                // Drop the owner when it looks like an (imported) class name or a
+                // class-alias import, so we log e.g. `runFeatureFileWithTags(...)`
+                // instead of `CucumberKW.runFeatureFileWithTags(...)` to match
+                // Katalon Studio's execution0.log format.
+                if (isLikelyClassReference(object)) {
+                    return method + "(" + args + ")";
+                }
                 return object + "." + method + "(" + args + ")";
             }
+        } else if (expr instanceof StaticMethodCallExpression) {
+            StaticMethodCallExpression call = (StaticMethodCallExpression) expr;
+            String args = buildArgumentsText(call.getArguments());
+            return call.getMethod() + "(" + args + ")";
         } else if (expr instanceof DeclarationExpression) {
             DeclarationExpression decl = (DeclarationExpression) expr;
             String left = decl.getLeftExpression().getText();
@@ -546,6 +563,25 @@ public class GroovySourceParser {
     }
     
     /**
+     * Heuristic: does an identifier look like a class reference (direct name
+     * or import alias)?  Katalon's log output drops the alias prefix for static
+     * keyword calls (e.g. `CucumberKW.runFeatureFile(...)` appears as
+     * `runFeatureFile(...)`).  We approximate this without an import table by
+     * treating any single dotted identifier whose first character is uppercase
+     * as a class reference.
+     */
+    private boolean isLikelyClassReference(String text) {
+        if (text == null || text.isEmpty()) return false;
+        // Must be a bare identifier (or dotted FQN) starting with uppercase
+        if (!Character.isUpperCase(text.charAt(0))) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (!Character.isLetterOrDigit(c) && c != '_' && c != '.' && c != '$') return false;
+        }
+        return true;
+    }
+
+    /**
      * Simplify expression for display (handle quotes, truncate long strings).
      */
     private String simplifyExpression(Expression expr) {
@@ -554,9 +590,7 @@ public class GroovySourceParser {
             Object value = constant.getValue();
             if (value instanceof String) {
                 String str = (String) value;
-                if (str.length() > 60) {
-                    return "&quot;" + escapeXml(str.substring(0, 57)) + "...&quot;";
-                }
+                // Katalon's execution0.log preserves full string arguments.
                 return "&quot;" + escapeXml(str) + "&quot;";
             }
             return String.valueOf(value);

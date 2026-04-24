@@ -183,7 +183,8 @@ public class XmlKeywordLogger {
         props.put("BDD_STEP_NAME", stepName);
         props.put("BDD_STEP_KEYWORD", keyword + " "); // Add trailing space to match Katalon format
         props.put("BDD_STEP_UUID", uuid);
-        logRecord("START", "startKeyword", "Start action : " + keyword + " " + stepName, currentNested, props);
+        // Katalon records the step name only (keyword is kept as a property).
+        logRecord("START", "startKeyword", "Start action : " + stepName, currentNested, props);
         nestedLevel.set(currentNested + 1);
     }
     
@@ -194,7 +195,7 @@ public class XmlKeywordLogger {
         int currentNested = nestedLevel.get() - 1;
         if (currentNested < 0) currentNested = 0;
         nestedLevel.set(currentNested);
-        logRecord("END", "endKeyword", "End action : " + keyword + " " + stepName, currentNested, Collections.emptyMap());
+        logRecord("END", "endKeyword", "End action : " + stepName, currentNested, Collections.emptyMap());
     }
     
     /**

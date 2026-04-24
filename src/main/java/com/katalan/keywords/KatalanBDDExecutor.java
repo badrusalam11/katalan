@@ -468,6 +468,14 @@ public class KatalanBDDExecutor {
      * Create step data for skipped step
      */
     private Map<String, Object> createSkippedStepData(Step step, int stepIndex) {
+        // Still emit BDD start/end records so execution0.log shows every
+        // step (even the ones that never ran because a previous step failed).
+        // Katalon Studio does the same.
+        XmlKeywordLogger kwLogger = XmlKeywordLogger.getInstance();
+        String stepUuid = UUID.randomUUID().toString();
+        kwLogger.startBddStep(step.keyword, step.text, step.lineNumber, stepUuid);
+        kwLogger.endBddStep(step.keyword, step.text);
+        
         Map<String, Object> stepData = new LinkedHashMap<>();
         stepData.put("name", step.keyword + " " + step.text);
         stepData.put("result", "SKIPPED");

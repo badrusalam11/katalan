@@ -58,6 +58,11 @@ public class GlobalVariable {
      * Get a global variable
      */
     public static Object get(String name) {
+        // Special handling for metaClass - return the Groovy MetaClass
+        if ("metaClass".equals(name)) {
+            return getGroovyMetaClass();
+        }
+        
         Object value = variables.get(name);
         if (value == null) {
             // Try static field
@@ -221,5 +226,41 @@ public class GlobalVariable {
         } else {
             field.set(null, value);
         }
+    }
+    
+    // ==========================================
+    // Groovy MetaClass Support
+    // ==========================================
+    
+    /**
+     * Get the Groovy MetaClass for this class.
+     * This is called when Groovy code accesses GlobalVariable.metaClass
+     */
+    private static Object getGroovyMetaClass() {
+        try {
+            Class<?> groovySystemClass = Class.forName("groovy.lang.GroovySystem");
+            Object metaClassRegistry = groovySystemClass.getMethod("getMetaClassRegistry").invoke(null);
+            Object metaClass = metaClassRegistry.getClass()
+                .getMethod("getMetaClass", Class.class)
+                .invoke(metaClassRegistry, GlobalVariable.class);
+            logger.debug("Returning MetaClass for GlobalVariable");
+            return metaClass;
+        } catch (Exception e) {
+            logger.warn("Could not get MetaClass: {}", e.getMessage());
+            return null;
+        }
+    }
+    
+    /**
+     * This method is called by Groovy when accessing a property that doesn't exist.
+     * It allows us to intercept dynamic property access.
+     */
+    public static Object $static_propertyMissing(String name) {
+        if ("metaClass".equals(name)) {
+            return getGroovyMetaClass();
+        }
+        
+        // For other properties, delegate to get()
+        return get(name);
     }
 }

@@ -20,12 +20,25 @@ public class TestSuite {
     private Instant endTime;
     private int parallel;
     private boolean failFast;
+    private int retryCount;
+    private boolean rerunImmediately;
+    private String tag;
     
     public TestSuite() {
         this.testCases = new ArrayList<>();
         this.parallel = 1;
         this.failFast = false;
+        this.retryCount = 0;
+        this.rerunImmediately = false;
+        this.tag = "";
     }
+
+    public int getRetryCount() { return retryCount; }
+    public void setRetryCount(int retryCount) { this.retryCount = retryCount; }
+    public boolean isRerunImmediately() { return rerunImmediately; }
+    public void setRerunImmediately(boolean rerunImmediately) { this.rerunImmediately = rerunImmediately; }
+    public String getTag() { return tag; }
+    public void setTag(String tag) { this.tag = tag; }
     
     public TestSuite(String name) {
         this();

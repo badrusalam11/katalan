@@ -157,10 +157,10 @@ public class KatalanEngine {
         
         // Log suite start with properties
         java.util.Map<String, String> suiteProps = new java.util.LinkedHashMap<>();
-        suiteProps.put("rerunTestFailImmediately", "false");
-        suiteProps.put("retryCount", "0");
+        suiteProps.put("rerunTestFailImmediately", String.valueOf(suite.isRerunImmediately()));
+        suiteProps.put("retryCount", String.valueOf(suite.getRetryCount()));
         suiteProps.put("name", suite.getName());
-        suiteProps.put("description", "");
+        suiteProps.put("description", suite.getDescription() != null ? suite.getDescription() : "");
         suiteProps.put("id", "Test Suites/" + suite.getId());
         kwLogger.startSuite(suite.getName(), "Test Suites/" + suite.getId(), suiteProps);
         
