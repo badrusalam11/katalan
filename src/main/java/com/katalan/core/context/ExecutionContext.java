@@ -303,6 +303,26 @@ public class ExecutionContext {
     }
     
     /**
+     * Get or generate cucumber report timestamp for current feature execution
+     * This ensures the same timestamp is used in both log message and actual report generation
+     */
+    public String getCucumberReportTimestamp() {
+        String timestamp = (String) getProperty("cucumberReportTimestamp");
+        if (timestamp == null) {
+            timestamp = String.valueOf(System.currentTimeMillis());
+            setProperty("cucumberReportTimestamp", timestamp);
+        }
+        return timestamp;
+    }
+    
+    /**
+     * Clear cucumber report timestamp (call this after feature execution completes)
+     */
+    public void clearCucumberReportTimestamp() {
+        properties.remove("cucumberReportTimestamp");
+    }
+    
+    /**
      * Get the project directory
      */
     public Path getProjectDir() {

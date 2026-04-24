@@ -118,6 +118,11 @@ public class CucumberKW {
         logger.info("Cucumber args: {}", args);
         
         try {
+            // Generate and store cucumber report timestamp for this feature execution
+            // IMPORTANT: This timestamp will be used both in the log message AND when generating the actual report
+            com.katalan.core.context.ExecutionContext context = com.katalan.core.context.ExecutionContext.getCurrent();
+            String cucumberTimestamp = context.getCucumberReportTimestamp();
+            
             // Emit Katalon-style INFO record so execution0.log matches Katalon
             // Studio's "Starting run keyword runFeatureFile: '...' and extract
             // report to folder: '...'..." entry.
@@ -127,8 +132,8 @@ public class CucumberKW {
                     reportFolderProp = com.kms.katalon.core.configuration.RunConfiguration.getReportFolder();
                 }
                 String cucumberReportFolder = reportFolderProp != null && !reportFolderProp.isEmpty()
-                        ? reportFolderProp.replace("\\", "/") + "/cucumber_report/" + System.currentTimeMillis()
-                        : "cucumber_report/" + System.currentTimeMillis();
+                        ? reportFolderProp.replace("\\", "/") + "/cucumber_report/" + cucumberTimestamp
+                        : "cucumber_report/" + cucumberTimestamp;
                 String infoMsg = "Starting run keyword runFeatureFile: '" + featureFile
                         + "' and extract report to folder: '" + cucumberReportFolder + "'...";
                 com.katalan.core.logging.XmlKeywordLogger.getInstance()
@@ -139,6 +144,10 @@ public class CucumberKW {
 
             // Run Cucumber with our custom runtime that includes Groovy support
             int failed = runCucumberWithGroovyGlue(featurePath, stepsPath, projectPath, tags);
+            
+            // NOTE: DO NOT clear timestamp here - it will be cleared by report generator after reports are written
+            // context.clearCucumberReportTimestamp(); // REMOVED - cleared in finally block of report generation
+            
             if (failed > 0) {
                 throw new RuntimeException("Cucumber execution finished with " + failed + " failed scenario(s)");
             }

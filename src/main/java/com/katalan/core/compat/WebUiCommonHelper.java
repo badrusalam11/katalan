@@ -29,7 +29,19 @@ public class WebUiCommonHelper {
         }
         
         By locator = createLocator(testObject);
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout));
+        
+        // Immediate check - try to find element without wait first
+        try {
+            WebElement element = driver.findElement(locator);
+            if (element != null) {
+                return element;
+            }
+        } catch (NoSuchElementException ignored) {
+            // Element not immediately available, proceed with wait
+        }
+        
+        // Fast polling with 100ms interval for responsive wait
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(100));
         return wait.until(ExpectedConditions.presenceOfElementLocated(locator));
     }
     
@@ -43,7 +55,19 @@ public class WebUiCommonHelper {
         }
         
         By locator = createLocator(testObject);
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout));
+        
+        // Immediate check - try to find elements without wait first
+        try {
+            List<WebElement> elements = driver.findElements(locator);
+            if (elements != null && !elements.isEmpty()) {
+                return elements;
+            }
+        } catch (Exception ignored) {
+            // Elements not immediately available, proceed with wait
+        }
+        
+        // Fast polling with 100ms interval for responsive wait
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(100));
         wait.until(ExpectedConditions.presenceOfElementLocated(locator));
         return driver.findElements(locator);
     }
@@ -59,7 +83,19 @@ public class WebUiCommonHelper {
             }
             
             By locator = createLocator(testObject);
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout));
+            
+            // Immediate check - try to check if element is clickable without wait first
+            try {
+                WebElement element = driver.findElement(locator);
+                if (element != null && element.isDisplayed() && element.isEnabled()) {
+                    return true; // Early return on success
+                }
+            } catch (NoSuchElementException | StaleElementReferenceException ignored) {
+                // Element not immediately clickable, proceed with wait
+            }
+            
+            // Fast polling with 100ms interval for responsive wait
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(100));
             wait.until(ExpectedConditions.elementToBeClickable(locator));
             return true;
         } catch (Exception e) {
@@ -78,7 +114,19 @@ public class WebUiCommonHelper {
             }
             
             By locator = createLocator(testObject);
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout));
+            
+            // Immediate check - try to check visibility without wait first
+            try {
+                WebElement element = driver.findElement(locator);
+                if (element != null && element.isDisplayed()) {
+                    return true; // Early return on success
+                }
+            } catch (NoSuchElementException | StaleElementReferenceException ignored) {
+                // Element not immediately visible, proceed with wait
+            }
+            
+            // Fast polling with 100ms interval for responsive wait
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(100));
             wait.until(ExpectedConditions.visibilityOfElementLocated(locator));
             return true;
         } catch (Exception e) {
