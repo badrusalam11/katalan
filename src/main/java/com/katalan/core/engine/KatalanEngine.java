@@ -599,6 +599,9 @@ public class KatalanEngine {
                 result.addScreenshot(screenshotPath.toString());
                 
                 logger.debug("Screenshot saved: {}", screenshotPath);
+                
+                // Log screenshot to execution0.log for custom report tracking
+                logScreenshotCapture(filename + ".png", suffix, screenshotPath.toString());
             }
         } catch (Exception ex) {
             logger.warn("Failed to take screenshot: {}", ex.getMessage());
@@ -628,6 +631,28 @@ public class KatalanEngine {
         
         // Log FAILED record (nested level 0 for test case level)
         xmlLogger.logMessage("FAILED", failureMessage.toString(), props);
+    }
+    
+    /**
+     * Log screenshot capture to execution0.log for custom report tracking
+     */
+    private void logScreenshotCapture(String filename, String captureType, String fullPath) {
+        XmlKeywordLogger xmlLogger = XmlKeywordLogger.getInstance();
+        
+        // Build screenshot capture message
+        String message = String.format("Screenshot captured on %s: %s", captureType, filename);
+        
+        // Build properties with screenshot metadata
+        Map<String, String> props = new LinkedHashMap<>();
+        props.put("screenshot.filename", filename);
+        props.put("screenshot.type", captureType); // "failure" or "error"
+        props.put("screenshot.path", fullPath);
+        props.put("attachment", filename); // For Katalon compatibility
+        props.put("testops-method-name", "com.katalan.core.engine.KatalanEngine.takeScreenshot");
+        props.put("testops-execution-stacktrace", "");
+        
+        // Log as INFO with screenshot properties
+        xmlLogger.logMessage("INFO", message, props);
     }
     
     /**

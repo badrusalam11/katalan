@@ -73,9 +73,6 @@ public class WebDriverFactory {
         
         ChromeOptions options = new ChromeOptions();
         
-        if (config.isHeadless()) {
-            options.addArguments("--headless=new");
-        }
         
         // Add common Chrome arguments
         options.addArguments(
@@ -94,6 +91,25 @@ public class WebDriverFactory {
             "--disable-features=PasswordCheck,PasswordLeakDetection,InsecureFormWarnings",
             "--password-store=basic"
         );
+
+        if (config.isHeadless()) {
+            options.addArguments(
+                "--headless=new",
+                "--window-size=1920,1080",
+                "--disable-gpu",
+                "--hide-scrollbars",
+                "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
+            );
+            options.setExperimentalOption(
+            "excludeSwitches",
+            java.util.Arrays.asList("enable-automation")
+            );
+            options.setExperimentalOption(
+                "useAutomationExtension",
+                false
+            );
+        }
+        
         
         // Use fresh temporary profile - no saved passwords, no Google account
         // Use File.separator for cross-platform compatibility (Mac/Linux use '/', Windows '\')
