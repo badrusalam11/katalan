@@ -169,7 +169,7 @@ public class KatalanCLI implements Callable<Integer> {
                     System.out.println("\n📊 Generating HTML report...");
                     KatalonReportGenerator katalanReporter = new KatalonReportGenerator(projectPath);
                     Path generatedReportPath = katalanReporter.generateReport(result);
-                    System.out.println("📁 Report generated at: " + generatedReportPath);
+                    System.out.println("📁 Report generated at: " + generatedReportPath.toAbsolutePath());
                     
                     // Also generate simple report at specified path for backwards compatibility
                     if (reportPath != null && !reportPath.toString().equals("reports")) {
