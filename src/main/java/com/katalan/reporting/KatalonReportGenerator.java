@@ -2020,9 +2020,13 @@ public class KatalonReportGenerator {
         Path cucumberDir = reportDir.resolve("cucumber_report");
         Files.createDirectories(cucumberDir);
         
-        // Generate one folder per BDD test case/feature
+        // Get the cucumber report timestamp from ExecutionContext
+        // This ensures we use the same timestamp that was logged in execution0.log
+        com.katalan.core.context.ExecutionContext context = com.katalan.core.context.ExecutionContext.getCurrent();
+        String timestampId = context.getCucumberReportTimestamp();
+        
+        // Generate one folder per BDD test case/feature using the shared timestamp
         for (TestCaseResult tcResult : bddTestCases) {
-            String timestampId = String.valueOf(System.currentTimeMillis());
             Path featureReportDir = cucumberDir.resolve(timestampId);
             Files.createDirectories(featureReportDir);
             
@@ -2030,10 +2034,11 @@ public class KatalonReportGenerator {
             generateCucumberXml(featureReportDir, tcResult);
             generateKCucumberJson(featureReportDir, tcResult);
             generateCucumberHtml(featureReportDir, tcResult);
-            
-            // Small delay to ensure unique timestamps
-            try { Thread.sleep(10); } catch (InterruptedException ignored) {}
         }
+        
+        // Clear the cucumber report timestamp after all reports are generated
+        // This ensures the same timestamp is used throughout the entire report generation process
+        context.clearCucumberReportTimestamp();
     }
     
     /**
@@ -2649,21 +2654,104 @@ public class KatalonReportGenerator {
         
         // Match (with arguments extraction)
         Map<String, Object> match = new LinkedHashMap<>();
-        match.put("location", "StepDefinitions." + stepName.replace(" ", "_").toLowerCase() + "()");
         
-        // Extract arguments from step name (parameters that were captured)
-        // Compare stepName with stepInfo.text to find placeholders like <role>, <fitur>
-        List<Map<String, Object>> arguments = new ArrayList<>();
-        if (stepInfo != null && stepInfo.text != null) {
-            arguments = extractStepArguments(stepName, stepInfo.text);
-        }
-        if (!arguments.isEmpty()) {
-            match.put("arguments", arguments);
+        // Try to get match info from step data (stored by BDDExecutor)
+        Object matchInfoObj = stepData.get("matchInfo");
+        if (matchInfoObj instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> matchInfo = (Map<String, Object>) matchInfoObj;
+            
+            // Get method and parameters from matchInfo
+            Object methodObj = matchInfo.get("method");
+            Object parametersObj = matchInfo.get("parameters");
+            
+            if (methodObj instanceof java.lang.reflect.Method) {
+                java.lang.reflect.Method method = (java.lang.reflect.Method) methodObj;
+                
+                // Build location with full method signature
+                String className = method.getDeclaringClass().getSimpleName();
+                String methodName = method.getName();
+                
+                // Build parameter types string
+                StringBuilder locationBuilder = new StringBuilder();
+                locationBuilder.append(className).append(".").append(methodName).append("(");
+                
+                Class<?>[] paramTypes = method.getParameterTypes();
+                for (int i = 0; i < paramTypes.length; i++) {
+                    if (i > 0) locationBuilder.append(",");
+                    locationBuilder.append(paramTypes[i].getSimpleName());
+                }
+                locationBuilder.append(")");
+                
+                match.put("location", locationBuilder.toString());
+                
+                // Extract arguments with offsets
+                if (parametersObj instanceof List && stepInfo != null && stepInfo.text != null) {
+                    @SuppressWarnings("unchecked")
+                    List<Object> parameters = (List<Object>) parametersObj;
+                    
+                    List<Map<String, Object>> arguments = extractArgumentsWithOffsets(stepName, stepInfo.text, parameters);
+                    if (!arguments.isEmpty()) {
+                        match.put("arguments", arguments);
+                    }
+                }
+            } else {
+                // Fallback if method not available
+                match.put("location", "StepDefinitions." + stepName.replace(" ", "_").toLowerCase() + "()");
+            }
+        } else {
+            // Fallback: use old method for backward compatibility
+            match.put("location", "StepDefinitions." + stepName.replace(" ", "_").toLowerCase() + "()");
+            
+            // Extract arguments from step name (parameters that were captured)
+            // Compare stepName with stepInfo.text to find placeholders like <role>, <fitur>
+            List<Map<String, Object>> arguments = new ArrayList<>();
+            if (stepInfo != null && stepInfo.text != null) {
+                arguments = extractStepArguments(stepName, stepInfo.text);
+            }
+            if (!arguments.isEmpty()) {
+                match.put("arguments", arguments);
+            }
         }
         
         step.put("match", match);
         
         return step;
+    }
+    
+    /**
+     * Extract arguments with their offsets from executed step vs step definition
+     * Uses actual parameter values from execution
+     */
+    private List<Map<String, Object>> extractArgumentsWithOffsets(String executedStep, String stepDefinition, List<Object> parameters) {
+        List<Map<String, Object>> arguments = new ArrayList<>();
+        
+        // Find placeholders in step definition (e.g., <role>, <fitur>)
+        java.util.regex.Pattern placeholderPattern = java.util.regex.Pattern.compile("<([^>]+)>");
+        java.util.regex.Matcher matcher = placeholderPattern.matcher(stepDefinition);
+        
+        int paramIndex = 0;
+        int searchFrom = 0;
+        
+        while (matcher.find() && paramIndex < parameters.size()) {
+            Object paramValue = parameters.get(paramIndex);
+            String paramString = paramValue != null ? paramValue.toString() : "";
+            
+            // Find where this parameter appears in the executed step
+            int offset = executedStep.indexOf(paramString, searchFrom);
+            if (offset >= 0) {
+                Map<String, Object> arg = new LinkedHashMap<>();
+                arg.put("val", paramString);
+                arg.put("offset", offset);
+                arguments.add(arg);
+                
+                searchFrom = offset + paramString.length();
+            }
+            
+            paramIndex++;
+        }
+        
+        return arguments;
     }
     
     /**

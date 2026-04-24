@@ -547,6 +547,13 @@ public class KatalanBDDExecutor {
             stepData.put("index", index);
             stepData.put("startIndex", 0);
             
+            // Store step match information for report generation
+            Map<String, Object> matchInfo = new LinkedHashMap<>();
+            matchInfo.put("method", match.definition.method);
+            matchInfo.put("pattern", match.definition.pattern.pattern());
+            matchInfo.put("parameters", match.parameters);
+            stepData.put("matchInfo", matchInfo);
+            
             List<Map<String, Object>> logs = new ArrayList<>();
             Map<String, Object> log = new LinkedHashMap<>();
             log.put("time", formatInstant(Instant.now()));
