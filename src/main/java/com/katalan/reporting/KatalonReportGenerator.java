@@ -2603,26 +2603,39 @@ public class KatalonReportGenerator {
         step.put("BDD_STEP_UUID", UUID.randomUUID().toString());
         step.put("line", lineNum);
         
-        // Extract step name and keyword
+        // Extract step name and keyword. Prefer authoritative keyword from feature metadata (stepInfo)
         String stepName = (String) stepData.getOrDefault("name", "Unknown step");
         String keyword = "Given ";
-        if (stepName.toLowerCase().startsWith("given ")) {
-            keyword = "Given ";
-            stepName = stepName.substring(6);
-        } else if (stepName.toLowerCase().startsWith("when ")) {
-            keyword = "When ";
-            stepName = stepName.substring(5);
-        } else if (stepName.toLowerCase().startsWith("then ")) {
-            keyword = "Then ";
-            stepName = stepName.substring(5);
-        } else if (stepName.toLowerCase().startsWith("and ")) {
-            keyword = "And ";
-            stepName = stepName.substring(4);
-        } else if (stepName.toLowerCase().startsWith("but ")) {
-            keyword = "But ";
-            stepName = stepName.substring(4);
+
+        if (stepInfo != null && stepInfo.keyword != null && !stepInfo.keyword.isEmpty()) {
+            // Use keyword from parsed feature file (this preserves Given/When/Then as authored)
+            keyword = stepInfo.keyword;
+
+            // Normalize executed stepName by removing an accidental leading keyword if present
+            String lowerKeyword = keyword.trim().toLowerCase();
+            if (stepName.toLowerCase().startsWith(lowerKeyword + " ")) {
+                stepName = stepName.substring(lowerKeyword.length() + 1);
+            }
+        } else {
+            // Fallback: infer keyword from executed step text
+            if (stepName.toLowerCase().startsWith("given ")) {
+                keyword = "Given ";
+                stepName = stepName.substring(6);
+            } else if (stepName.toLowerCase().startsWith("when ")) {
+                keyword = "When ";
+                stepName = stepName.substring(5);
+            } else if (stepName.toLowerCase().startsWith("then ")) {
+                keyword = "Then ";
+                stepName = stepName.substring(5);
+            } else if (stepName.toLowerCase().startsWith("and ")) {
+                keyword = "And ";
+                stepName = stepName.substring(4);
+            } else if (stepName.toLowerCase().startsWith("but ")) {
+                keyword = "But ";
+                stepName = stepName.substring(4);
+            }
         }
-        
+
         step.put("name", stepName);
         step.put("keyword", keyword);
         
