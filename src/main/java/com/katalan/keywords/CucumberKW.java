@@ -118,6 +118,25 @@ public class CucumberKW {
         logger.info("Cucumber args: {}", args);
         
         try {
+            // Emit Katalon-style INFO record so execution0.log matches Katalon
+            // Studio's "Starting run keyword runFeatureFile: '...' and extract
+            // report to folder: '...'..." entry.
+            try {
+                String reportFolderProp = System.getProperty("reportFolder");
+                if (reportFolderProp == null || reportFolderProp.isEmpty()) {
+                    reportFolderProp = com.kms.katalon.core.configuration.RunConfiguration.getReportFolder();
+                }
+                String cucumberReportFolder = reportFolderProp != null && !reportFolderProp.isEmpty()
+                        ? reportFolderProp.replace("\\", "/") + "/cucumber_report/" + System.currentTimeMillis()
+                        : "cucumber_report/" + System.currentTimeMillis();
+                String infoMsg = "Starting run keyword runFeatureFile: '" + featureFile
+                        + "' and extract report to folder: '" + cucumberReportFolder + "'...";
+                com.katalan.core.logging.XmlKeywordLogger.getInstance()
+                        .logMessage("INFO", infoMsg, java.util.Collections.emptyMap());
+            } catch (Throwable ignored) {
+                // Non-fatal: logging only
+            }
+
             // Run Cucumber with our custom runtime that includes Groovy support
             int failed = runCucumberWithGroovyGlue(featurePath, stepsPath, projectPath, tags);
             if (failed > 0) {

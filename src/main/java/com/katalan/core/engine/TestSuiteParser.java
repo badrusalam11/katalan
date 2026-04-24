@@ -51,10 +51,45 @@ public class TestSuiteParser {
                 name = suitePath.getFileName().toString().replace(".ts", "");
             }
             suite.setName(name);
-            suite.setId(name.replaceAll("\\s+", "_").toLowerCase());
+
+            // Compute suite ID as relative path from "Test Suites/" root
+            // e.g. projectPath/Test Suites/Regresion/Nomi/BRI to BRI.ts
+            //   -> "Regresion/Nomi/BRI to BRI"
+            String computedId = name;
+            try {
+                Path absSuite = suitePath.toAbsolutePath().normalize();
+                Path absProject = projectPath != null
+                        ? projectPath.toAbsolutePath().normalize()
+                        : absSuite.getParent();
+                Path tsRoot = absProject.resolve("Test Suites");
+                if (absSuite.startsWith(tsRoot)) {
+                    String rel = tsRoot.relativize(absSuite).toString().replace('\\', '/');
+                    if (rel.endsWith(".ts")) {
+                        rel = rel.substring(0, rel.length() - 3);
+                    }
+                    if (!rel.isEmpty()) {
+                        computedId = rel;
+                    }
+                }
+            } catch (Exception ignored) {
+                // Fall back to suite name if relativization fails
+            }
+            suite.setId(computedId);
             
             // Get description
             suite.setDescription(getElementText(root, "description"));
+            
+            // Parse retry configuration (Katalon .ts XML schema)
+            String numberOfRerun = getElementText(root, "numberOfRerun");
+            if (numberOfRerun != null) {
+                try { suite.setRetryCount(Integer.parseInt(numberOfRerun.trim())); } catch (Exception ignored) {}
+            }
+            String rerunImmediately = getElementText(root, "rerunImmediately");
+            if (rerunImmediately != null) {
+                suite.setRerunImmediately("true".equalsIgnoreCase(rerunImmediately.trim()));
+            }
+            String tag = getElementText(root, "tag");
+            if (tag != null) suite.setTag(tag);
             
             // Parse test case links
             NodeList testCaseLinks = root.getElementsByTagName("testCaseLink");
