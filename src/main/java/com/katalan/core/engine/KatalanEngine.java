@@ -286,8 +286,14 @@ public class KatalanEngine {
                 katalanReporter.flushExecutionLog(generatedReportPath, executionResult);
                 logger.info("Flushed execution0.log with {} log records before @AfterTestSuite", 
                     com.katalan.core.logging.XmlKeywordLogger.getInstance().getRecords().size());
+                
+                // CRITICAL: FLUSH cucumber reports NOW before @AfterTestSuite!
+                // Custom report listeners (CSReport) need to READ cucumber.json, k-cucumber.json, cucumber.xml
+                // We must write these files NOW so listeners can parse them.
+                katalanReporter.flushCucumberReports(generatedReportPath, executionResult);
+                logger.info("Flushed cucumber reports (cucumber.json, k-cucumber.json, cucumber.xml) before @AfterTestSuite");
             } catch (Exception e) {
-                logger.warn("Failed to flush execution0.log: {}", e.getMessage());
+                logger.warn("Failed to flush reports: {}", e.getMessage());
             }
         }
         
