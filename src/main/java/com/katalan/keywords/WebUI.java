@@ -33,6 +33,43 @@ public class WebUI {
     
     private static final Logger logger = LoggerFactory.getLogger(WebUI.class);
     
+    /**
+     * Get a readable description of the test object for logging
+     */
+    private static String getTestObjectDescription(TestObject testObject) {
+        if (testObject == null) {
+            return "null";
+        }
+        
+        StringBuilder desc = new StringBuilder();
+        
+        // Add name if available
+        String name = testObject.getName();
+        if (name != null && !name.isEmpty()) {
+            desc.append(name);
+        }
+        
+        // Add selector info - FULL locator without truncation
+        if (testObject.getSelectorMethod() != null && testObject.getSelectorValue() != null) {
+            if (desc.length() > 0) {
+                desc.append(" (");
+            }
+            desc.append(testObject.getSelectorMethod()).append(": ");
+            desc.append(testObject.getSelectorValue());
+            
+            if (name != null && !name.isEmpty()) {
+                desc.append(")");
+            }
+        }
+        
+        // If still empty, use toString
+        if (desc.length() == 0) {
+            desc.append(testObject.toString());
+        }
+        
+        return desc.toString();
+    }
+    
     // ==================== Browser Keywords ====================
     
     /**
@@ -193,7 +230,7 @@ public class WebUI {
      * Click on an element with timeout
      */
     public static void click(TestObject testObject, int timeout) {
-        logger.info("Clicking on: {}", testObject.getName());
+        logger.info("Clicking on: {}", getTestObjectDescription(testObject));
         WebDriver driver = getDriver();
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout));
         By by = testObject.toSeleniumBy();
@@ -232,7 +269,7 @@ public class WebUI {
      * Double click on an element with timeout
      */
     public static void doubleClick(TestObject testObject, int timeout) {
-        logger.info("Double clicking on: {}", testObject.getName());
+        logger.info("Double clicking on: {}", getTestObjectDescription(testObject));
         WebElement element = waitForElement(testObject, timeout);
         new Actions(getDriver()).doubleClick(element).perform();
     }
@@ -248,7 +285,7 @@ public class WebUI {
      * Right click on an element with timeout
      */
     public static void rightClick(TestObject testObject, int timeout) {
-        logger.info("Right clicking on: {}", testObject.getName());
+        logger.info("Right clicking on: {}", getTestObjectDescription(testObject));
         WebElement element = waitForElement(testObject, timeout);
         new Actions(getDriver()).contextClick(element).perform();
     }
@@ -264,7 +301,7 @@ public class WebUI {
      * Click on element using JavaScript with timeout
      */
     public static void clickUsingJavaScript(TestObject testObject, int timeout) {
-        logger.info("JS Click on: {}", testObject.getName());
+        logger.info("JS Click on: {}", getTestObjectDescription(testObject));
         WebElement element = waitForElement(testObject, timeout);
         executeJavaScript("arguments[0].click();", element);
     }
@@ -287,7 +324,7 @@ public class WebUI {
      * onChange) see the updated value and enable submit buttons.
      */
     public static void setText(TestObject testObject, String text, int timeout) {
-        logger.info("Setting text '{}' to: {}", text, testObject.getName());
+        logger.info("Setting text '{}' to: {}", text, getTestObjectDescription(testObject));
         WebElement element = waitForElement(testObject, timeout);
         try {
             element.clear();
@@ -315,7 +352,7 @@ public class WebUI {
      * Clear text from an input field with timeout
      */
     public static void clearText(TestObject testObject, int timeout) {
-        logger.info("Clearing text from: {}", testObject.getName());
+        logger.info("Clearing text from: {}", getTestObjectDescription(testObject));
         WebElement element = waitForElement(testObject, timeout);
         element.clear();
     }
@@ -338,7 +375,7 @@ public class WebUI {
      * Send keys (text string) to an element with timeout - Katalon compatibility
      */
     public static void sendKeys(TestObject testObject, int timeout, String text) {
-        logger.info("Sending text to: {}", testObject.getName());
+        logger.info("Sending text to: {}", getTestObjectDescription(testObject));
         WebElement element = waitForElement(testObject, timeout);
         element.sendKeys(text);
     }
@@ -347,7 +384,7 @@ public class WebUI {
      * Send keys to an element with timeout
      */
     public static void sendKeys(TestObject testObject, int timeout, Keys... keys) {
-        logger.info("Sending keys to: {}", testObject.getName());
+        logger.info("Sending keys to: {}", getTestObjectDescription(testObject));
         WebElement element = waitForElement(testObject, timeout);
         for (Keys key : keys) {
             element.sendKeys(key);
@@ -365,7 +402,7 @@ public class WebUI {
      * Upload file with timeout
      */
     public static void uploadFile(TestObject testObject, String filePath, int timeout) {
-        logger.info("Uploading file '{}' to: {}", filePath, testObject.getName());
+        logger.info("Uploading file '{}' to: {}", filePath, getTestObjectDescription(testObject));
         WebElement element = waitForElement(testObject, timeout);
         element.sendKeys(filePath);
     }
@@ -437,7 +474,7 @@ public class WebUI {
      * Select option by visible text with regex support
      */
     public static void selectOptionByLabel(TestObject testObject, String label, boolean isRegex, int timeout) {
-        logger.info("Selecting option '{}' from: {}", label, testObject.getName());
+        logger.info("Selecting option '{}' from: {}", label, getTestObjectDescription(testObject));
         WebElement element = waitForElement(testObject, timeout);
         Select select = new Select(element);
         if (isRegex) {
@@ -463,7 +500,7 @@ public class WebUI {
      * Select option by value with regex support
      */
     public static void selectOptionByValue(TestObject testObject, String value, boolean isRegex, int timeout) {
-        logger.info("Selecting option by value '{}' from: {}", value, testObject.getName());
+        logger.info("Selecting option by value '{}' from: {}", value, getTestObjectDescription(testObject));
         WebElement element = waitForElement(testObject, timeout);
         Select select = new Select(element);
         if (isRegex) {
@@ -489,7 +526,7 @@ public class WebUI {
      * Select option by index with timeout
      */
     public static void selectOptionByIndex(TestObject testObject, int index, int timeout) {
-        logger.info("Selecting option by index {} from: {}", index, testObject.getName());
+        logger.info("Selecting option by index {} from: {}", index, getTestObjectDescription(testObject));
         WebElement element = waitForElement(testObject, timeout);
         Select select = new Select(element);
         select.selectByIndex(index);
@@ -506,7 +543,7 @@ public class WebUI {
      * Deselect all options with timeout
      */
     public static void deselectAllOption(TestObject testObject, int timeout) {
-        logger.info("Deselecting all options from: {}", testObject.getName());
+        logger.info("Deselecting all options from: {}", getTestObjectDescription(testObject));
         WebElement element = waitForElement(testObject, timeout);
         Select select = new Select(element);
         select.deselectAll();
@@ -557,7 +594,7 @@ public class WebUI {
      * Check a checkbox with timeout
      */
     public static void check(TestObject testObject, int timeout) {
-        logger.info("Checking checkbox: {}", testObject.getName());
+        logger.info("Checking checkbox: {}", getTestObjectDescription(testObject));
         WebElement element = waitForElement(testObject, timeout);
         if (!element.isSelected()) {
             element.click();
@@ -575,7 +612,7 @@ public class WebUI {
      * Uncheck a checkbox with timeout
      */
     public static void uncheck(TestObject testObject, int timeout) {
-        logger.info("Unchecking checkbox: {}", testObject.getName());
+        logger.info("Unchecking checkbox: {}", getTestObjectDescription(testObject));
         WebElement element = waitForElement(testObject, timeout);
         if (element.isSelected()) {
             element.click();
@@ -588,7 +625,7 @@ public class WebUI {
      * Wait for element to be present
      */
     public static void waitForElementPresent(TestObject testObject, int timeout) {
-        logger.info("Waiting for element present: {}", testObject.getName());
+        logger.info("Waiting for element present: {}", getTestObjectDescription(testObject));
         WebDriverWait wait = new WebDriverWait(getDriver(), Duration.ofSeconds(timeout));
         wait.until(ExpectedConditions.presenceOfElementLocated(testObject.toSeleniumBy()));
     }
@@ -597,7 +634,7 @@ public class WebUI {
      * Wait for element to be visible
      */
     public static void waitForElementVisible(TestObject testObject, int timeout) {
-        logger.info("Waiting for element visible: {}", testObject.getName());
+        logger.info("Waiting for element visible: {}", getTestObjectDescription(testObject));
         WebDriverWait wait = new WebDriverWait(getDriver(), Duration.ofSeconds(timeout));
         wait.until(ExpectedConditions.visibilityOfElementLocated(testObject.toSeleniumBy()));
     }
@@ -606,7 +643,7 @@ public class WebUI {
      * Wait for element to be clickable
      */
     public static void waitForElementClickable(TestObject testObject, int timeout) {
-        logger.info("Waiting for element clickable: {}", testObject.getName());
+        logger.info("Waiting for element clickable: {}", getTestObjectDescription(testObject));
         WebDriverWait wait = new WebDriverWait(getDriver(), Duration.ofSeconds(timeout));
         wait.until(ExpectedConditions.elementToBeClickable(testObject.toSeleniumBy()));
     }
@@ -615,7 +652,7 @@ public class WebUI {
      * Wait for element to not be present
      */
     public static void waitForElementNotPresent(TestObject testObject, int timeout) {
-        logger.info("Waiting for element not present: {}", testObject.getName());
+        logger.info("Waiting for element not present: {}", getTestObjectDescription(testObject));
         WebDriverWait wait = new WebDriverWait(getDriver(), Duration.ofSeconds(timeout));
         wait.until(ExpectedConditions.invisibilityOfElementLocated(testObject.toSeleniumBy()));
     }
@@ -661,7 +698,7 @@ public class WebUI {
             waitForElementPresent(testObject, timeout);
             return true;
         } catch (Exception e) {
-            logger.warn("Element not present: {}", testObject.getName());
+            logger.warn("Element not present: {}", getTestObjectDescription(testObject));
             return false;
         }
     }
@@ -681,7 +718,7 @@ public class WebUI {
             waitForElementVisible(testObject, timeout);
             return true;
         } catch (Exception e) {
-            logger.warn("Element not visible: {}", testObject.getName());
+            logger.warn("Element not visible: {}", getTestObjectDescription(testObject));
             return false;
         }
     }
@@ -812,7 +849,7 @@ public class WebUI {
      * Switch to frame by TestObject with timeout
      */
     public static void switchToFrame(TestObject testObject, int timeout) {
-        logger.info("Switching to frame: {}", testObject.getName());
+        logger.info("Switching to frame: {}", getTestObjectDescription(testObject));
         WebElement element = waitForElement(testObject, timeout);
         getDriver().switchTo().frame(element);
     }
@@ -941,7 +978,7 @@ public class WebUI {
      * Scroll to element with timeout
      */
     public static void scrollToElement(TestObject testObject, int timeout) {
-        logger.info("Scrolling to element: {}", testObject.getName());
+        logger.info("Scrolling to element: {}", getTestObjectDescription(testObject));
         WebElement element = waitForElement(testObject, timeout);
         executeJavaScript("arguments[0].scrollIntoView(true);", element);
     }
@@ -981,7 +1018,7 @@ public class WebUI {
      * Mouse over element with timeout
      */
     public static void mouseOver(TestObject testObject, int timeout) {
-        logger.info("Mouse over: {}", testObject.getName());
+        logger.info("Mouse over: {}", getTestObjectDescription(testObject));
         WebElement element = waitForElement(testObject, timeout);
         new Actions(getDriver()).moveToElement(element).perform();
     }
@@ -1014,7 +1051,7 @@ public class WebUI {
      * Focus on element with timeout
      */
     public static void focus(TestObject testObject, int timeout) {
-        logger.info("Focusing on: {}", testObject.getName());
+        logger.info("Focusing on: {}", getTestObjectDescription(testObject));
         WebElement element = waitForElement(testObject, timeout);
         new Actions(getDriver()).moveToElement(element).click().perform();
     }
