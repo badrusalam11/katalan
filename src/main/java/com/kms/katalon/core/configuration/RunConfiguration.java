@@ -290,6 +290,35 @@ public class RunConfiguration {
     }
     
     /**
+     * Get execution properties as a Map structure compatible with Katalon
+     * This returns a structure that mimics Katalon's ExecutionProperties object
+     * Used by listeners like Actmov3 that call RunConfiguration.getExecutionProperties().drivers.system
+     */
+    public static Map<String, Object> getExecutionProperties() {
+        Map<String, Object> props = new HashMap<>();
+        
+        // Create the drivers.system structure
+        Map<String, Object> drivers = new HashMap<>();
+        Map<String, Object> system = new HashMap<>();
+        Map<String, Object> webUI = new HashMap<>();
+        Map<String, Object> mobile = new HashMap<>();
+        
+        // Set browser type for WebUI
+        String browserType = getBrowserType();
+        webUI.put("browserType", browserType);
+        
+        // Set device platform for Mobile (if applicable)
+        mobile.put("devicePlatform", ""); // Empty for non-mobile tests
+        
+        system.put("WebUI", webUI);
+        system.put("Mobile", mobile);
+        drivers.put("system", system);
+        props.put("drivers", drivers);
+        
+        return props;
+    }
+    
+    /**
      * Store a value in execution context
      */
     public static void storeToExecutionContext(String key, Object value) {
