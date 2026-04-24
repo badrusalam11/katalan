@@ -1145,6 +1145,15 @@ public class KatalonReportGenerator {
     public void flushExecutionLog(Path reportDir, ExecutionResult result) throws IOException {
         generateExecutionLog(reportDir, result);
     }
+    
+    /**
+     * FLUSH cucumber reports (cucumber.json, k-cucumber.json, cucumber.xml) BEFORE @AfterTestSuite runs.
+     * Custom report listeners (CSReport) need to READ these files,
+     * so we must write them NOW before listeners execute.
+     */
+    public void flushCucumberReports(Path reportDir, ExecutionResult result) throws IOException {
+        generateCucumberReports(reportDir, result);
+    }
 
     /**
      * Append a single Katalon-style <record> entry to the execution log buffer.
@@ -2029,6 +2038,15 @@ public class KatalonReportGenerator {
         for (TestCaseResult tcResult : bddTestCases) {
             Path featureReportDir = cucumberDir.resolve(timestampId);
             Files.createDirectories(featureReportDir);
+            
+            // Check if files already exist (already flushed before @AfterTestSuite)
+            // If so, skip generation to avoid duplication
+            if (Files.exists(featureReportDir.resolve("cucumber.json")) &&
+                Files.exists(featureReportDir.resolve("k-cucumber.json")) &&
+                Files.exists(featureReportDir.resolve("cucumber.xml"))) {
+                logger.debug("Cucumber reports already exist for {}, skipping", tcResult.getTestCaseName());
+                continue;
+            }
             
             generateCucumberJson(featureReportDir, tcResult);
             generateCucumberXml(featureReportDir, tcResult);
