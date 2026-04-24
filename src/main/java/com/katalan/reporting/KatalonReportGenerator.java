@@ -2658,8 +2658,8 @@ public class KatalonReportGenerator {
         long durationNanos = 0;
         if (startTimeStr != null && endTimeStr != null) {
             try {
-                Instant start = Instant.parse(startTimeStr.replace("T", "T").replaceAll("([+-]\\d{2})(\\d{2})$", "$1:$2"));
-                Instant end = Instant.parse(endTimeStr.replace("T", "T").replaceAll("([+-]\\d{2})(\\d{2})$", "$1:$2"));
+                Instant start = java.time.OffsetDateTime.parse(startTimeStr).toInstant();
+                Instant end = java.time.OffsetDateTime.parse(endTimeStr).toInstant();
                 durationNanos = Duration.between(start, end).toNanos();
             } catch (Exception e) {
                 logger.warn("Failed to parse step timestamps: {} - {}", startTimeStr, endTimeStr);
