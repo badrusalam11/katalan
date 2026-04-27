@@ -153,10 +153,55 @@ public class KatalanCLI implements Callable<Integer> {
                 
                 // Create engine
                 KatalanEngine engine = new KatalanEngine(config);
+
+                // IMPORTANT: Ensure ExecutionContext contains the project path so
+                // RunConfiguration.getProjectDir() returns the target project.
+                // Some scripts use relative paths (new File("MyActmo.txt")) and
+                // also call RunConfiguration.getProjectDir(), so initialize
+                // the ExecutionContext before engine.initialize().
+                com.katalan.core.context.ExecutionContext ctx = new com.katalan.core.context.ExecutionContext(config);
+                com.katalan.core.context.ExecutionContext.setCurrent(ctx);
+
+                // CRITICAL: Change working directory to project path BEFORE engine.initialize()
+                // This ensures automation scripts that use relative file paths (new File("MyActmo.txt"))
+                // write to the PROJECT directory, not the katalan jar's directory.
+                // Save original to restore later.
+                String originalUserDir = System.getProperty("user.dir");
+                String newProjectDir = projectPath.toAbsolutePath().toString();
+                System.setProperty("user.dir", newProjectDir);
+                
+                // ALSO change actual process working directory using native call via JNA
+                // This is CRITICAL because Java's File class uses native getcwd(), not the property!
+                try {
+                    com.sun.jna.Native.setLastError(0);
+                    int result;
+                    
+                    if (System.getProperty("os.name").toLowerCase().contains("win")) {
+                        // Windows: use _chdir from msvcrt
+                        com.sun.jna.NativeLibrary msvcrt = com.sun.jna.NativeLibrary.getInstance("msvcrt");
+                        com.sun.jna.Function chdir = msvcrt.getFunction("_chdir");
+                        result = (Integer) chdir.invoke(Integer.class, new Object[]{newProjectDir});
+                    } else {
+                        // Unix/Linux/Mac: use chdir from libc
+                        com.sun.jna.NativeLibrary libc = com.sun.jna.NativeLibrary.getInstance("c");
+                        com.sun.jna.Function chdir = libc.getFunction("chdir");
+                        result = (Integer) chdir.invoke(Integer.class, new Object[]{newProjectDir});
+                    }
+                    
+                    if (result == 0) {
+                        System.out.println("✅ Native working directory changed to: " + newProjectDir);
+                    } else {
+                        System.err.println("⚠️  Warning: chdir() returned error code: " + result);
+                    }
+                } catch (Exception e) {
+                    System.err.println("⚠️  Warning: Could not change native working directory: " + e.getMessage());
+                    System.err.println("   Scripts using relative paths may write to katalan directory!");
+                }
                 
                 try {
                     // Initialize
                     System.out.println("🚀 Initializing katalan Engine...");
+                    System.out.println("📁 Working directory set to: " + projectPath.toAbsolutePath());
                     engine.initialize();
                     
                     // Re-apply GlobalVariable overrides AFTER profile is loaded
@@ -203,7 +248,14 @@ public class KatalanCLI implements Callable<Integer> {
                     return result.getFailedTests() > 0 || result.getErrorTests() > 0 ? 1 : 0;
                     
                 } finally {
-                    engine.shutdown();
+                    try {
+                        // Restore original working directory
+                        System.setProperty("user.dir", originalUserDir);
+                        engine.shutdown();
+                    } finally {
+                        // Clear thread ExecutionContext so future runs start clean
+                        com.katalan.core.context.ExecutionContext.clearCurrent();
+                    }
                 }
                 
             } catch (Exception e) {
