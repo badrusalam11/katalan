@@ -73,8 +73,44 @@ public class WebDriverFactory {
         
         ChromeOptions options = new ChromeOptions();
         
+        // ============================================================
+        // 1. Read custom args from RunConfiguration (from automation script)
+        // ============================================================
+        Object argsFromScript = com.kms.katalon.core.configuration.RunConfiguration.getWebDriverPreferencesProperty("args");
+        if (argsFromScript instanceof java.util.List) {
+            java.util.List<?> argsList = (java.util.List<?>) argsFromScript;
+            for (Object arg : argsList) {
+                if (arg != null) {
+                    options.addArguments(arg.toString());
+                    logger.debug("Added Chrome arg from script: {}", arg);
+                }
+            }
+        }
         
-        // Add common Chrome arguments
+        // ============================================================
+        // 2. Read custom prefs from RunConfiguration (from automation script)
+        // ============================================================
+        Object prefsFromScript = com.kms.katalon.core.configuration.RunConfiguration.getWebDriverPreferencesProperty("prefs");
+        java.util.Map<String, Object> prefs = new java.util.HashMap<>();
+        if (prefsFromScript instanceof java.util.Map) {
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, Object> prefsMap = (java.util.Map<String, Object>) prefsFromScript;
+            prefs.putAll(prefsMap);
+            logger.debug("Added Chrome prefs from script: {}", prefsMap.keySet());
+        }
+        
+        // ============================================================
+        // 3. Read localState from RunConfiguration (for download bubble)
+        // ============================================================
+        Object localStateFromScript = com.kms.katalon.core.configuration.RunConfiguration.getWebDriverPreferencesProperty("localState");
+        if (localStateFromScript instanceof java.util.Map) {
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, Object> localStateMap = (java.util.Map<String, Object>) localStateFromScript;
+            options.setExperimentalOption("localState", localStateMap);
+            logger.debug("Added Chrome localState from script: {}", localStateMap.keySet());
+        }
+        
+        // Add common Chrome arguments (defaults - will be overridden by script if duplicates)
         options.addArguments(
             "--disable-blink-features=AutomationControlled",
             "--disable-extensions",
@@ -88,7 +124,9 @@ public class WebDriverFactory {
             "--ignore-certificate-errors",
             "--ignore-ssl-errors",
             "--allow-running-insecure-content",
-            "--disable-features=PasswordCheck,PasswordLeakDetection,InsecureFormWarnings",
+            "--safebrowsing-disable-download-protection",
+            "--safebrowsing-disable-extension-blacklist",
+            "--disable-features=InsecureDownloadWarnings,PasswordCheck,PasswordLeakDetection,InsecureFormWarnings",
             "--password-store=basic"
         );
 
@@ -117,19 +155,22 @@ public class WebDriverFactory {
                 + "katalan-chrome-" + System.currentTimeMillis();
         options.addArguments("--user-data-dir=" + tempProfile);
         
-        // Disable all password/autofill features
-        java.util.Map<String, Object> prefs = new java.util.HashMap<>();
+        // Disable all password/autofill features (defaults - can be overridden by script prefs)
         prefs.put("credentials_enable_service", false);
         prefs.put("profile.password_manager_enabled", false);
         prefs.put("profile.password_manager_leak_detection", false);
         prefs.put("autofill.profile_enabled", false);
         prefs.put("autofill.credit_card_enabled", false);
-        options.setExperimentalOption("prefs", prefs);
+        
+        // Apply all prefs (script prefs + defaults)
+        if (!prefs.isEmpty()) {
+            options.setExperimentalOption("prefs", prefs);
+        }
         
         // Accept insecure certs
         options.setAcceptInsecureCerts(true);
         
-        // Add custom arguments
+        // Add custom arguments from config (legacy support)
         for (Map.Entry<String, String> arg : config.getBrowserArguments().entrySet()) {
             options.addArguments(arg.getKey() + "=" + arg.getValue());
         }
@@ -254,16 +295,22 @@ public class WebDriverFactory {
     
     /**
      * Configure WebDriver timeouts
+     * CRITICAL: implicitWait MUST be 0 to avoid double-waiting with explicit waits
+     * Katalon Studio uses implicitWait=0 for best performance
      */
     private static void configureDriver(WebDriver driver, RunConfiguration config) {
-        driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(config.getImplicitWait()));
+        // ALWAYS use 0 for implicit wait to prevent double-waiting issues
+        // When implicit wait > 0, every findElement call waits the full timeout
+        // This causes 2x slowdown: implicit wait + explicit wait
+        driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(0));
+        
         driver.manage().timeouts().pageLoadTimeout(Duration.ofSeconds(config.getPageLoadTimeout()));
         driver.manage().timeouts().scriptTimeout(Duration.ofSeconds(config.getScriptTimeout()));
         
         // Maximize window by default
         driver.manage().window().maximize();
         
-        logger.info("WebDriver configured with timeouts - implicit: {}s, pageLoad: {}s, script: {}s",
-                config.getImplicitWait(), config.getPageLoadTimeout(), config.getScriptTimeout());
+        logger.info("WebDriver configured with timeouts - implicit: 0s (FAST), pageLoad: {}s, script: {}s",
+                config.getPageLoadTimeout(), config.getScriptTimeout());
     }
 }

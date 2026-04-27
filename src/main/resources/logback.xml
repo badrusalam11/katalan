@@ -25,8 +25,16 @@
         </encoder>
     </appender>
     
-    <!-- katalan Loggers -->
-    <logger name="com.katalan" level="DEBUG"/>
+    <!-- Wrap FILE appender with ASYNC for non-blocking I/O -->
+    <appender name="ASYNC_FILE" class="ch.qos.logback.classic.AsyncAppender">
+        <appender-ref ref="FILE"/>
+        <queueSize>512</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <neverBlock>true</neverBlock>
+    </appender>
+    
+    <!-- katalan Loggers - INFO for visibility (shows "Clicking...", "Setting text...") -->
+    <logger name="com.katalan" level="INFO"/>
     
     <!-- Selenium/WebDriver - reduce noise -->
     <logger name="org.openqa.selenium" level="WARN"/>
@@ -35,7 +43,7 @@
     <!-- Root Logger -->
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>
-        <appender-ref ref="FILE"/>
+        <appender-ref ref="ASYNC_FILE"/>
     </root>
     
 </configuration>
