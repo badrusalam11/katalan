@@ -131,16 +131,38 @@ public class WebDriverFactory {
         );
 
         if (config.isHeadless()) {
+            // ============================================================
+            // CRITICAL: FORCE VIEWPORT SIZE VIA mobileEmulation
+            // This is the ONLY reliable way to set window size in headless!
+            // --window-size flag is IGNORED in headless mode!
+            // ============================================================
+            java.util.Map<String, Object> deviceMetrics = new java.util.HashMap<>();
+            deviceMetrics.put("width", 1920);
+            deviceMetrics.put("height", 1080);
+            deviceMetrics.put("pixelRatio", 1.0);
+            
+            java.util.Map<String, Object> mobileEmulation = new java.util.HashMap<>();
+            mobileEmulation.put("deviceMetrics", deviceMetrics);
+            mobileEmulation.put("userAgent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36");
+            
+            options.setExperimentalOption("mobileEmulation", mobileEmulation);
+            
             options.addArguments(
                 "--headless=new",
-                "--window-size=1920,1080",
                 "--disable-gpu",
                 "--hide-scrollbars",
-                "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
+                "--disable-dev-shm-usage",
+                "--disable-software-rasterizer",
+                "--enable-features=NetworkService,NetworkServiceInProcess",
+                "--force-device-scale-factor=1",
+                "--disable-setuid-sandbox",
+                "--no-first-run",
+                "--no-default-browser-check"
             );
+            
             options.setExperimentalOption(
-            "excludeSwitches",
-            java.util.Arrays.asList("enable-automation")
+                "excludeSwitches",
+                java.util.Arrays.asList("enable-automation")
             );
             options.setExperimentalOption(
                 "useAutomationExtension",
@@ -307,8 +329,20 @@ public class WebDriverFactory {
         driver.manage().timeouts().pageLoadTimeout(Duration.ofSeconds(config.getPageLoadTimeout()));
         driver.manage().timeouts().scriptTimeout(Duration.ofSeconds(config.getScriptTimeout()));
         
-        // Maximize window by default
-        driver.manage().window().maximize();
+        // For non-headless: maximize window
+        // For headless: window size already forced via mobileEmulation in ChromeOptions
+        if (!config.isHeadless()) {
+            driver.manage().window().maximize();
+        } else {
+            // Verify headless viewport size (for logging only)
+            try {
+                org.openqa.selenium.Dimension actualSize = driver.manage().window().getSize();
+                logger.info("Headless mode: Viewport forced to 1920x1080 via mobileEmulation (actual: {}x{})", 
+                           actualSize.getWidth(), actualSize.getHeight());
+            } catch (Exception e) {
+                logger.warn("Could not verify headless viewport size: {}", e.getMessage());
+            }
+        }
         
         logger.info("WebDriver configured with timeouts - implicit: 0s (FAST), pageLoad: {}s, script: {}s",
                 config.getPageLoadTimeout(), config.getScriptTimeout());
