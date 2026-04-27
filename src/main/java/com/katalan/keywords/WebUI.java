@@ -595,6 +595,7 @@ public class WebUI {
     
     /**
      * Wait for element to be present with failure handling
+     * Uses 50ms polling for fast detection (consistent with other waits)
      */
     public static void waitForElementPresent(TestObject testObject, int timeout, Object failureHandling) {
         logger.info("Waiting for element present: {}", describe(testObject));
@@ -602,8 +603,8 @@ public class WebUI {
             WebDriver driver = getDriver();
             By locator = testObject.toSeleniumBy();
             
-            // Direct wait - no immediate check needed
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(100));
+            // Use 50ms polling for fast detection (consistent with waitForElement)
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(50));
             wait.until(ExpectedConditions.presenceOfElementLocated(locator));
         } catch (Exception e) {
             com.katalan.core.compat.FailureHandling mode = toFailureHandling(failureHandling);
@@ -628,6 +629,7 @@ public class WebUI {
     
     /**
      * Wait for element to be visible with failure handling
+     * Uses 50ms polling for fast detection (consistent with other waits)
      */
     public static void waitForElementVisible(TestObject testObject, int timeout, Object failureHandling) {
         logger.info("Waiting for element visible: {}", describe(testObject));
@@ -635,8 +637,8 @@ public class WebUI {
             WebDriver driver = getDriver();
             By locator = testObject.toSeleniumBy();
             
-            // Direct wait - no immediate check needed
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(100));
+            // Use 50ms polling for fast detection (consistent with waitForElement)
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(50));
             wait.until(ExpectedConditions.visibilityOfElementLocated(locator));
         } catch (Exception e) {
             com.katalan.core.compat.FailureHandling mode = toFailureHandling(failureHandling);
@@ -661,6 +663,7 @@ public class WebUI {
     
     /**
      * Wait for element to be clickable with failure handling
+     * Uses 50ms polling for fast detection (consistent with other waits)
      */
     public static void waitForElementClickable(TestObject testObject, int timeout, Object failureHandling) {
         logger.info("Waiting for element clickable: {}", describe(testObject));
@@ -668,8 +671,8 @@ public class WebUI {
             WebDriver driver = getDriver();
             By locator = testObject.toSeleniumBy();
             
-            // Direct wait - no immediate check needed
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(100));
+            // Use 50ms polling for fast detection (consistent with waitForElement)
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(50));
             wait.until(ExpectedConditions.elementToBeClickable(locator));
         } catch (Exception e) {
             com.katalan.core.compat.FailureHandling mode = toFailureHandling(failureHandling);
