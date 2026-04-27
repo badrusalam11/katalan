@@ -86,7 +86,23 @@ public class WebUI {
      */
     public static void navigateToUrl(String url) {
         logger.info("Navigating to URL: {}", url);
-        getDriver().get(url);
+        WebDriver driver = getDriver();
+        driver.get(url);
+        
+        // Wait for page to be fully loaded (especially critical in headless mode)
+        try {
+            // Wait for document.readyState === 'complete'
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(30), Duration.ofMillis(100));
+            wait.until(webDriver -> ((JavascriptExecutor) webDriver)
+                .executeScript("return document.readyState").equals("complete"));
+            
+            // Additional check: wait for body to be present
+            wait.until(ExpectedConditions.presenceOfElementLocated(By.tagName("body")));
+            
+            logger.debug("Page fully loaded: {}", url);
+        } catch (Exception e) {
+            logger.warn("Timeout waiting for page load, continuing anyway: {}", e.getMessage());
+        }
     }
 
     // ==================== Smart Wait (no-op stubs) ====================
