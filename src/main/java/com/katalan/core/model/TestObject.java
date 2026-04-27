@@ -14,6 +14,8 @@ public class TestObject {
     private Map<String, String> properties;
     private SelectorMethod selectorMethod;
     private String selectorValue;
+    // Cached Selenium By locator to avoid repeated allocations
+    private transient org.openqa.selenium.By cachedBy;
     
     public enum SelectorMethod {
         XPATH,
@@ -70,27 +72,38 @@ public class TestObject {
         if (selectorMethod == null || selectorValue == null) {
             throw new IllegalStateException("Selector method and value must be set");
         }
-        
+        // Return cached By if already computed and selector hasn't changed
+        if (cachedBy != null) return cachedBy;
+
         switch (selectorMethod) {
             case XPATH:
-                return By.xpath(selectorValue);
+                cachedBy = By.xpath(selectorValue);
+                break;
             case CSS:
-                return By.cssSelector(selectorValue);
+                cachedBy = By.cssSelector(selectorValue);
+                break;
             case ID:
-                return By.id(selectorValue);
+                cachedBy = By.id(selectorValue);
+                break;
             case NAME:
-                return By.name(selectorValue);
+                cachedBy = By.name(selectorValue);
+                break;
             case CLASS_NAME:
-                return By.className(selectorValue);
+                cachedBy = By.className(selectorValue);
+                break;
             case LINK_TEXT:
-                return By.linkText(selectorValue);
+                cachedBy = By.linkText(selectorValue);
+                break;
             case PARTIAL_LINK_TEXT:
-                return By.partialLinkText(selectorValue);
+                cachedBy = By.partialLinkText(selectorValue);
+                break;
             case TAG_NAME:
-                return By.tagName(selectorValue);
+                cachedBy = By.tagName(selectorValue);
+                break;
             default:
                 throw new IllegalArgumentException("Unknown selector method: " + selectorMethod);
         }
+        return cachedBy;
     }
     
     // Getters and Setters
@@ -128,6 +141,7 @@ public class TestObject {
     
     public void setSelectorMethod(SelectorMethod selectorMethod) {
         this.selectorMethod = selectorMethod;
+        this.cachedBy = null;
     }
     
     public String getSelectorValue() {
@@ -136,6 +150,7 @@ public class TestObject {
     
     public void setSelectorValue(String selectorValue) {
         this.selectorValue = selectorValue;
+        this.cachedBy = null;
     }
     
     @Override
