@@ -15,7 +15,9 @@ import picocli.CommandLine.Parameters;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Callable;
 
 /**
@@ -102,11 +104,20 @@ public class KatalanCLI implements Callable<Integer> {
         @Option(names = {"-v", "--verbose"}, description = "Enable verbose logging")
         private boolean verbose;
         
+        // Capture all unmatched options starting with -g_ for GlobalVariable overrides
+        // Example: -g_nama_tester=John will set GlobalVariable.nama_tester = "John"
+        @CommandLine.Unmatched
+        private List<String> unmatchedOptions;
+        
         @Override
         public Integer call() {
             printBanner();
             
             try {
+                // Process GlobalVariable overrides from -g_* parameters
+                // Save them to re-apply after engine initialization
+                Map<String, Object> globalVarOverrides = processGlobalVariableOverrides();
+                
                 // Validate inputs
                 if (testSuite == null && (testCases == null || testCases.isEmpty())) {
                     System.err.println("Error: Please specify either --test-suite or --test-case");
@@ -147,6 +158,14 @@ public class KatalanCLI implements Callable<Integer> {
                     // Initialize
                     System.out.println("🚀 Initializing katalan Engine...");
                     engine.initialize();
+                    
+                    // Re-apply GlobalVariable overrides AFTER profile is loaded
+                    // This ensures CLI parameters take precedence over profile values
+                    if (!globalVarOverrides.isEmpty()) {
+                        System.out.println("\n🔄 Re-applying GlobalVariable overrides after profile load...");
+                        applyGlobalVariableOverrides(globalVarOverrides);
+                        System.out.println("✅ " + globalVarOverrides.size() + " override(s) applied\n");
+                    }
                     
                     ExecutionResult result;
                     
@@ -240,6 +259,94 @@ public class KatalanCLI implements Callable<Integer> {
             System.out.println("║                                                           ║");
             System.out.println("╚═══════════════════════════════════════════════════════════╝");
             System.out.println();
+        }
+        
+        /**
+         * Process GlobalVariable overrides from CLI parameters
+         * Supports format: -g_variableName=value
+         * Example: -g_nama_tester=John will set GlobalVariable.nama_tester = "John"
+         * 
+         * @return Map of variable names to values for re-application after profile load
+         */
+        private Map<String, Object> processGlobalVariableOverrides() {
+            Map<String, Object> overrides = new java.util.HashMap<>();
+            
+            if (unmatchedOptions == null || unmatchedOptions.isEmpty()) {
+                return overrides;
+            }
+            
+            for (String option : unmatchedOptions) {
+                // Check if it starts with -g_
+                if (option.startsWith("-g_")) {
+                    String withoutPrefix = option.substring(3); // Remove "-g_"
+                    
+                    // Split by = to get variable name and value
+                    String[] parts = withoutPrefix.split("=", 2);
+                    if (parts.length == 2) {
+                        String variableName = parts[0];
+                        String value = parts[1];
+                        
+                        // Save for later re-application
+                        overrides.put(variableName, value);
+                        System.out.println("📝 GlobalVariable." + variableName + " = \"" + value + "\" (will be applied after profile load)");
+                    } else {
+                        System.err.println("⚠️  Warning: Invalid format for -g_ parameter: " + option);
+                        System.err.println("    Expected format: -g_variableName=value");
+                    }
+                }
+            }
+            
+            if (!overrides.isEmpty()) {
+                System.out.println("📦 Collected " + overrides.size() + " GlobalVariable override(s)\n");
+            }
+            
+            return overrides;
+        }
+        
+        /**
+         * Apply GlobalVariable overrides using reflection
+         * Called AFTER profile is loaded to ensure CLI values take precedence
+         */
+        private void applyGlobalVariableOverrides(Map<String, Object> overrides) {
+            if (overrides == null || overrides.isEmpty()) {
+                return;
+            }
+            
+            int successCount = 0;
+            for (Map.Entry<String, Object> entry : overrides.entrySet()) {
+                String variableName = entry.getKey();
+                Object value = entry.getValue();
+                
+                try {
+                    // Use GlobalVariable.set() which stores in dynamic map AND tries to set static field
+                    com.katalan.core.compat.GlobalVariable.set(variableName, value);
+                    
+                    System.out.println("  ✓ GlobalVariable." + variableName + " = \"" + value + "\"");
+                    successCount++;
+                } catch (Exception e) {
+                    System.err.println("  ⚠️  Warning: Failed to set GlobalVariable." + variableName + ": " + e.getMessage());
+                }
+            }
+        }
+        
+        /**
+         * Convert string value to appropriate type based on field type
+         */
+        private Object convertValue(String value, Class<?> targetType) {
+            if (targetType == String.class) {
+                return value;
+            } else if (targetType == int.class || targetType == Integer.class) {
+                return Integer.parseInt(value);
+            } else if (targetType == long.class || targetType == Long.class) {
+                return Long.parseLong(value);
+            } else if (targetType == double.class || targetType == Double.class) {
+                return Double.parseDouble(value);
+            } else if (targetType == boolean.class || targetType == Boolean.class) {
+                return Boolean.parseBoolean(value);
+            } else {
+                // Default: return as String
+                return value;
+            }
         }
         
         private void printSummary(ExecutionResult result, Path generatedReportPath) {
