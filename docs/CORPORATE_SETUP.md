@@ -28,17 +28,29 @@ project/
 ```
 
 #### Step 3: Configure Katalan untuk pakai local driver
+
+**Cara 1: Via Command Line (RECOMMENDED untuk CI/CD)**
+```bash
+# Chrome
+./katalan.sh run -ts "Test Suites/MySuite" --driver /path/to/drivers/chromedriver
+
+# Firefox  
+./katalan.sh run -ts "Test Suites/MySuite" -b firefox --driver /path/to/drivers/geckodriver
+
+# Edge
+./katalan.sh run -ts "Test Suites/MySuite" -b edge --driver /path/to/drivers/msedgedriver
+
+# Example di CI/CD dengan relative path
+./katalan.sh run -ts "Test Suites/MySuite" --driver ./drivers/chromedriver_linux
+```
+
+**Cara 2: Via Test Script**
 ```groovy
 // Di test script atau profile
 import com.kms.katalon.core.configuration.RunConfiguration
 
 // Set path ke local driver
 RunConfiguration.setDriverPath("/path/to/drivers/chromedriver")
-```
-
-Atau via command line:
-```bash
-./katalan.sh -browserType=CHROME -driverPath=/path/to/drivers/chromedriver test.groovy
 ```
 
 ---
@@ -185,6 +197,158 @@ Minimal whitelist ini untuk IT team:
 
 ### Optional (untuk online commands database):
 - ✅ `raw.githubusercontent.com` (commands database)
+
+---
+
+## CI/CD Pipeline Examples
+
+### GitLab CI dengan Pre-Downloaded Driver
+```yaml
+variables:
+  DRIVER_VERSION: "131.0.6778.85"
+  DRIVER_PATH: "${CI_PROJECT_DIR}/drivers/chromedriver"
+
+stages:
+  - prepare
+  - test
+
+# Download driver sekali untuk semua jobs
+prepare_driver:
+  stage: prepare
+  script:
+    - mkdir -p drivers
+    - |
+      if [ ! -f drivers/chromedriver ]; then
+        curl -o drivers/chromedriver.zip "https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/${DRIVER_VERSION}/linux64/chromedriver-linux64.zip"
+        unzip drivers/chromedriver.zip -d drivers/
+        mv drivers/chromedriver-linux64/chromedriver drivers/
+        chmod +x drivers/chromedriver
+      fi
+  artifacts:
+    paths:
+      - drivers/
+    expire_in: 1 week
+  cache:
+    key: chrome-driver-${DRIVER_VERSION}
+    paths:
+      - drivers/
+
+run_tests:
+  stage: test
+  dependencies:
+    - prepare_driver
+  script:
+    - chmod +x katalan.sh
+    - ./katalan.sh run -ts "Test Suites/RegressionTest" --driver ${DRIVER_PATH} --headless
+```
+
+### Jenkins Pipeline dengan Artifact Repository
+```groovy
+pipeline {
+    agent any
+    
+    environment {
+        DRIVER_PATH = "${WORKSPACE}/drivers/chromedriver"
+        ARTIFACTORY_URL = "https://artifactory.company.com/selenium-drivers"
+    }
+    
+    stages {
+        stage('Get Driver') {
+            steps {
+                script {
+                    if (!fileExists("${DRIVER_PATH}")) {
+                        sh """
+                            mkdir -p drivers
+                            curl -o drivers/chromedriver ${ARTIFACTORY_URL}/chromedriver-linux
+                            chmod +x drivers/chromedriver
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Run Tests') {
+            steps {
+                sh """
+                    ./katalan.sh run \
+                        -ts "Test Suites/Smoke" \
+                        --driver ${DRIVER_PATH} \
+                        --headless \
+                        --browser chrome
+                """
+            }
+        }
+    }
+}
+```
+
+### GitHub Actions dengan Driver di Repository
+```yaml
+name: E2E Tests
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      # Driver sudah ada di repository
+      - name: Setup ChromeDriver
+        run: |
+          chmod +x drivers/chromedriver_linux
+      
+      - name: Run Tests
+        run: |
+          chmod +x katalan.sh
+          ./katalan.sh run \
+            -ts "Test Suites/CI" \
+            --driver ./drivers/chromedriver_linux \
+            --headless
+      
+      - name: Upload Report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-report
+          path: Reports/
+```
+
+### Azure DevOps dengan Secure Files
+```yaml
+trigger:
+  - main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+steps:
+- task: DownloadSecureFile@1
+  name: chromeDriver
+  inputs:
+    secureFile: 'chromedriver_linux'
+
+- script: |
+    mkdir -p $(Build.SourcesDirectory)/drivers
+    cp $(chromeDriver.secureFilePath) $(Build.SourcesDirectory)/drivers/chromedriver
+    chmod +x $(Build.SourcesDirectory)/drivers/chromedriver
+  displayName: 'Setup ChromeDriver'
+
+- script: |
+    ./katalan.sh run \
+      -ts "Test Suites/Regression" \
+      --driver $(Build.SourcesDirectory)/drivers/chromedriver \
+      --headless
+  displayName: 'Run Tests'
+
+- task: PublishTestResults@2
+  condition: always()
+  inputs:
+    testResultsFormat: 'JUnit'
+    testResultsFiles: '**/TEST-*.xml'
+```
 
 ---
 

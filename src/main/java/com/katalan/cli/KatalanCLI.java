@@ -98,6 +98,9 @@ public class KatalanCLI implements Callable<Integer> {
         @Option(names = {"--profile"}, description = "Execution profile name", defaultValue = "default")
         private String profile;
         
+        @Option(names = {"--driver"}, description = "Path to WebDriver executable (chromedriver, geckodriver, etc.) - skips automatic download")
+        private String driverPath;
+        
         @Option(names = {"--remote-url"}, description = "Remote WebDriver URL (for Selenium Grid)")
         private String remoteUrl;
         
@@ -143,6 +146,12 @@ public class KatalanCLI implements Callable<Integer> {
                     projectPath = java.nio.file.Paths.get(System.getProperty("user.dir"));
                 }
                 configBuilder.projectPath(projectPath);
+                
+                // Set custom driver path if provided (for CI/CD environments with corporate firewall)
+                if (driverPath != null && !driverPath.isEmpty()) {
+                    configBuilder.driverPath(driverPath);
+                    System.out.println("🚗 Using custom driver path: " + driverPath);
+                }
                 
                 if (remoteUrl != null && !remoteUrl.isEmpty()) {
                     configBuilder.useRemoteWebDriver(true)

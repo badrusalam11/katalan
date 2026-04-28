@@ -77,6 +77,7 @@ java -jar katalan-runner-1.0.0.jar run \
 | `--fail-fast` | Stop on first failure | false |
 | `--timeout` | Implicit wait timeout (seconds) | 30 |
 | `--profile` | Execution profile name | default |
+| `--driver` | Path to WebDriver (skip download) | - |
 | `--remote-url` | Remote WebDriver URL | - |
 | `-v, --verbose` | Verbose logging | false |
 
@@ -287,6 +288,31 @@ java -jar katalan-runner.jar run \
   --retry 2 \
   --fail-fast
 ```
+
+### Corporate/CI/CD Setup (No Internet Access)
+
+When running in corporate environments with firewall restrictions, use `--driver` to skip WebDriver download:
+
+```bash
+# Use pre-downloaded chromedriver
+java -jar katalan-runner.jar run \
+  -ts "Test Suites/Smoke" \
+  --driver /path/to/chromedriver \
+  --headless
+
+# CI/CD example with driver in repository
+./katalan.sh run \
+  -ts "Test Suites/Regression" \
+  --driver ./drivers/chromedriver_linux \
+  --headless
+```
+
+**Setup steps for CI/CD:**
+1. Download driver once from: https://googlechromelabs.github.io/chrome-for-testing/
+2. Save to your repository or artifact storage
+3. Use `--driver` flag to specify path
+
+See [CORPORATE_SETUP.md](docs/CORPORATE_SETUP.md) for detailed CI/CD pipeline examples.
 
 ## 🤝 Contributing
 
