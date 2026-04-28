@@ -192,7 +192,23 @@ public class KatalonReportGenerator {
      * @param result The execution result
      * @return The path to the generated report folder
      */
+    /**
+     * Backwards-compatible generateReport: loads report settings from the project
+     * and delegates to the settings-aware overload.
+     */
     public Path generateReport(ExecutionResult result) throws IOException {
+        com.katalan.reporting.ReportSettings settings = com.katalan.reporting.ReportSettings.load(this.projectPath);
+        return generateReport(result, settings);
+    }
+
+    /**
+     * Generate Katalon-style reports honoring user settings (HTML/CSV generation).
+     *
+     * @param result The execution result
+     * @param settings Report generation settings (generateHTML/generateCSV)
+     * @return The path to the generated report folder
+     */
+    public Path generateReport(ExecutionResult result, com.katalan.reporting.ReportSettings settings) throws IOException {
         String timestamp = TIMESTAMP_FORMATTER.format(result.getStartTime());
         
         // Create Katalon-style folder structure:
@@ -206,9 +222,19 @@ public class KatalonReportGenerator {
         
         logger.info("Generating Katalon-style reports in: {}", reportDir);
         
-        // Generate all report files
-        generateHtmlReport(reportDir, timestamp, result);
-        generateCsvReport(reportDir, timestamp, result);
+        // Generate files according to settings
+        if (settings.isGenerateHTML()) {
+            generateHtmlReport(reportDir, timestamp, result);
+        } else {
+            logger.info("Skipping HTML generation as per report settings");
+        }
+
+        if (settings.isGenerateCSV()) {
+            generateCsvReport(reportDir, timestamp, result);
+        } else {
+            logger.info("Skipping CSV generation as per report settings");
+        }
+
         generateExecutionProperties(reportDir, result, suiteRelative);
         generateExecutionUuid(reportDir);
         generateConsoleLog(reportDir, result);  // Generate console FIRST

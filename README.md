@@ -10,6 +10,7 @@
 - ✅ Object Repository support
 - ✅ GlobalVariable support
 - ✅ Beautiful HTML reports
+- ✅ **PDF Report Generation** (configurable via properties)
 - ✅ Screenshot on failure/success
 - ✅ Retry failed tests
 - ✅ Headless browser mode
@@ -266,6 +267,23 @@ reports/
 ├── style.css           # Styles
 └── screenshots/        # Failure screenshots
 ```
+
+### PDF Report Generation
+
+Generate PDF reports by configuring `settings/external/com.katalon.plugin.report.properties`:
+
+```properties
+generatePDF=true
+generateHTML=true
+generateCSV=false
+```
+
+PDF reports include:
+- Test summary statistics (pass/fail/error counts, duration, pass rate)
+- Individual test case details with status, duration, and error messages
+- Automatic generation after test execution
+
+See [PDF_REPORT.md](docs/PDF_REPORT.md) for detailed configuration and CI/CD examples.
 
 ## 🔧 Configuration
 
