@@ -4,6 +4,7 @@ import com.katalan.core.config.RunConfiguration;
 import io.github.bonigarcia.wdm.WebDriverManager;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.chrome.ChromeDriver;
+import org.openqa.selenium.chrome.ChromeDriverService;
 import org.openqa.selenium.chrome.ChromeOptions;
 import org.openqa.selenium.edge.EdgeDriver;
 import org.openqa.selenium.edge.EdgeOptions;
@@ -26,7 +27,7 @@ public class WebDriverFactory {
     private static final Logger logger = LoggerFactory.getLogger(WebDriverFactory.class);
     
     /**
-     * Create a WebDriver based on configuration
+     * Create WebDriver instance based on configuration
      */
     public static WebDriver createDriver(RunConfiguration config) {
         logger.info("Creating WebDriver for browser: {}", config.getBrowserType());
@@ -35,11 +36,16 @@ public class WebDriverFactory {
         
         if (config.isUseRemoteWebDriver()) {
             driver = createRemoteDriver(config);
+            configureDriver(driver, config); // Remote drivers need separate configuration
         } else {
             driver = createLocalDriver(config);
+            // Local Chrome driver already configured in createChromeDriver()
+            // Other browsers need configuration
+            if (config.getBrowserType() != RunConfiguration.BrowserType.CHROME) {
+                configureDriver(driver, config);
+            }
         }
         
-        configureDriver(driver, config);
         return driver;
     }
     
@@ -66,9 +72,62 @@ public class WebDriverFactory {
      */
     private static WebDriver createChromeDriver(RunConfiguration config) {
         if (config.getDriverPath() == null || config.getDriverPath().isEmpty()) {
+            logger.info("Using WebDriverManager to auto-download chromedriver");
             WebDriverManager.chromedriver().setup();
         } else {
-            System.setProperty("webdriver.chrome.driver", config.getDriverPath());
+            // Validate and set custom driver path
+            String driverPath = config.getDriverPath();
+            java.io.File driverFile = new java.io.File(driverPath);
+            
+            // Validate file exists
+            if (!driverFile.exists()) {
+                throw new IllegalArgumentException(
+                    "Driver file not found: " + driverFile.getAbsolutePath() +
+                    "\nPlease check the path and ensure the file exists." +
+                    "\nExample: --driver \"C:\\path\\to\\chromedriver.exe\" (Windows)" +
+                    "\nExample: --driver \"/path/to/chromedriver\" (Linux/Mac)"
+                );
+            }
+            
+            // Validate it's a file, not a directory
+            if (driverFile.isDirectory()) {
+                throw new IllegalArgumentException(
+                    "Driver path points to a directory, not an executable file: " + driverFile.getAbsolutePath() +
+                    "\nPlease specify the full path to the chromedriver executable." +
+                    "\nExample: --driver \"C:\\path\\to\\chromedriver.exe\" (Windows)" +
+                    "\nExample: --driver \"/path/to/chromedriver\" (Linux/Mac)"
+                );
+            }
+            
+            // Set execute permission on Unix-like systems
+            if (!driverFile.canExecute() && !System.getProperty("os.name").toLowerCase().contains("win")) {
+                logger.warn("Driver file is not executable: {}. Attempting to set execute permission...", driverPath);
+                try {
+                    driverFile.setExecutable(true);
+                } catch (Exception e) {
+                    logger.error("Failed to set execute permission: {}", e.getMessage());
+                }
+            }
+            
+            logger.info("Using custom chromedriver: {}", driverPath);
+            System.setProperty("webdriver.chrome.driver", driverPath);
+            
+            // Log driver version for debugging
+            try {
+                ProcessBuilder pb = new ProcessBuilder(driverPath, "--version");
+                pb.redirectErrorStream(true);
+                Process p = pb.start();
+                java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(p.getInputStream()));
+                String version = reader.readLine();
+                p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
+                if (version != null) {
+                    logger.info("ChromeDriver version: {}", version);
+                } else {
+                    logger.warn("Could not determine chromedriver version");
+                }
+            } catch (Exception e) {
+                logger.warn("Failed to check chromedriver version: {}", e.getMessage());
+            }
         }
         
         ChromeOptions options = new ChromeOptions();
@@ -127,7 +186,19 @@ public class WebDriverFactory {
             "--safebrowsing-disable-download-protection",
             "--safebrowsing-disable-extension-blacklist",
             "--disable-features=InsecureDownloadWarnings,PasswordCheck,PasswordLeakDetection,InsecureFormWarnings",
-            "--password-store=basic"
+            "--password-store=basic",
+            // ============================================================
+            // Stability fixes for Windows Server + Chrome 147+
+            // ============================================================
+            "--disable-background-timer-throttling",
+            "--disable-backgrounding-occluded-windows",
+            "--disable-renderer-backgrounding",
+            "--disable-hang-monitor",
+            "--disable-ipc-flooding-protection",
+            "--disable-features=CalculateNativeWinOcclusion",
+            "--force-color-profile=srgb",
+            "--metrics-recording-only",
+            "--disable-client-side-phishing-detection"
         );
 
         if (config.isHeadless()) {
@@ -206,7 +277,70 @@ public class WebDriverFactory {
             options.setBinary(config.getBrowserBinaryPath());
         }
         
-        return new ChromeDriver(options);
+        // ============================================================
+        // ChromeDriver Service with explicit port + cleanup
+        // Prevents DevTools port conflicts on Windows Server
+        // ============================================================
+        ChromeDriverService service = new ChromeDriverService.Builder()
+            .usingAnyFreePort()
+            .withLogOutput(System.out)
+            .withBuildCheckDisabled(true)
+            .build();
+        
+        ChromeDriver driver = new ChromeDriver(service, options);
+        
+        // Set timeouts after driver creation
+        driver.manage().timeouts().implicitlyWait(java.time.Duration.ZERO);
+        driver.manage().timeouts().pageLoadTimeout(java.time.Duration.ofSeconds(60));
+        driver.manage().timeouts().scriptTimeout(java.time.Duration.ofSeconds(30));
+        
+        logger.info("WebDriver configured with timeouts - implicit: {}s (FAST), pageLoad: {}s, script: {}s", 
+            0, 60, 30);
+        
+        // ============================================================
+        // Track PIDs for cleanup manager
+        // ============================================================
+        try {
+            // Track ChromeDriver service PID (Selenium 4.8+ has getProcessId())
+            if (service.isRunning()) {
+                try {
+                    // Try reflection for getProcessId() (available in Selenium 4.8+)
+                    java.lang.reflect.Method getProcessIdMethod = service.getClass().getMethod("getProcessId");
+                    Object pidObj = getProcessIdMethod.invoke(service);
+                    if (pidObj instanceof Number) {
+                        long driverPid = ((Number) pidObj).longValue();
+                        DriverCleanupManager.trackDriverPid(driverPid);
+                        logger.debug("📌 Tracked ChromeDriver PID: {}", driverPid);
+                    }
+                } catch (NoSuchMethodException e) {
+                    // Selenium < 4.8 doesn't have getProcessId(), skip driver PID tracking
+                    logger.debug("ChromeDriverService.getProcessId() not available (Selenium < 4.8)");
+                } catch (Exception e) {
+                    logger.debug("Could not track ChromeDriver PID: {}", e.getMessage());
+                }
+            }
+            
+            // Track Chrome browser PID (requires Selenium 4.x capabilities)
+            try {
+                Object sessionId = driver.getSessionId();
+                if (sessionId != null) {
+                    // Get Chrome process ID from capabilities (Chrome 63+)
+                    Object chromePid = driver.getCapabilities().getCapability("goog:processID");
+                    if (chromePid instanceof Number) {
+                        long pid = ((Number) chromePid).longValue();
+                        DriverCleanupManager.trackChromePid(pid);
+                        logger.debug("📌 Tracked Chrome browser PID: {}", pid);
+                    }
+                }
+            } catch (Exception e) {
+                logger.debug("Could not track Chrome browser PID: {}", e.getMessage());
+            }
+            
+        } catch (Exception e) {
+            logger.warn("Failed to track driver PIDs for cleanup: {}", e.getMessage());
+        }
+        
+        return driver;
     }
     
     /**

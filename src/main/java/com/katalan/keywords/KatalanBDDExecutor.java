@@ -625,6 +625,36 @@ public class KatalanBDDExecutor {
                 }
             }
             
+            // ========================================================================
+            // CRITICAL: Take screenshot on step failure (if enabled in config)
+            // This ensures screenshots are captured even for BDD step failures
+            // ========================================================================
+            try {
+                com.katalan.core.config.RunConfiguration config = context.getRunConfiguration();
+                if (config != null && config.isTakeScreenshotOnFailure()) {
+                    org.openqa.selenium.WebDriver driver = context.getWebDriver();
+                    if (driver != null) {
+                        try {
+                            String timestamp = String.valueOf(System.currentTimeMillis());
+                            String screenshotPath = WebUI.takeScreenshot(timestamp);
+                            logger.info("📸 Screenshot captured on step failure: {}", screenshotPath);
+                            
+                            // Add screenshot info to log
+                            Map<String, Object> screenshotLog = new LinkedHashMap<>();
+                            screenshotLog.put("time", formatInstant(Instant.now()));
+                            screenshotLog.put("level", "INFO");
+                            screenshotLog.put("message", "Screenshot: " + screenshotPath);
+                            logs.add(screenshotLog);
+                        } catch (Exception screenshotEx) {
+                            logger.warn("Failed to take screenshot on step failure: {}", screenshotEx.getMessage());
+                        }
+                    }
+                }
+            } catch (Exception configEx) {
+                // Ignore config/screenshot errors - don't fail the test twice
+                logger.debug("Could not check screenshot config: {}", configEx.getMessage());
+            }
+            
             // Return step data instead of throwing - let caller handle the failure
             return stepData;
         }

@@ -58,6 +58,9 @@ public class KatalanEngine {
     public void initialize() throws IOException {
         logger.info("Initializing katalan Engine");
         
+        // Initialize driver cleanup manager (registers shutdown hook)
+        com.katalan.core.driver.DriverCleanupManager.initialize();
+        
         // Load Object Repository
         if (config.getProjectPath() != null && Files.exists(config.getProjectPath())) {
             Map<String, TestObject> repository = ObjectRepositoryParser.loadObjectRepository(config.getProjectPath());
@@ -707,7 +710,15 @@ public class KatalanEngine {
      */
     public void shutdown() {
         logger.info("Shutting down katalan Engine");
+        
+        // CRITICAL: Close browser gracefully first (this closes driver properly)
+        // context.cleanup() calls driver.quit() which should close Chrome
         context.cleanup();
+        
+        // Backup: Force kill any remaining tracked PIDs (fast, no orphan scan)
+        // This only runs if driver.quit() didn't work properly
+        logger.debug("🧹 Cleanup tracked ChromeDriver PIDs (if any remaining)...");
+        com.katalan.core.driver.DriverCleanupManager.forceCleanup();
     }
 
     // --------------------------------------------------------------------
