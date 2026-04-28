@@ -7,6 +7,8 @@ import com.katalan.core.model.TestSuite;
 import com.katalan.core.engine.TestSuiteParser;
 import com.katalan.reporting.HtmlReportGenerator;
 import com.katalan.reporting.KatalonReportGenerator;
+import com.katalan.reporting.PDFReportGenerator;
+import com.katalan.reporting.ReportSettings;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
@@ -103,6 +105,11 @@ public class KatalanCLI implements Callable<Integer> {
         
         @Option(names = {"--remote-url"}, description = "Remote WebDriver URL (for Selenium Grid)")
         private String remoteUrl;
+        
+        @Option(names = {"--report-format"}, description = "Override report formats (comma-separated): pdf,html,csv. " +
+                "When specified, overrides settings from com.katalon.plugin.report.properties. " +
+                "Example: --report-format=pdf,html")
+        private String reportFormat;
         
         @Option(names = {"-v", "--verbose"}, description = "Enable verbose logging")
         private boolean verbose;
@@ -239,9 +246,36 @@ public class KatalanCLI implements Callable<Integer> {
                     // Generate full Katalon-style report (HTML/CSV/logs).
                     // Engine already pre-created the folder + execution.properties
                     // before @AfterTestSuite listeners; here we fill in the rest.
-                    System.out.println("\n📊 Generating HTML report...");
+                    System.out.println("\n📊 Generating reports...");
+                    // Load settings early so we can decide what to generate.
+                    // CLI --report-format takes precedence over properties file.
+                    ReportSettings reportSettings;
+                    if (reportFormat != null && !reportFormat.trim().isEmpty()) {
+                        System.out.println("🔧 Using report format from CLI: " + reportFormat);
+                        reportSettings = ReportSettings.fromString(reportFormat);
+                    } else {
+                        reportSettings = ReportSettings.load(projectPath);
+                    }
+
                     KatalonReportGenerator katalanReporter = new KatalonReportGenerator(projectPath);
-                    Path generatedReportPath = katalanReporter.generateReport(result);
+                    Path generatedReportPath = katalanReporter.generateReport(result, reportSettings);
+
+                    // Generate PDF if enabled
+                    if (reportSettings.isGeneratePDF()) {
+                        try {
+                            System.out.println("Generating PDF report...");
+                            com.katalan.reporting.PDFReportGenerator pdfGenerator = 
+                                new com.katalan.reporting.PDFReportGenerator(generatedReportPath);
+                            Path pdfPath = pdfGenerator.generateReport();
+                            System.out.println("✅ PDF report: " + pdfPath.toAbsolutePath());
+                        } catch (Exception e) {
+                            System.err.println("⚠️  Failed to generate PDF report: " + e.getMessage());
+                            if (verbose) {
+                                e.printStackTrace();
+                            }
+                        }
+                    }
+
                     System.out.println("📁 Report generated at: " + generatedReportPath.toAbsolutePath());
                     
                     // Also generate simple report at specified path for backwards compatibility
