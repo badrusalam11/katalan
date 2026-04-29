@@ -2063,18 +2063,32 @@ public class KatalonReportGenerator {
             }
         }
         
-        // CRITICAL: Only create cucumber_report folder if there are BDD tests
-        // Katalon does NOT create this folder for non-BDD tests
-        if (bddTestCases.isEmpty()) {
+        // Get the cucumber report timestamp from ExecutionContext
+        com.katalan.core.context.ExecutionContext context = com.katalan.core.context.ExecutionContext.getCurrent();
+        
+        // CRITICAL: Check if cucumber_report was referenced in execution0.log
+        // hasCucumberReportTimestamp() returns true ONLY if CucumberKW actually set it
+        boolean cucumberWasReferenced = context.hasCucumberReportTimestamp();
+        
+        if (!cucumberWasReferenced && bddTestCases.isEmpty()) {
+            // No BDD tests detected and no cucumber timestamp logged - truly no BDD tests
             return;
         }
         
         Path cucumberDir = reportDir.resolve("cucumber_report");
         Files.createDirectories(cucumberDir);
         
-        // Get the cucumber report timestamp from ExecutionContext
-        // This ensures we use the same timestamp that was logged in execution0.log
-        com.katalan.core.context.ExecutionContext context = com.katalan.core.context.ExecutionContext.getCurrent();
+        // If cucumber was referenced but no BDD tests detected, create empty folder structure
+        // This prevents CSReport from crashing when parsing execution0.log
+        if (cucumberWasReferenced && bddTestCases.isEmpty()) {
+            String timestampId = context.getCucumberReportTimestamp();
+            Path featureReportDir = cucumberDir.resolve(timestampId);
+            Files.createDirectories(featureReportDir);
+            logger.warn("⚠️ cucumber_report timestamp logged in execution0.log but no BDD tests detected - created empty folder structure");
+            return;
+        }
+        
+        // Normal case: BDD tests detected, generate reports
         String timestampId = context.getCucumberReportTimestamp();
         
         // Generate one folder per BDD test case/feature using the shared timestamp
