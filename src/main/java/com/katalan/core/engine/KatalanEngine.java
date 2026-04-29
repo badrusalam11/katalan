@@ -250,8 +250,10 @@ public class KatalanEngine {
             TestCaseResult tcResult = executeTestCase(testCase);
             suiteResult.addTestCaseResult(tcResult);
             
-            // Clean up browser after each test case for test isolation
-            cleanupBrowserAfterTestCase();
+            // IMPORTANT: DO NOT cleanup browser here (Katalon behavior)
+            // Each test case that calls openBrowser() will get a NEW browser instance
+            // by setting context driver to null BEFORE test execution.
+            // All browsers are killed at shutdown via DriverCleanupManager.
             
             // Fail fast mode
             if (config.isFailFast() && tcResult.getStatus() != TestCase.TestCaseStatus.PASSED) {
@@ -381,6 +383,13 @@ public class KatalanEngine {
         } catch (Exception e) {
             logger.error("@BeforeTestCase listener error: {}", e.getMessage(), e);
         }
+        
+        // CRITICAL: Clear WebDriver from context so next openBrowser() creates NEW browser.
+        // DO NOT quit the driver here! Let it stay alive. DriverCleanupManager will kill
+        // ALL browsers at JVM shutdown. This gives us multiple concurrent browser sessions
+        // (TC01 browser + TC02 browser + TC03 browser all alive until end).
+        logger.info("🔄 Clearing driver from context (old browser stays alive, new openBrowser will create new one)");
+        context.setWebDriver(null);
         
         int attempts = 0;
         int maxAttempts = config.getRetryFailedTests() + 1;
@@ -687,22 +696,6 @@ public class KatalanEngine {
      */
     public TestListenerRegistry getListenerRegistry() {
         return listenerRegistry;
-    }
-    
-    /**
-     * Clean up browser after each test case for test isolation
-     */
-    private void cleanupBrowserAfterTestCase() {
-        WebDriver driver = context.getWebDriver();
-        if (driver != null) {
-            try {
-                driver.quit();
-                logger.debug("Browser cleaned up after test case");
-            } catch (Exception e) {
-                logger.warn("Failed to cleanup browser: {}", e.getMessage());
-            }
-            context.setWebDriver(null);
-        }
     }
     
     /**

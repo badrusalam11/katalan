@@ -465,20 +465,39 @@ public class TestListenerRegistry {
                         }
                     }
 
+                    logger.info("🔔 Invoking {}@{} on listener: {}", 
+                            annotationType.getSimpleName(), methodName, listener.getClass().getSimpleName());
+
                     int paramCount = method.getParameterCount();
-                    if (paramCount == 0) {
-                        method.invoke(listener);
-                    } else if (paramCount == 1) {
-                        Class<?> paramType = method.getParameterTypes()[0];
-                        if (contextArg != null && paramType.isInstance(contextArg)) {
-                            method.invoke(listener, contextArg);
+                    try {
+                        if (paramCount == 0) {
+                            method.invoke(listener);
+                        } else if (paramCount == 1) {
+                            Class<?> paramType = method.getParameterTypes()[0];
+                            if (contextArg != null && paramType.isInstance(contextArg)) {
+                                method.invoke(listener, contextArg);
+                            } else {
+                                // Pass null if types don't line up rather than failing hard
+                                method.invoke(listener, new Object[]{null});
+                            }
                         } else {
-                            // Pass null if types don't line up rather than failing hard
-                            method.invoke(listener, new Object[]{null});
+                            logger.warn("Listener method {}#{} has unsupported arity {} - skipping",
+                                    listener.getClass().getName(), method.getName(), paramCount);
                         }
-                    } else {
-                        logger.warn("Listener method {}#{} has unsupported arity {} - skipping",
-                                listener.getClass().getName(), method.getName(), paramCount);
+                        
+                        logger.info("✅ Listener {}@{} completed successfully", 
+                                annotationType.getSimpleName(), methodName);
+                    } catch (java.lang.reflect.InvocationTargetException e) {
+                        Throwable cause = e.getCause() != null ? e.getCause() : e;
+                        logger.error("❌ Listener {}@{} threw exception: {} - {}", 
+                                annotationType.getSimpleName(), methodName, 
+                                cause.getClass().getName(), cause.getMessage());
+                        logger.error("Full stacktrace:", cause);
+                    } catch (Throwable t) {
+                        logger.error("❌ Listener {}@{} invocation failed: {} - {}", 
+                                annotationType.getSimpleName(), methodName,
+                                t.getClass().getName(), t.getMessage());
+                        logger.error("Full stacktrace:", t);
                     }
                     
                     // Log listener method end
@@ -487,11 +506,6 @@ public class TestListenerRegistry {
                     logger.debug("Invoked @{} on {}#{}",
                             annotationType.getSimpleName(),
                             listener.getClass().getName(), method.getName());
-                } catch (Throwable t) {
-                    Throwable cause = t.getCause() != null ? t.getCause() : t;
-                    logger.error("Test Listener {}#{} (@{}) threw: {}",
-                            listener.getClass().getName(), method.getName(),
-                            annotationType.getSimpleName(), cause.getMessage(), cause);
                 } finally {
                     currentThread.setContextClassLoader(previousCL);
                 }

@@ -1068,7 +1068,11 @@ public class KatalonReportGenerator {
      *     <record>... endSuite ...</record>
      *   </log>
      */
-    private void generateExecutionLog(Path reportDir, ExecutionResult result) throws IOException {
+    /**
+     * Write execution0.log to disk with all buffered XmlKeywordLogger records.
+     * ALWAYS writes the file regardless of whether it exists.
+     */
+    private void writeExecutionLogToDisk(Path reportDir, ExecutionResult result) throws IOException {
         StringBuilder log = new StringBuilder();
         log.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n");
         log.append("<!DOCTYPE log SYSTEM \"logger.dtd\">\n");
@@ -1164,12 +1168,25 @@ public class KatalonReportGenerator {
     }
 
     /**
+     * Generate execution0.log (called from generateReport).
+     * SKIP if file already exists (already flushed before @AfterTestSuite).
+     */
+    private void generateExecutionLog(Path reportDir, ExecutionResult result) throws IOException {
+        Path executionLogPath = reportDir.resolve("execution0.log");
+        if (Files.exists(executionLogPath)) {
+            logger.info("⏭️ Skipping execution0.log generation - already flushed before @AfterTestSuite listener");
+            return;
+        }
+        writeExecutionLogToDisk(reportDir, result);
+    }
+
+    /**
      * FLUSH execution0.log BEFORE @AfterTestSuite runs.
      * Custom report listeners (CSReport, PdfGenerator) need to READ execution0.log,
      * so we must write all buffered XmlKeywordLogger records NOW.
      */
     public void flushExecutionLog(Path reportDir, ExecutionResult result) throws IOException {
-        generateExecutionLog(reportDir, result);
+        writeExecutionLogToDisk(reportDir, result);
     }
     
     /**
