@@ -316,6 +316,14 @@ public class ExecutionContext {
     }
     
     /**
+     * Check if cucumber report timestamp has been set (without creating one).
+     * Returns true if CucumberKW has logged a cucumber_report reference.
+     */
+    public boolean hasCucumberReportTimestamp() {
+        return getProperty("cucumberReportTimestamp") != null;
+    }
+    
+    /**
      * Clear cucumber report timestamp (call this after feature execution completes)
      */
     public void clearCucumberReportTimestamp() {
