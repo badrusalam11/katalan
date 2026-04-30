@@ -39,24 +39,25 @@ public class WebUI {
      * Open browser and navigate to URL
      */
     public static void openBrowser(String url) {
-        logger.info("Opening browser with URL: {}", url);
+        logger.info("🌐 openBrowser() called with URL: {}", url);
         ExecutionContext context = ExecutionContext.getCurrent();
-        WebDriver driver = context.getWebDriver();
         
-        // Check if current driver is valid
-        if (driver == null || isDriverClosed(driver)) {
-            // Create new browser instance
-            logger.info("Creating new browser instance");
-            com.katalan.core.driver.WebDriverFactory factory = new com.katalan.core.driver.WebDriverFactory();
-            driver = com.katalan.core.driver.WebDriverFactory.createDriver(context.getRunConfiguration());
-            context.setWebDriver(driver);
-        }
+        // CRITICAL: ALWAYS create NEW browser instance on every openBrowser() call!
+        // DO NOT reuse existing driver. Each openBrowser() = new Chrome session.
+        // All browsers stay alive until JVM shutdown, then DriverCleanupManager kills ALL.
+        logger.info("✅ Creating NEW browser instance (previous driver will stay alive)");
+        
+        WebDriver driver = com.katalan.core.driver.WebDriverFactory.createDriver(context.getRunConfiguration());
+        context.setWebDriver(driver);
+        logger.info("✅ NEW browser created and set as current driver");
         
         // Only navigate if URL is provided (non-empty)
         if (url != null && !url.trim().isEmpty()) {
+            logger.info("📍 Navigating to: {}", url);
             driver.get(url);
+        } else {
+            logger.info("📍 No URL provided - browser opened without navigation");
         }
-        // Empty URL means just open the browser without navigating (Katalon behavior)
     }
     
     /**

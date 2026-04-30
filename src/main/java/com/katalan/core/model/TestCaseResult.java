@@ -34,6 +34,12 @@ public class TestCaseResult {
     // BDD hierarchical scenario data (for Katalon-style report)
     private List<Map<String, Object>> bddScenarioData;
     
+    // Test case script path (relative to project root, e.g., "Test Cases/BRICAMS/...")
+    private String scriptPath;
+    
+    // Test case tag from .tc file
+    private String tag;
+    
     public TestCaseResult() {
         this.stepResults = new ArrayList<>();
         this.screenshotPaths = new ArrayList<>();
@@ -58,6 +64,11 @@ public class TestCaseResult {
         this.errorMessage = testCase.getErrorMessage();
         this.stackTrace = testCase.getStackTrace();
         this.retryAttempt = testCase.getRetryCount();
+        
+        // Store script path for PDF report generation
+        if (testCase.getScriptPath() != null) {
+            this.scriptPath = testCase.getScriptPath().toString();
+        }
     }
     
     public void addStepResult(StepResult stepResult) {
@@ -241,6 +252,22 @@ public class TestCaseResult {
     
     public void setBddScenarioData(List<Map<String, Object>> bddScenarioData) {
         this.bddScenarioData = bddScenarioData;
+    }
+    
+    public String getScriptPath() {
+        return scriptPath;
+    }
+    
+    public void setScriptPath(String scriptPath) {
+        this.scriptPath = scriptPath;
+    }
+    
+    public String getTag() {
+        return tag;
+    }
+    
+    public void setTag(String tag) {
+        this.tag = tag;
     }
     
     /**
