@@ -31,7 +31,8 @@ import java.util.concurrent.Callable;
 @Command(
     name = "katalan",
     mixinStandardHelpOptions = true,
-    version = "katalan Runner 1.0.0",
+    version = "katalan Runner ${version}", // Maven will replace ${version} via version provider
+    versionProvider = KatalanCLI.VersionProvider.class,
     description = "Unofficial Katalon Test Runner - Execute Katalon automation scripts independently",
     subcommands = {
         KatalanCLI.RunCommand.class,
@@ -39,6 +40,16 @@ import java.util.concurrent.Callable;
     }
 )
 public class KatalanCLI implements Callable<Integer> {
+    
+    /**
+     * Version provider that reads from Maven-filtered version.properties
+     */
+    static class VersionProvider implements picocli.CommandLine.IVersionProvider {
+        @Override
+        public String[] getVersion() {
+            return new String[]{com.katalan.core.Version.getFullVersion()};
+        }
+    }
     
     public static void main(String[] args) {
         int exitCode = new CommandLine(new KatalanCLI()).execute(args);
@@ -334,10 +345,11 @@ public class KatalanCLI implements Callable<Integer> {
         }
         
         private void printBanner() {
+            String version = com.katalan.core.Version.getVersion();
             System.out.println();
             System.out.println("╔═══════════════════════════════════════════════════════════╗");
             System.out.println("║                                                           ║");
-            System.out.println("║   🧪 KATALAN RUNNER v1.0.0                                ║");
+            System.out.println(String.format("║   🧪 KATALAN RUNNER v%-33s║", version));
             System.out.println("║   Unofficial Katalon Test Runner                          ║");
             System.out.println("║                                                           ║");
             System.out.println("╚═══════════════════════════════════════════════════════════╝");
@@ -512,7 +524,7 @@ public class KatalanCLI implements Callable<Integer> {
             System.out.println("║                   KATALAN SYSTEM INFO                     ║");
             System.out.println("╚═══════════════════════════════════════════════════════════╝");
             System.out.println();
-            System.out.println("katalan Runner:    1.0.0");
+            System.out.println("katalan Version:   " + com.katalan.core.Version.getVersion());
             System.out.println("Java Version:      " + System.getProperty("java.version"));
             System.out.println("Java Home:         " + System.getProperty("java.home"));
             System.out.println("OS Name:           " + System.getProperty("os.name"));

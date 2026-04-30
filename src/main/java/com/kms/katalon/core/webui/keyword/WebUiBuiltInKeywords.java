@@ -220,8 +220,11 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void clickOffset(TestObject to, int offsetX, int offsetY) {
-        logNotSupported("clickOffset");
-        WebUI.click(toKatalan(to));
+        WebUI.clickOffset(toKatalan(to), offsetX, offsetY);
+    }
+    
+    public static void clickOffset(TestObject to, int offsetX, int offsetY, int timeout) {
+        WebUI.clickOffset(toKatalan(to), offsetX, offsetY, timeout);
     }
     
     public static void clickOffset(TestObject to, int offsetX, int offsetY, FailureHandling flowControl) {
@@ -282,14 +285,12 @@ public class WebUiBuiltInKeywords {
         return runBool(() -> waitForElementVisible(to, timeout), flowControl);
     }
     
-    public static boolean waitForElementNotVisible(TestObject to, int timeout) {
-        logNotSupported("waitForElementNotVisible");
-        WebUI.delay(1);
-        return true;
+    public static void waitForElementNotVisible(TestObject to, int timeout) {
+        WebUI.waitForElementNotVisible(toKatalan(to), timeout);
     }
     
-    public static boolean waitForElementNotVisible(TestObject to, int timeout, FailureHandling flowControl) {
-        return runBool(() -> waitForElementNotVisible(to, timeout), flowControl);
+    public static void waitForElementNotVisible(TestObject to, int timeout, FailureHandling flowControl) {
+        runVoid(() -> waitForElementNotVisible(to, timeout), flowControl);
     }
     
     public static boolean waitForElementPresent(TestObject to, int timeout) {
@@ -714,11 +715,11 @@ public class WebUiBuiltInKeywords {
     }
     
     public static String takeFullPageScreenshot() {
-        return takeScreenshot();
+        return WebUI.takeFullPageScreenshot();
     }
     
     public static String takeFullPageScreenshot(String fileName) {
-        return takeScreenshot(fileName);
+        return WebUI.takeFullPageScreenshot(fileName);
     }
     
     public static String takeFullPageScreenshot(String fileName, FailureHandling flowControl) {
@@ -848,16 +849,116 @@ public class WebUiBuiltInKeywords {
     // ==================== Find Element Methods ====================
     
     public static WebElement findWebElement(TestObject to) {
-        logNotSupported("findWebElement");
-        return null;
+        return WebUI.findWebElement(toKatalan(to));
     }
     
     public static WebElement findWebElement(TestObject to, int timeout) {
-        return findWebElement(to);
+        return WebUI.findWebElement(toKatalan(to), timeout);
     }
     
     public static List<WebElement> findWebElements(TestObject to, int timeout) {
-        logNotSupported("findWebElements");
-        return Collections.emptyList();
+        return WebUI.findWebElements(toKatalan(to), timeout);
+    }
+    
+    // ==================== CSWeb Compatibility Keywords ====================
+    
+    public static void enhancedClick(TestObject to) {
+        WebUI.enhancedClick(toKatalan(to));
+    }
+    
+    public static void enhancedClick(TestObject to, int timeout) {
+        WebUI.enhancedClick(toKatalan(to), timeout);
+    }
+    
+    public static void loading() {
+        WebUI.loading();
+    }
+    
+    public static void loading(int timeout) {
+        WebUI.loading(timeout);
+    }
+    
+    public static Object network() {
+        return WebUI.network();
+    }
+    
+    public static boolean verifyElementClickable(TestObject to, int timeout) {
+        return WebUI.verifyElementClickable(toKatalan(to), timeout);
+    }
+    
+    public static boolean verifyElementClickable(TestObject to, int timeout, FailureHandling flowControl) {
+        return runBool(() -> verifyElementClickable(to, timeout), flowControl);
+    }
+    
+    public static boolean verifyElementHasAttribute(TestObject to, String attributeName, int timeout) {
+        return WebUI.verifyElementHasAttribute(toKatalan(to), attributeName, timeout);
+    }
+    
+    public static boolean verifyElementHasAttribute(TestObject to, String attributeName, int timeout, FailureHandling flowControl) {
+        return runBool(() -> verifyElementHasAttribute(to, attributeName, timeout), flowControl);
+    }
+    
+    public static boolean verifyElementInViewport(TestObject to, int timeout) {
+        return WebUI.verifyElementInViewport(toKatalan(to), timeout);
+    }
+    
+    public static boolean verifyElementInViewport(TestObject to, int timeout, FailureHandling flowControl) {
+        return runBool(() -> verifyElementInViewport(to, timeout), flowControl);
+    }
+    
+    public static boolean verifyElementNotClickable(TestObject to, int timeout) {
+        return WebUI.verifyElementNotClickable(toKatalan(to), timeout);
+    }
+    
+    public static boolean verifyElementNotClickable(TestObject to, int timeout, FailureHandling flowControl) {
+        return runBool(() -> verifyElementNotClickable(to, timeout), flowControl);
+    }
+    
+    public static boolean verifyElementNotHasAttribute(TestObject to, String attributeName, int timeout) {
+        return WebUI.verifyElementNotHasAttribute(toKatalan(to), attributeName, timeout);
+    }
+    
+    public static boolean verifyElementNotHasAttribute(TestObject to, String attributeName, int timeout, FailureHandling flowControl) {
+        return runBool(() -> verifyElementNotHasAttribute(to, attributeName, timeout), flowControl);
+    }
+    
+    public static boolean verifyElementNotVisible(TestObject to, int timeout) {
+        return WebUI.verifyElementNotVisible(toKatalan(to), timeout);
+    }
+    
+    public static boolean verifyElementNotVisible(TestObject to, int timeout, FailureHandling flowControl) {
+        return runBool(() -> verifyElementNotVisible(to, timeout), flowControl);
+    }
+    
+    public static boolean verifyEqual(Object actual, Object expected) {
+        return WebUI.verifyEqual(actual, expected);
+    }
+    
+    public static boolean verifyEqual(Object actual, Object expected, FailureHandling flowControl) {
+        return runBool(() -> verifyEqual(actual, expected), flowControl);
+    }
+    
+    public static boolean verifyFileLastDownload(String filename) {
+        return WebUI.verifyFileLastDownload(filename);
+    }
+    
+    public static boolean verifyFileLastDownload(String filename, String downloadPath, FailureHandling flowControl) {
+        return runBool(() -> WebUI.verifyFileLastDownload(filename, downloadPath, flowControl), flowControl);
+    }
+    
+    public static void waitForElementNotClickable(TestObject to, int timeout) {
+        WebUI.waitForElementNotClickable(toKatalan(to), timeout);
+    }
+    
+    public static void waitForElementNotClickable(TestObject to, int timeout, FailureHandling flowControl) {
+        runVoid(() -> waitForElementNotClickable(to, timeout), flowControl);
+    }
+    
+    public static void waitForElementNotHasAttribute(TestObject to, String attributeName, int timeout) {
+        WebUI.waitForElementNotHasAttribute(toKatalan(to), attributeName, timeout);
+    }
+    
+    public static void waitForElementNotHasAttribute(TestObject to, String attributeName, int timeout, FailureHandling flowControl) {
+        runVoid(() -> waitForElementNotHasAttribute(to, attributeName, timeout), flowControl);
     }
 }
