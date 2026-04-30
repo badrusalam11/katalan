@@ -33,6 +33,17 @@
         <neverBlock>true</neverBlock>
     </appender>
     
+    <!-- Console File Appender - writes FULL execution log to console0.log -->
+    <appender name="CONSOLE_FILE" class="com.katalan.core.logging.DynamicFileAppender">
+        <file>logs/console-default.log</file>
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+        </encoder>
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>INFO</level>
+        </filter>
+    </appender>
+    
     <!-- katalan Loggers - INFO for visibility (shows "Clicking...", "Setting text...") -->
     <logger name="com.katalan" level="INFO"/>
     
@@ -44,6 +55,7 @@
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>
         <appender-ref ref="ASYNC_FILE"/>
+        <appender-ref ref="CONSOLE_FILE"/>
     </root>
     
 </configuration>

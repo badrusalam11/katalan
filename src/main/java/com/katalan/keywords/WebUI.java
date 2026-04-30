@@ -1538,6 +1538,54 @@ public class WebUI {
     // ==================== Private Helper Methods ====================
     
     /**
+     * Convert Katalon TestObject to katalan TestObject if needed
+     */
+    private static TestObject convertTestObject(Object testObjectParam) {
+        if (testObjectParam == null) {
+            throw new IllegalArgumentException("TestObject cannot be null");
+        }
+        
+        // Already our TestObject
+        if (testObjectParam instanceof TestObject) {
+            return (TestObject) testObjectParam;
+        }
+        
+        // Katalon TestObject - need to convert
+        if (testObjectParam instanceof com.kms.katalon.core.testobject.TestObject) {
+            com.kms.katalon.core.testobject.TestObject katalonTO = 
+                (com.kms.katalon.core.testobject.TestObject) testObjectParam;
+            
+            // Create new katalan TestObject
+            TestObject katalanTO = new TestObject(katalonTO.getObjectId());
+            
+            // Copy XPath selector (most common)
+            String xpath = katalonTO.findPropertyValue("xpath", false);
+            if (xpath != null) {
+                katalanTO.setSelectorMethod(TestObject.SelectorMethod.XPATH);
+                katalanTO.setSelectorValue(xpath);
+            } else {
+                // Try CSS selector
+                String css = katalonTO.findPropertyValue("css", false);
+                if (css != null) {
+                    katalanTO.setSelectorMethod(TestObject.SelectorMethod.CSS);
+                    katalanTO.setSelectorValue(css);
+                } else {
+                    // Try ID
+                    String id = katalonTO.findPropertyValue("id", false);
+                    if (id != null) {
+                        katalanTO.setSelectorMethod(TestObject.SelectorMethod.ID);
+                        katalanTO.setSelectorValue(id);
+                    }
+                }
+            }
+            
+            return katalanTO;
+        }
+        
+        throw new IllegalArgumentException("Unsupported TestObject type: " + testObjectParam.getClass().getName());
+    }
+    
+    /**
      * Convert Object timeout to int (for Katalon compatibility where timeout can be String or Number)
      */
     private static int toIntTimeout(Object timeout) {
@@ -1698,6 +1746,20 @@ public class WebUI {
     }
     
     /**
+     * Click element with offset - accepts any TestObject type
+     */
+    public static void clickOffset(Object testObjectParam, int offsetX, int offsetY) {
+        clickOffset(convertTestObject(testObjectParam), offsetX, offsetY, 30);
+    }
+    
+    /**
+     * Click element with offset and timeout - accepts any TestObject type
+     */
+    public static void clickOffset(Object testObjectParam, int offsetX, int offsetY, int timeout) {
+        clickOffset(convertTestObject(testObjectParam), offsetX, offsetY, timeout);
+    }
+    
+    /**
      * Click element with offset and timeout
      */
     public static void clickOffset(TestObject testObject, int offsetX, int offsetY, int timeout) {
@@ -1711,6 +1773,20 @@ public class WebUI {
      */
     public static void enhancedClick(TestObject testObject) {
         enhancedClick(testObject, 30);
+    }
+    
+    /**
+     * Enhanced click - accepts any TestObject type (Katalon or katalan)
+     */
+    public static void enhancedClick(Object testObjectParam) {
+        enhancedClick(convertTestObject(testObjectParam), 30);
+    }
+    
+    /**
+     * Enhanced click with timeout - accepts any TestObject type
+     */
+    public static void enhancedClick(Object testObjectParam, int timeout) {
+        enhancedClick(convertTestObject(testObjectParam), timeout);
     }
     
     /**
@@ -1755,6 +1831,20 @@ public class WebUI {
     }
     
     /**
+     * Find single web element - accepts any TestObject type
+     */
+    public static WebElement findWebElement(Object testObjectParam) {
+        return findWebElement(convertTestObject(testObjectParam), 30);
+    }
+    
+    /**
+     * Find single web element with timeout - accepts any TestObject type
+     */
+    public static WebElement findWebElement(Object testObjectParam, int timeout) {
+        return findWebElement(convertTestObject(testObjectParam), timeout);
+    }
+    
+    /**
      * Find single web element with timeout
      */
     public static WebElement findWebElement(TestObject testObject, int timeout) {
@@ -1766,6 +1856,20 @@ public class WebUI {
      */
     public static List<WebElement> findWebElements(TestObject testObject) {
         return findWebElements(testObject, 30);
+    }
+    
+    /**
+     * Find multiple web elements - accepts any TestObject type
+     */
+    public static List<WebElement> findWebElements(Object testObjectParam) {
+        return findWebElements(convertTestObject(testObjectParam), 30);
+    }
+    
+    /**
+     * Find multiple web elements with timeout - accepts any TestObject type
+     */
+    public static List<WebElement> findWebElements(Object testObjectParam, int timeout) {
+        return findWebElements(convertTestObject(testObjectParam), timeout);
     }
     
     /**
@@ -1840,6 +1944,20 @@ public class WebUI {
      */
     public static boolean verifyElementClickable(TestObject testObject, int timeout) {
         return verifyElementClickable(testObject, timeout, null);
+    }
+    
+    /**
+     * Verify element is clickable - accepts any TestObject type
+     */
+    public static boolean verifyElementClickable(Object testObjectParam, int timeout) {
+        return verifyElementClickable(convertTestObject(testObjectParam), timeout, null);
+    }
+    
+    /**
+     * Verify element is clickable with failure handling - accepts any TestObject type
+     */
+    public static boolean verifyElementClickable(Object testObjectParam, int timeout, Object failureHandling) {
+        return verifyElementClickable(convertTestObject(testObjectParam), timeout, failureHandling);
     }
     
     /**
@@ -2101,7 +2219,17 @@ public class WebUI {
                 }
             });
         } catch (Exception e) {
-            handleVerifyFailure("waitForElementNotClickable", e, toFailureHandling(failureHandling));
+            com.katalan.core.compat.FailureHandling mode = toFailureHandling(failureHandling);
+            if (mode == com.katalan.core.compat.FailureHandling.STOP_ON_FAILURE) {
+                if (e instanceof RuntimeException) throw (RuntimeException) e;
+                throw new RuntimeException("waitForElementNotClickable failed", e);
+            }
+            // CONTINUE_ON_FAILURE or OPTIONAL - log and return
+            if (mode == com.katalan.core.compat.FailureHandling.CONTINUE_ON_FAILURE) {
+                logger.warn("waitForElementNotClickable failed: {}", e.getMessage());
+            } else {
+                logger.debug("waitForElementNotClickable failed (optional): {}", e.getMessage());
+            }
         }
     }
     
@@ -2132,7 +2260,17 @@ public class WebUI {
                 }
             });
         } catch (Exception e) {
-            handleVerifyFailure("waitForElementNotHasAttribute", e, toFailureHandling(failureHandling));
+            com.katalan.core.compat.FailureHandling mode = toFailureHandling(failureHandling);
+            if (mode == com.katalan.core.compat.FailureHandling.STOP_ON_FAILURE) {
+                if (e instanceof RuntimeException) throw (RuntimeException) e;
+                throw new RuntimeException("waitForElementNotHasAttribute failed", e);
+            }
+            // CONTINUE_ON_FAILURE or OPTIONAL - log and return
+            if (mode == com.katalan.core.compat.FailureHandling.CONTINUE_ON_FAILURE) {
+                logger.warn("waitForElementNotHasAttribute failed: {}", e.getMessage());
+            } else {
+                logger.debug("waitForElementNotHasAttribute failed (optional): {}", e.getMessage());
+            }
         }
     }
     
@@ -2155,7 +2293,17 @@ public class WebUI {
             
             wait.until(ExpectedConditions.invisibilityOfElementLocated(by));
         } catch (Exception e) {
-            handleVerifyFailure("waitForElementNotVisible", e, toFailureHandling(failureHandling));
+            com.katalan.core.compat.FailureHandling mode = toFailureHandling(failureHandling);
+            if (mode == com.katalan.core.compat.FailureHandling.STOP_ON_FAILURE) {
+                if (e instanceof RuntimeException) throw (RuntimeException) e;
+                throw new RuntimeException("waitForElementNotVisible failed", e);
+            }
+            // CONTINUE_ON_FAILURE or OPTIONAL - log and return
+            if (mode == com.katalan.core.compat.FailureHandling.CONTINUE_ON_FAILURE) {
+                logger.warn("waitForElementNotVisible failed: {}", e.getMessage());
+            } else {
+                logger.debug("waitForElementNotVisible failed (optional): {}", e.getMessage());
+            }
         }
     }
 }

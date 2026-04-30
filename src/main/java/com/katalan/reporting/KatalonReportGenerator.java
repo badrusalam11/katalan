@@ -76,11 +76,13 @@ public class KatalonReportGenerator {
     private static final String LOG_RECORD_CLASS = "com.kms.katalon.core.logging.XmlKeywordLogger";
     
     private final Path projectPath;
-    private final String katalanVersion = "10.3.2.0";  // Match Katalon Studio version exactly
+    private final String katalanVersion; // katalan version for reports
+    private final String katalonCompatVersion = "10.3.2.0"; // Katalon Studio compatibility version
     private Path currentReportDir;
     
     public KatalonReportGenerator(Path projectPath) {
         this.projectPath = projectPath;
+        this.katalanVersion = com.katalan.core.Version.getVersion();
     }
     
     /**
@@ -150,6 +152,14 @@ public class KatalonReportGenerator {
         Files.createDirectories(reportDir);
         this.currentReportDir = reportDir;
         
+        // Set console log path for DynamicFileAppender
+        com.katalan.core.logging.DynamicFileAppender consoleAppender = 
+            com.katalan.core.logging.DynamicFileAppender.getInstance();
+        if (consoleAppender != null) {
+            consoleAppender.setDynamicFile(reportDir.resolve("console0.log").toString());
+            logger.info("Console logs will be written to: {}", reportDir.resolve("console0.log"));
+        }
+        
         String suiteRelative = resolveSuiteRelativePath(result);
         
         // CRITICAL: Generate these 4 files BEFORE test cases run!
@@ -160,12 +170,7 @@ public class KatalonReportGenerator {
         try { generateExecutionUuid(reportDir); } catch (Exception e) {
             logger.warn("Failed to write execution.uuid early: {}", e.getMessage());
         }
-        // Create EMPTY console0.log - will be appended during test execution
-        try { 
-            Files.writeString(reportDir.resolve("console0.log"), ""); 
-        } catch (Exception e) {
-            logger.warn("Failed to create console0.log early: {}", e.getMessage());
-        }
+        // console0.log is now created automatically by CONSOLE_FILE appender in logback.xml
         // Create execution0.log with XML header - will be appended during test execution
         try { 
             String logHeader = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n" +
@@ -968,13 +973,16 @@ public class KatalonReportGenerator {
         // 14. logbackConfigFileLocation
         properties.put("logbackConfigFileLocation", "/Applications/Katalon Studio.app/Contents/Eclipse/configuration/org.eclipse.osgi/125/0/.cp/resources/logback/logback-console.xml");
         
-        // 15. katalon.versionNumber (WITHOUT .0 suffix)
-        properties.put("katalon.versionNumber", "10.3.2");
+        // 15. katalon.versionNumber (Katalon Studio compatibility version)
+        properties.put("katalon.versionNumber", katalonCompatVersion.substring(0, katalonCompatVersion.lastIndexOf('.'))); // Remove .0 suffix
         
         // 16. katalon.buildNumber
         properties.put("katalon.buildNumber", "0");
         
-        // 17. runningMode (GUI not CLI!)
+        // 17. katalan.versionNumber (actual katalan runner version)
+        properties.put("katalan.versionNumber", katalanVersion);
+        
+        // 18. runningMode (GUI not CLI!)
         properties.put("runningMode", "GUI");
         
         // 18. pluginTestListeners
@@ -1058,7 +1066,8 @@ public class KatalonReportGenerator {
         log.append(LOG_TIMESTAMP_FORMATTER.format(result.getEndTime()));
         log.append(" INFO  c.k.katalan.core.main.TestSuiteExecutor  - END ").append(suiteName).append("\n");
         
-        Files.writeString(reportDir.resolve("console0.log"), log.toString());
+        // console0.log is now written automatically by CONSOLE_FILE appender in logback.xml
+        // No need to manually write it here
     }
     
     /**
