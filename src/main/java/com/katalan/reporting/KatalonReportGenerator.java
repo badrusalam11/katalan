@@ -235,6 +235,18 @@ public class KatalonReportGenerator {
             logger.info("Skipping CSV generation as per report settings");
         }
 
+        if (settings.isGeneratePDF()) {
+            try {
+                Path pdfPath = new com.katalan.reporting.PDFReportGenerator(reportDir, result)
+                        .generateReport();
+                logger.info("📄 PDF report generated: {}", pdfPath);
+            } catch (Exception ex) {
+                logger.warn("Failed to generate PDF report: {}", ex.getMessage(), ex);
+            }
+        } else {
+            logger.info("Skipping PDF generation as per report settings");
+        }
+
         generateExecutionProperties(reportDir, result, suiteRelative);
         generateExecutionUuid(reportDir);
         generateConsoleLog(reportDir, result);  // Generate console FIRST
@@ -1068,7 +1080,11 @@ public class KatalonReportGenerator {
      *     <record>... endSuite ...</record>
      *   </log>
      */
-    private void generateExecutionLog(Path reportDir, ExecutionResult result) throws IOException {
+    /**
+     * Write execution0.log to disk with all buffered XmlKeywordLogger records.
+     * ALWAYS writes the file regardless of whether it exists.
+     */
+    private void writeExecutionLogToDisk(Path reportDir, ExecutionResult result) throws IOException {
         StringBuilder log = new StringBuilder();
         log.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n");
         log.append("<!DOCTYPE log SYSTEM \"logger.dtd\">\n");
@@ -1164,12 +1180,25 @@ public class KatalonReportGenerator {
     }
 
     /**
+     * Generate execution0.log (called from generateReport).
+     * SKIP if file already exists (already flushed before @AfterTestSuite).
+     */
+    private void generateExecutionLog(Path reportDir, ExecutionResult result) throws IOException {
+        Path executionLogPath = reportDir.resolve("execution0.log");
+        if (Files.exists(executionLogPath)) {
+            logger.info("⏭️ Skipping execution0.log generation - already flushed before @AfterTestSuite listener");
+            return;
+        }
+        writeExecutionLogToDisk(reportDir, result);
+    }
+
+    /**
      * FLUSH execution0.log BEFORE @AfterTestSuite runs.
      * Custom report listeners (CSReport, PdfGenerator) need to READ execution0.log,
      * so we must write all buffered XmlKeywordLogger records NOW.
      */
     public void flushExecutionLog(Path reportDir, ExecutionResult result) throws IOException {
-        generateExecutionLog(reportDir, result);
+        writeExecutionLogToDisk(reportDir, result);
     }
     
     /**
@@ -2046,18 +2075,32 @@ public class KatalonReportGenerator {
             }
         }
         
-        // CRITICAL: Only create cucumber_report folder if there are BDD tests
-        // Katalon does NOT create this folder for non-BDD tests
-        if (bddTestCases.isEmpty()) {
+        // Get the cucumber report timestamp from ExecutionContext
+        com.katalan.core.context.ExecutionContext context = com.katalan.core.context.ExecutionContext.getCurrent();
+        
+        // CRITICAL: Check if cucumber_report was referenced in execution0.log
+        // hasCucumberReportTimestamp() returns true ONLY if CucumberKW actually set it
+        boolean cucumberWasReferenced = context.hasCucumberReportTimestamp();
+        
+        if (!cucumberWasReferenced && bddTestCases.isEmpty()) {
+            // No BDD tests detected and no cucumber timestamp logged - truly no BDD tests
             return;
         }
         
         Path cucumberDir = reportDir.resolve("cucumber_report");
         Files.createDirectories(cucumberDir);
         
-        // Get the cucumber report timestamp from ExecutionContext
-        // This ensures we use the same timestamp that was logged in execution0.log
-        com.katalan.core.context.ExecutionContext context = com.katalan.core.context.ExecutionContext.getCurrent();
+        // If cucumber was referenced but no BDD tests detected, create empty folder structure
+        // This prevents CSReport from crashing when parsing execution0.log
+        if (cucumberWasReferenced && bddTestCases.isEmpty()) {
+            String timestampId = context.getCucumberReportTimestamp();
+            Path featureReportDir = cucumberDir.resolve(timestampId);
+            Files.createDirectories(featureReportDir);
+            logger.warn("⚠️ cucumber_report timestamp logged in execution0.log but no BDD tests detected - created empty folder structure");
+            return;
+        }
+        
+        // Normal case: BDD tests detected, generate reports
         String timestampId = context.getCucumberReportTimestamp();
         
         // Generate one folder per BDD test case/feature using the shared timestamp
