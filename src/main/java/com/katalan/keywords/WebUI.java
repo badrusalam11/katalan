@@ -1687,4 +1687,475 @@ public class WebUI {
         }
         return "screenshots";
     }
+    
+    // ==================== Additional Keywords (CSWeb compatibility) ====================
+    
+    /**
+     * Click element with offset (x, y coordinates from element's top-left corner)
+     */
+    public static void clickOffset(TestObject testObject, int offsetX, int offsetY) {
+        clickOffset(testObject, offsetX, offsetY, 30);
+    }
+    
+    /**
+     * Click element with offset and timeout
+     */
+    public static void clickOffset(TestObject testObject, int offsetX, int offsetY, int timeout) {
+        logger.info("Clicking on {} with offset ({}, {})", describe(testObject), offsetX, offsetY);
+        WebElement element = waitForElement(testObject, timeout);
+        new Actions(getDriver()).moveToElement(element, offsetX, offsetY).click().perform();
+    }
+    
+    /**
+     * Enhanced click with retry mechanism for flaky elements
+     */
+    public static void enhancedClick(TestObject testObject) {
+        enhancedClick(testObject, 30);
+    }
+    
+    /**
+     * Enhanced click with retry mechanism and timeout
+     */
+    public static void enhancedClick(TestObject testObject, int timeout) {
+        logger.info("Enhanced clicking on: {}", describe(testObject));
+        WebDriver driver = getDriver();
+        By by = testObject.toSeleniumBy();
+        
+        int maxRetries = 3;
+        for (int i = 0; i < maxRetries; i++) {
+            try {
+                WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(100));
+                WebElement element = wait.until(ExpectedConditions.elementToBeClickable(by));
+                
+                // Scroll into view
+                ((JavascriptExecutor) driver).executeScript(
+                    "arguments[0].scrollIntoView({block:'center', inline:'center'});", element);
+                
+                try {
+                    element.click();
+                    return; // Success
+                } catch (ElementClickInterceptedException e) {
+                    // Try JS click as fallback
+                    ((JavascriptExecutor) driver).executeScript("arguments[0].click();", element);
+                    return;
+                }
+            } catch (StaleElementReferenceException e) {
+                if (i == maxRetries - 1) throw e;
+                logger.debug("Stale element, retrying... ({}/{})", i + 1, maxRetries);
+                delay(1);
+            }
+        }
+    }
+    
+    /**
+     * Find single web element using TestObject
+     */
+    public static WebElement findWebElement(TestObject testObject) {
+        return findWebElement(testObject, 30);
+    }
+    
+    /**
+     * Find single web element with timeout
+     */
+    public static WebElement findWebElement(TestObject testObject, int timeout) {
+        return com.katalan.core.compat.WebUiCommonHelper.findWebElement(testObject, timeout);
+    }
+    
+    /**
+     * Find multiple web elements using TestObject
+     */
+    public static List<WebElement> findWebElements(TestObject testObject) {
+        return findWebElements(testObject, 30);
+    }
+    
+    /**
+     * Find multiple web elements with timeout
+     */
+    public static List<WebElement> findWebElements(TestObject testObject, int timeout) {
+        return com.katalan.core.compat.WebUiCommonHelper.findWebElements(testObject, timeout);
+    }
+    
+    /**
+     * Wait for page loading indicators to disappear (e.g., spinners, loading text)
+     */
+    public static void loading() {
+        loading(30);
+    }
+    
+    /**
+     * Wait for page loading indicators to disappear with timeout
+     */
+    public static void loading(int timeout) {
+        logger.info("Waiting for page to finish loading...");
+        WebDriver driver = getDriver();
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(100));
+        
+        // Wait for document ready state
+        wait.until(webDriver -> ((JavascriptExecutor) webDriver)
+            .executeScript("return document.readyState").equals("complete"));
+        
+        // Wait for common loading indicators to disappear
+        try {
+            wait.until(ExpectedConditions.invisibilityOfElementLocated(
+                By.xpath("//*[contains(text(),'Loading') or contains(text(),'loading') or " +
+                        "contains(@class,'loading') or contains(@class,'spinner')]")));
+        } catch (TimeoutException e) {
+            // Loading indicators may not exist, that's OK
+            logger.debug("No loading indicators found or they disappeared");
+        }
+    }
+    
+    /**
+     * Get network/proxy information (placeholder for BrowserMob proxy integration)
+     */
+    public static Object network() {
+        logger.debug("network() called - returns null (BrowserMob proxy not integrated)");
+        return null;
+    }
+    
+    /**
+     * Take full page screenshot (scrolling through entire page)
+     */
+    public static String takeFullPageScreenshot() {
+        return takeFullPageScreenshot(null);
+    }
+    
+    /**
+     * Take full page screenshot with filename
+     */
+    public static String takeFullPageScreenshot(String filename) {
+        logger.info("Taking full page screenshot");
+        
+        if (filename == null || filename.isEmpty()) {
+            filename = "fullpage_" + System.currentTimeMillis();
+        }
+        
+        // For now, use regular screenshot - full page screenshot requires more complex implementation
+        // TODO: Implement actual full-page screenshot by stitching multiple screenshots
+        return takeScreenshot(filename);
+    }
+    
+    /**
+     * Verify element is clickable
+     */
+    public static boolean verifyElementClickable(TestObject testObject, int timeout) {
+        return verifyElementClickable(testObject, timeout, null);
+    }
+    
+    /**
+     * Verify element is clickable with failure handling
+     */
+    public static boolean verifyElementClickable(TestObject testObject, int timeout, Object failureHandling) {
+        logger.info("Verifying element is clickable: {}", describe(testObject));
+        try {
+            boolean result = com.katalan.core.compat.WebUiCommonHelper.checkElementClickable(testObject, timeout);
+            if (!result) {
+                throw new RuntimeException("Element is not clickable: " + describe(testObject));
+            }
+            return true;
+        } catch (Exception e) {
+            return !handleVerifyFailure("verifyElementClickable", e, toFailureHandling(failureHandling));
+        }
+    }
+    
+    /**
+     * Verify element has attribute
+     */
+    public static boolean verifyElementHasAttribute(TestObject testObject, String attributeName, int timeout) {
+        return verifyElementHasAttribute(testObject, attributeName, timeout, null);
+    }
+    
+    /**
+     * Verify element has attribute with failure handling
+     */
+    public static boolean verifyElementHasAttribute(TestObject testObject, String attributeName, 
+                                                    int timeout, Object failureHandling) {
+        logger.info("Verifying element has attribute '{}': {}", attributeName, describe(testObject));
+        try {
+            WebElement element = waitForElement(testObject, timeout);
+            String value = element.getAttribute(attributeName);
+            if (value == null) {
+                throw new RuntimeException("Element does not have attribute '" + attributeName + "': " + describe(testObject));
+            }
+            return true;
+        } catch (Exception e) {
+            return !handleVerifyFailure("verifyElementHasAttribute", e, toFailureHandling(failureHandling));
+        }
+    }
+    
+    /**
+     * Verify element is in viewport
+     */
+    public static boolean verifyElementInViewport(TestObject testObject, int timeout) {
+        return verifyElementInViewport(testObject, timeout, null);
+    }
+    
+    /**
+     * Verify element is in viewport with failure handling
+     */
+    public static boolean verifyElementInViewport(TestObject testObject, int timeout, Object failureHandling) {
+        logger.info("Verifying element is in viewport: {}", describe(testObject));
+        try {
+            WebElement element = waitForElement(testObject, timeout);
+            Boolean inViewport = (Boolean) ((JavascriptExecutor) getDriver()).executeScript(
+                "var elem = arguments[0];" +
+                "var rect = elem.getBoundingClientRect();" +
+                "return (rect.top >= 0 && rect.left >= 0 && " +
+                "rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) && " +
+                "rect.right <= (window.innerWidth || document.documentElement.clientWidth));",
+                element
+            );
+            if (!inViewport) {
+                throw new RuntimeException("Element is not in viewport: " + describe(testObject));
+            }
+            return true;
+        } catch (Exception e) {
+            return !handleVerifyFailure("verifyElementInViewport", e, toFailureHandling(failureHandling));
+        }
+    }
+    
+    /**
+     * Verify element is NOT clickable
+     */
+    public static boolean verifyElementNotClickable(TestObject testObject, int timeout) {
+        return verifyElementNotClickable(testObject, timeout, null);
+    }
+    
+    /**
+     * Verify element is NOT clickable with failure handling
+     */
+    public static boolean verifyElementNotClickable(TestObject testObject, int timeout, Object failureHandling) {
+        logger.info("Verifying element is NOT clickable: {}", describe(testObject));
+        try {
+            boolean isClickable = com.katalan.core.compat.WebUiCommonHelper.checkElementClickable(testObject, timeout);
+            if (isClickable) {
+                throw new RuntimeException("Element is clickable (expected not clickable): " + describe(testObject));
+            }
+            return true;
+        } catch (Exception e) {
+            return !handleVerifyFailure("verifyElementNotClickable", e, toFailureHandling(failureHandling));
+        }
+    }
+    
+    /**
+     * Verify element does NOT have attribute
+     */
+    public static boolean verifyElementNotHasAttribute(TestObject testObject, String attributeName, int timeout) {
+        return verifyElementNotHasAttribute(testObject, attributeName, timeout, null);
+    }
+    
+    /**
+     * Verify element does NOT have attribute with failure handling
+     */
+    public static boolean verifyElementNotHasAttribute(TestObject testObject, String attributeName, 
+                                                       int timeout, Object failureHandling) {
+        logger.info("Verifying element does NOT have attribute '{}': {}", attributeName, describe(testObject));
+        try {
+            WebElement element = waitForElement(testObject, timeout);
+            String value = element.getAttribute(attributeName);
+            if (value != null) {
+                throw new RuntimeException("Element has attribute '" + attributeName + "' (expected not to have): " + 
+                                         describe(testObject));
+            }
+            return true;
+        } catch (Exception e) {
+            return !handleVerifyFailure("verifyElementNotHasAttribute", e, toFailureHandling(failureHandling));
+        }
+    }
+    
+    /**
+     * Verify element is NOT visible
+     */
+    public static boolean verifyElementNotVisible(TestObject testObject, int timeout) {
+        return verifyElementNotVisible(testObject, timeout, null);
+    }
+    
+    /**
+     * Verify element is NOT visible with failure handling
+     */
+    public static boolean verifyElementNotVisible(TestObject testObject, int timeout, Object failureHandling) {
+        logger.info("Verifying element is NOT visible: {}", describe(testObject));
+        try {
+            WebDriver driver = getDriver();
+            By by = testObject.toSeleniumBy();
+            
+            try {
+                WebElement element = driver.findElement(by);
+                if (element.isDisplayed()) {
+                    throw new RuntimeException("Element is visible (expected not visible): " + describe(testObject));
+                }
+            } catch (NoSuchElementException e) {
+                // Element doesn't exist - that's considered not visible
+                return true;
+            }
+            return true;
+        } catch (Exception e) {
+            return !handleVerifyFailure("verifyElementNotVisible", e, toFailureHandling(failureHandling));
+        }
+    }
+    
+    /**
+     * Verify two values are equal
+     */
+    public static boolean verifyEqual(Object actual, Object expected) {
+        return verifyEqual(actual, expected, null);
+    }
+    
+    /**
+     * Verify two values are equal with failure handling
+     */
+    public static boolean verifyEqual(Object actual, Object expected, Object failureHandling) {
+        logger.info("Verifying {} equals {}", actual, expected);
+        try {
+            if (actual == null && expected == null) {
+                return true;
+            }
+            if (actual == null || expected == null) {
+                throw new RuntimeException("Values not equal: " + actual + " != " + expected);
+            }
+            if (!actual.equals(expected)) {
+                throw new RuntimeException("Values not equal: " + actual + " != " + expected);
+            }
+            return true;
+        } catch (Exception e) {
+            return !handleVerifyFailure("verifyEqual", e, toFailureHandling(failureHandling));
+        }
+    }
+    
+    /**
+     * Verify the last downloaded file exists and matches criteria
+     */
+    public static boolean verifyFileLastDownload(String downloadPath) {
+        return verifyFileLastDownload(downloadPath, null, null);
+    }
+    
+    /**
+     * Verify the last downloaded file with expected filename pattern
+     */
+    public static boolean verifyFileLastDownload(String downloadPath, String expectedFilenamePattern, Object failureHandling) {
+        logger.info("Verifying last downloaded file in: {}", downloadPath);
+        try {
+            File dir = new File(downloadPath);
+            if (!dir.exists() || !dir.isDirectory()) {
+                throw new RuntimeException("Download directory does not exist: " + downloadPath);
+            }
+            
+            File[] files = dir.listFiles();
+            if (files == null || files.length == 0) {
+                throw new RuntimeException("No files found in download directory: " + downloadPath);
+            }
+            
+            // Find the most recently modified file
+            File latestFile = null;
+            long latestTime = 0;
+            for (File file : files) {
+                if (file.isFile() && file.lastModified() > latestTime) {
+                    latestTime = file.lastModified();
+                    latestFile = file;
+                }
+            }
+            
+            if (latestFile == null) {
+                throw new RuntimeException("No files found in download directory: " + downloadPath);
+            }
+            
+            logger.info("Latest downloaded file: {}", latestFile.getName());
+            
+            // Check filename pattern if provided
+            if (expectedFilenamePattern != null && !expectedFilenamePattern.isEmpty()) {
+                if (!latestFile.getName().matches(expectedFilenamePattern)) {
+                    throw new RuntimeException("File name does not match pattern. Expected: " + 
+                                             expectedFilenamePattern + ", Actual: " + latestFile.getName());
+                }
+            }
+            
+            return true;
+        } catch (Exception e) {
+            return !handleVerifyFailure("verifyFileLastDownload", e, toFailureHandling(failureHandling));
+        }
+    }
+    
+    /**
+     * Wait for element to be NOT clickable
+     */
+    public static void waitForElementNotClickable(TestObject testObject, int timeout) {
+        waitForElementNotClickable(testObject, timeout, null);
+    }
+    
+    /**
+     * Wait for element to be NOT clickable with failure handling
+     */
+    public static void waitForElementNotClickable(TestObject testObject, int timeout, Object failureHandling) {
+        logger.info("Waiting for element to be NOT clickable: {}", describe(testObject));
+        try {
+            WebDriver driver = getDriver();
+            By by = testObject.toSeleniumBy();
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(100));
+            
+            wait.until(webDriver -> {
+                try {
+                    WebElement element = webDriver.findElement(by);
+                    return !element.isDisplayed() || !element.isEnabled();
+                } catch (NoSuchElementException | StaleElementReferenceException e) {
+                    return true; // Element not present = not clickable
+                }
+            });
+        } catch (Exception e) {
+            handleVerifyFailure("waitForElementNotClickable", e, toFailureHandling(failureHandling));
+        }
+    }
+    
+    /**
+     * Wait for element to NOT have attribute
+     */
+    public static void waitForElementNotHasAttribute(TestObject testObject, String attributeName, int timeout) {
+        waitForElementNotHasAttribute(testObject, attributeName, timeout, null);
+    }
+    
+    /**
+     * Wait for element to NOT have attribute with failure handling
+     */
+    public static void waitForElementNotHasAttribute(TestObject testObject, String attributeName, 
+                                                     int timeout, Object failureHandling) {
+        logger.info("Waiting for element to NOT have attribute '{}': {}", attributeName, describe(testObject));
+        try {
+            WebDriver driver = getDriver();
+            By by = testObject.toSeleniumBy();
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(100));
+            
+            wait.until(webDriver -> {
+                try {
+                    WebElement element = webDriver.findElement(by);
+                    return element.getAttribute(attributeName) == null;
+                } catch (NoSuchElementException | StaleElementReferenceException e) {
+                    return true; // Element not present = doesn't have attribute
+                }
+            });
+        } catch (Exception e) {
+            handleVerifyFailure("waitForElementNotHasAttribute", e, toFailureHandling(failureHandling));
+        }
+    }
+    
+    /**
+     * Wait for element to be NOT visible
+     */
+    public static void waitForElementNotVisible(TestObject testObject, int timeout) {
+        waitForElementNotVisible(testObject, timeout, null);
+    }
+    
+    /**
+     * Wait for element to be NOT visible with failure handling
+     */
+    public static void waitForElementNotVisible(TestObject testObject, int timeout, Object failureHandling) {
+        logger.info("Waiting for element to be NOT visible: {}", describe(testObject));
+        try {
+            WebDriver driver = getDriver();
+            By by = testObject.toSeleniumBy();
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(100));
+            
+            wait.until(ExpectedConditions.invisibilityOfElementLocated(by));
+        } catch (Exception e) {
+            handleVerifyFailure("waitForElementNotVisible", e, toFailureHandling(failureHandling));
+        }
+    }
 }
