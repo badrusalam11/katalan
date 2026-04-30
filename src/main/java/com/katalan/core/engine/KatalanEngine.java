@@ -573,9 +573,9 @@ public class KatalanEngine {
                     attempt, maxAttempts, testCase.getName());
             testCase.incrementRetry();
         } else {
-            logger.error("Test case ERROR: {} - {}", testCase.getName(), errorMessage, e);
-            result.markError(errorMessage, stackTrace);
-            testCase.markError(errorMessage, stackTrace);
+            logger.error("Test case FAILED: {} - {}", testCase.getName(), errorMessage, e);
+            result.markFailed(errorMessage, stackTrace);
+            testCase.markFailed(errorMessage, stackTrace);
             
             // Log FAILED record to execution0.log (Katalon format - errors logged as FAILED)
             logTestCaseFailure(testCase, e, errorMessage, stackTrace);

@@ -96,6 +96,13 @@ public class PDFReportGenerator {
 
         ExecutionResult exec = this.result != null ? this.result : buildResultFromLog();
 
+        // Ensure totals are correct before rendering (passed/failed/error counts)
+        try {
+            exec.recalculateTotals();
+        } catch (Exception e) {
+            logger.debug("Failed to recalculate execution totals: {}", e.getMessage());
+        }
+
         logger.info("Generating PDF report: {}", pdfPath);
 
         try (PdfWriter writer = new PdfWriter(pdfPath.toFile());
@@ -211,16 +218,16 @@ public class PDFReportGenerator {
         grid.addCell(labelCell("Elapsed"));
         grid.addCell(valueCell(elapsed, COLOR_TEXT));
 
-        grid.addCell(labelCell("Error"));
-        grid.addCell(valueCell(String.valueOf(exec.getErrorTests()), COLOR_ERROR).setBold());
+        grid.addCell(labelCell("Skipped"));
+        grid.addCell(valueCell(String.valueOf(exec.getSkippedTests()), COLOR_SKIPPED));
         grid.addCell(labelCell("Pass Rate"));
         grid.addCell(valueCell(String.format("%.1f%%", exec.getPassRate()),
                 exec.getPassRate() >= 100.0 ? COLOR_PASSED : COLOR_FAILED).setBold());
 
-        grid.addCell(labelCell("Skipped"));
-        grid.addCell(valueCell(String.valueOf(exec.getSkippedTests()), COLOR_SKIPPED));
+        grid.addCell(new Cell().setBorder(Border.NO_BORDER)); // empty cell
+        grid.addCell(new Cell().setBorder(Border.NO_BORDER)); // empty cell
         grid.addCell(labelCell("Status"));
-        boolean ok = exec.getFailedTests() == 0 && exec.getErrorTests() == 0;
+        boolean ok = exec.getFailedTests() == 0;
         grid.addCell(valueCell(ok ? "PASSED" : "FAILED", ok ? COLOR_PASSED : COLOR_FAILED).setBold());
 
         doc.add(grid);
@@ -390,7 +397,15 @@ public class PDFReportGenerator {
 
         Table kv = new Table(UnitValue.createPercentArray(new float[]{1, 2}))
                 .useAllAvailableWidth();
-        envRow(kv, "Katalon version", "10.3.2.0");
+    // Show katalan runner version (not Katalon Studio). Prefer ExecutionResult.reportPath's metadata
+    String katalanVersion = null;
+    try {
+        katalanVersion = com.katalan.core.Version.getVersion();
+    } catch (Exception e) {
+        katalanVersion = "-";
+    }
+        envRow(kv, "Katalon version", "10.3.2.0"); // Show fixed Katalon Studio version for compatibility
+        envRow(kv, "Katalan version", katalanVersion);
         envRow(kv, "Host name",       hostName);
         envRow(kv, "Local OS",        os);
         envRow(kv, "Browser",         browser);
@@ -489,6 +504,60 @@ public class PDFReportGenerator {
         grid.addCell(detailValue(elapsed, false));
 
         doc.add(grid);
+
+        // If test case failed or errored, include failure summary and truncated stacktrace + console snippet
+        if (tc.getStatus() == TestCase.TestCaseStatus.FAILED || tc.getStatus() == TestCase.TestCaseStatus.ERROR) {
+            // Failure header
+            Paragraph failHdr = new Paragraph("Failure Summary")
+                    .setFontSize(12).setBold().setFontColor(COLOR_ERROR).setMarginTop(8).setMarginBottom(6);
+            doc.add(failHdr);
+
+            String errMsg = tc.getErrorMessage() != null ? tc.getErrorMessage() : "Test failed";
+            // Show a short human-friendly first line
+            Paragraph em = new Paragraph(errMsg.split("\n")[0]).setFontSize(9).setFontColor(COLOR_TEXT_MUTED);
+            doc.add(em);
+
+            // Stacktrace (truncated to first 30 lines)
+            String st = tc.getStackTrace() != null ? tc.getStackTrace() : "";
+            if (!st.isEmpty()) {
+                String[] lines = st.split("\n");
+                StringBuilder truncated = new StringBuilder();
+                int max = Math.min(lines.length, 30);
+                for (int i = 0; i < max; i++) {
+                    truncated.append(lines[i]).append("\n");
+                }
+                if (lines.length > max) truncated.append("... (truncated)");
+
+                Paragraph stPara = new Paragraph(truncated.toString()).setFontSize(8).setFontColor(COLOR_TEXT_MUTED);
+                stPara.setBorder(new SolidBorder(COLOR_BORDER, 0.5f)).setPadding(6).setMarginTop(6).setMarginBottom(6);
+                doc.add(stPara);
+            }
+
+            // Add a short snippet from console output if available (first ERROR lines)
+            String console = tc.getConsoleOutput() != null ? tc.getConsoleOutput() : "";
+            if (!console.isEmpty()) {
+                Paragraph cHdr = new Paragraph("Console snippet (error-level lines)")
+                        .setFontSize(10).setBold().setFontColor(COLOR_TEXT).setMarginTop(6).setMarginBottom(4);
+                doc.add(cHdr);
+
+                // Extract lines that contain ERROR or WARN around the failure time (simple heuristic)
+                String[] clog = console.split("\n");
+                StringBuilder snippet = new StringBuilder();
+                int added = 0;
+                for (String l : clog) {
+                    if (l.contains(" ERROR ") || l.contains(" WARN ") || l.toLowerCase().contains("timeout") || l.toLowerCase().contains("expected condition")) {
+                        snippet.append(l).append("\n");
+                        added++;
+                        if (added >= 20) break;
+                    }
+                }
+                if (snippet.length() > 0) {
+                    Paragraph cPara = new Paragraph(snippet.toString()).setFontSize(8).setFontColor(COLOR_TEXT_MUTED);
+                    cPara.setBorder(new SolidBorder(COLOR_BORDER, 0.5f)).setPadding(6).setMarginTop(6).setMarginBottom(6);
+                    doc.add(cPara);
+                }
+            }
+        }
 
         // 3) Sebelumnya / current / Selanjutnya navigation
         Table nav = new Table(UnitValue.createPercentArray(new float[]{1.4f, 4.2f, 1.4f}))
