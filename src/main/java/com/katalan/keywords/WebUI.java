@@ -2262,8 +2262,13 @@ public class WebUI {
         } catch (Exception e) {
             com.katalan.core.compat.FailureHandling mode = toFailureHandling(failureHandling);
             if (mode == com.katalan.core.compat.FailureHandling.STOP_ON_FAILURE) {
-                if (e instanceof RuntimeException) throw (RuntimeException) e;
-                throw new RuntimeException("waitForElementNotHasAttribute failed", e);
+                String msg = String.format("waitForElementNotHasAttribute failed: expected element %s to NOT have attribute '%s' within %d second(s)",
+                        describe(testObject), attributeName, timeout);
+                if (e instanceof RuntimeException) {
+                    // Wrap to attach a clearer message but keep original exception as cause
+                    throw new RuntimeException(msg, e);
+                }
+                throw new RuntimeException(msg, e);
             }
             // CONTINUE_ON_FAILURE or OPTIONAL - log and return
             if (mode == com.katalan.core.compat.FailureHandling.CONTINUE_ON_FAILURE) {
