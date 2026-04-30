@@ -235,6 +235,18 @@ public class KatalonReportGenerator {
             logger.info("Skipping CSV generation as per report settings");
         }
 
+        if (settings.isGeneratePDF()) {
+            try {
+                Path pdfPath = new com.katalan.reporting.PDFReportGenerator(reportDir, result)
+                        .generateReport();
+                logger.info("📄 PDF report generated: {}", pdfPath);
+            } catch (Exception ex) {
+                logger.warn("Failed to generate PDF report: {}", ex.getMessage(), ex);
+            }
+        } else {
+            logger.info("Skipping PDF generation as per report settings");
+        }
+
         generateExecutionProperties(reportDir, result, suiteRelative);
         generateExecutionUuid(reportDir);
         generateConsoleLog(reportDir, result);  // Generate console FIRST
