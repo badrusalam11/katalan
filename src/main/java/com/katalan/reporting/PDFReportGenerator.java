@@ -116,7 +116,6 @@ public class PDFReportGenerator {
                     }
                 }
 
-                addBanner(doc);
                 addTitle(doc);
                 addNarrative(doc, exec);
                 addInfoGrid(doc, exec);
@@ -128,35 +127,6 @@ public class PDFReportGenerator {
 
         logger.info("PDF report generated: {}", pdfPath);
         return pdfPath;
-    }
-
-    private void addBanner(Document doc) {
-        Table banner = new Table(UnitValue.createPercentArray(new float[]{1, 1}))
-                .useAllAvailableWidth()
-                .setBorder(Border.NO_BORDER)
-                .setMarginBottom(8);
-
-        Cell left = new Cell()
-                .add(new Paragraph("BRI").setFontSize(24).setBold().setFontColor(COLOR_BRI_BLUE))
-                .add(new Paragraph("Melayani Dengan Setulus Hati").setFontSize(7).setItalic().setFontColor(COLOR_BRI_BLUE))
-                .setBorder(Border.NO_BORDER)
-                .setVerticalAlignment(VerticalAlignment.MIDDLE);
-
-        Cell right = new Cell()
-                .add(new Paragraph("QEN").setFontSize(20).setBold().setFontColor(COLOR_BRI_BLUE)
-                        .setTextAlignment(TextAlignment.RIGHT))
-                .add(new Paragraph("Quality Engineering Department").setFontSize(7).setFontColor(COLOR_TEXT_MUTED)
-                        .setTextAlignment(TextAlignment.RIGHT))
-                .setBorder(Border.NO_BORDER)
-                .setVerticalAlignment(VerticalAlignment.MIDDLE);
-
-        banner.addCell(left);
-        banner.addCell(right);
-        doc.add(banner);
-
-        doc.add(new Paragraph(" ").setFontSize(1)
-                .setBorderBottom(new SolidBorder(COLOR_BRI_BLUE, 1.5f))
-                .setMarginBottom(6));
     }
 
     private void addTitle(Document doc) {
@@ -380,11 +350,35 @@ public class PDFReportGenerator {
                 .setPadding(10)
                 .setVerticalAlignment(VerticalAlignment.MIDDLE)
                 .setTextAlignment(TextAlignment.CENTER);
-        iconCell.add(new Paragraph("\uD83C\uDF10")
-                .setFontSize(48)
-                .setTextAlignment(TextAlignment.CENTER));
+        
+        // Try to load Chrome icon from assets
+        try {
+            Path chromeIcon = Paths.get("/Users/computer/Documents/repository/katalan/assets/image/chrome_icon.png");
+            if (Files.exists(chromeIcon)) {
+                ImageData imgData = ImageDataFactory.create(chromeIcon.toString());
+                Image img = new Image(imgData)
+                        .setWidth(48)
+                        .setHeight(48)
+                        .setHorizontalAlignment(HorizontalAlignment.CENTER);
+                Paragraph imgParagraph = new Paragraph().add(img).setTextAlignment(TextAlignment.CENTER);
+                iconCell.add(imgParagraph);
+            } else {
+                // Fallback to emoji if image not found
+                iconCell.add(new Paragraph("\uD83C\uDF10")
+                        .setFontSize(48)
+                        .setTextAlignment(TextAlignment.CENTER));
+            }
+        } catch (Exception e) {
+            // Fallback to emoji on error
+            logger.warn("Failed to load Chrome icon, using emoji: {}", e.getMessage());
+            iconCell.add(new Paragraph("\uD83C\uDF10")
+                    .setFontSize(48)
+                    .setTextAlignment(TextAlignment.CENTER));
+        }
+        
         iconCell.add(new Paragraph(browser.split(" ")[0])
-                .setFontSize(9).setBold().setFontColor(COLOR_TEXT_MUTED));
+                .setFontSize(9).setBold().setFontColor(COLOR_TEXT_MUTED)
+                .setTextAlignment(TextAlignment.CENTER));
         outer.addCell(iconCell);
 
         Cell rightCell = new Cell()
@@ -396,7 +390,7 @@ public class PDFReportGenerator {
 
         Table kv = new Table(UnitValue.createPercentArray(new float[]{1, 2}))
                 .useAllAvailableWidth();
-        envRow(kv, "Katalan version", "1.0.0");
+        envRow(kv, "Katalon version", "10.3.2.0");
         envRow(kv, "Host name",       hostName);
         envRow(kv, "Local OS",        os);
         envRow(kv, "Browser",         browser);
@@ -1262,7 +1256,7 @@ public class PDFReportGenerator {
             try (Canvas canvas = new Canvas(new PdfCanvas(page),
                     new Rectangle(ps.getLeft() + 36, ps.getBottom() + 18, ps.getWidth() - 72, 20))) {
                 Paragraph p = new Paragraph(
-                        "BRI Automation Test Report    |    Page " + pageNum + " / " + total)
+                        "Automation Test Report    |    Page " + pageNum + " / " + total)
                         .setFontSize(8)
                         .setFontColor(new DeviceRgb(108, 117, 125))
                         .setTextAlignment(TextAlignment.CENTER);
