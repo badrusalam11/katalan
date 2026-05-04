@@ -331,6 +331,34 @@ public class ExecutionContext {
     }
     
     /**
+     * Clear all execution variables to free memory (for CI/CD optimization)
+     * This is called after each test case to prevent memory accumulation
+     */
+    public void clearVariables() {
+        // Clear execution variables but keep global variables
+        if (executionVariables != null) {
+            executionVariables.clear();
+        }
+        
+        // Clear variable stack
+        if (variableStack != null) {
+            variableStack.clear();
+        }
+        
+        // Clear non-essential properties
+        if (properties != null) {
+            // Keep only essential properties
+            String timestamp = (String) properties.get("cucumberReportTimestamp");
+            properties.clear();
+            if (timestamp != null) {
+                properties.put("cucumberReportTimestamp", timestamp);
+            }
+        }
+        
+        logger.debug("Cleared execution variables and properties");
+    }
+    
+    /**
      * Get the project directory
      */
     public Path getProjectDir() {

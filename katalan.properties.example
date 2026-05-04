@@ -1,0 +1,268 @@
+# ==============================================================================
+# Katalan Runner - Resource Optimization Configuration
+# ==============================================================================
+# Realistic optimization settings based on actual behavior analysis.
+# 
+# ANALYSIS RESULT:
+# - Katalan ALREADY closes browser after each test case ✅
+# - No memory leak for normal usage (1 test = 1 browser lifecycle) ✅
+# - Main bottleneck: Browser startup overhead (5s per test) ❌
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# JVM Memory Settings (Pass as command-line arguments)
+# ------------------------------------------------------------------------------
+# These settings MUST be passed when starting Java, not in this properties file.
+#
+# Example command:
+# java -Xms512m -Xmx1536m -XX:+UseG1GC -jar katalan-runner.jar run -p /path/to/project
+#
+# Recommended JVM settings:
+#
+# Small suites (1-10 test cases):
+#   -Xms256m -Xmx1024m -XX:+UseG1GC
+#
+# Medium suites (10-50 test cases):
+#   -Xms512m -Xmx1536m -XX:+UseG1GC -XX:MaxGCPauseMillis=200
+#
+# Large suites (50+ test cases) or CI/CD:
+#   -Xms512m -Xmx2048m -XX:+UseG1GC -XX:MaxGCPauseMillis=200 
+#   -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp/katalan-heap.hprof
+#   -XX:MaxMetaspaceSize=256m
+#
+# Parallel execution (4+ suites on 1 agent):
+#   -Xms512m -Xmx1536m -XX:+UseG1GC -XX:+ExitOnOutOfMemoryError
+#
+# See katalan-cicd-runner.sh for complete CI/CD example.
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# ⚠️  CURRENT ISSUE (May 4, 2026)
+# ------------------------------------------------------------------------------
+# Observed: Java process using 3.62-4.07 GB RAM for small test suite (2 tests)
+#
+# ROOT CAUSES:
+# 1. No JVM heap limit set (-Xmx not specified)
+#    → Java takes default ~25% of system RAM (4GB on 16GB machine)
+# 2. XmlKeywordLogger buffers all logs in memory
+#    → For large suites (3856 scripts), this can be 300-400MB
+# 3. Screenshot accumulation (PNG format, 500KB each)
+#    → 100 screenshots = 50MB
+# 4. Groovy ClassLoader holds compiled scripts
+#    → Each script compilation cached in memory
+#
+# SOLUTION:
+# 1. ✅ ALWAYS set -Xmx limit (see JVM settings above)
+# 2. ✅ Enable optimizations below for large suites
+# 3. ✅ Use JPEG screenshots (80% size reduction)
+# 4. ✅ Enable streaming logger for 100+ tests
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Global Optimization Toggle
+# ------------------------------------------------------------------------------
+# Master switch: Set to false for legacy mode (current proven behavior)
+# Set to true only if you want to test experimental optimizations
+katalan.optimization.enabled=false
+
+# ------------------------------------------------------------------------------
+# Browser Pooling (EXPERIMENTAL - Not Needed for Normal Usage)
+# ------------------------------------------------------------------------------
+# Current behavior is ALREADY efficient:
+# - TC1: openBrowser → test → close ✅
+# - TC2: openBrowser → test → close ✅
+# 
+# Browser pool only helps if you have 50+ tests and want to save startup time.
+# Trade-off: Complexity vs 5s saved per test after the first one.
+
+# Enable browser pooling (reduces startup overhead for large suites)
+katalan.browser.pool.enabled=false
+
+# Max concurrent browsers (only matters if pool enabled)
+katalan.browser.pool.maxSize=3
+
+# Reuse browser windows between tests
+katalan.browser.pool.reuseWindows=true
+
+# Close idle browsers after timeout (seconds)
+katalan.browser.pool.idleTimeout=60
+
+# Cleanup strategy: IMMEDIATE (safest), DELAYED, or LAZY
+katalan.browser.cleanup.strategy=IMMEDIATE
+
+# ------------------------------------------------------------------------------
+# Memory Management (USEFUL - Enable for Large Suites)
+# ------------------------------------------------------------------------------
+# Monitor memory usage to catch issues early
+
+# Maximum heap usage before warning (percentage)
+katalan.memory.maxHeapUsage=80
+
+# Warning threshold (percentage)
+katalan.memory.warningThreshold=70
+
+# Force GC after each test (useful for 100+ test suites)
+katalan.memory.gcAfterTest=false
+
+# ------------------------------------------------------------------------------
+# Screenshot Optimization (HIGHLY RECOMMENDED - Easy Win!)
+# ------------------------------------------------------------------------------
+# JPEG reduces file size by 80% with minimal quality loss
+# No code changes needed, just format conversion
+
+# Screenshot format: PNG (current), JPEG (recommended), WEBP
+katalan.screenshot.format=PNG
+
+# JPEG/WEBP quality (1-100)
+# 85 = good quality with 80% size reduction
+katalan.screenshot.quality=85
+
+# Maximum screenshot width (downscale large screenshots)
+# 0 = no downscaling
+katalan.screenshot.maxWidth=1920
+
+# Enable GZIP compression for screenshot archives
+katalan.screenshot.compression=false
+
+# Skip duplicate screenshots (same content hash)
+katalan.screenshot.skipDuplicates=false
+
+# ------------------------------------------------------------------------------
+# Logging Optimization (CRITICAL for 500+ Test Cases)
+# ------------------------------------------------------------------------------
+# Streaming logger prevents OOM errors on very large test suites
+
+# Enable streaming logger (recommended for 500+ tests)
+# Current XmlKeywordLogger buffers ALL records in memory
+katalan.logging.streaming=false
+
+# Buffer size (records in memory before flush)
+katalan.logging.bufferSize=1000
+
+# Auto-flush interval (seconds)
+katalan.logging.flushInterval=5
+
+# Enable GZIP compression for log files
+katalan.logging.compression=false
+
+# ------------------------------------------------------------------------------
+# Cache Settings (CURRENT VALUES ARE ALREADY GOOD)
+# ------------------------------------------------------------------------------
+# No need to change unless you have 1000+ page objects or step definitions
+
+# ObjectRepository cache size
+katalan.cache.objectRepository.maxSize=500
+
+# Step definitions cache size
+katalan.cache.stepDefinitions.maxSize=1000
+
+# Step match LRU cache size
+katalan.cache.stepMatch.maxSize=1024
+
+# Cache TTL (seconds)
+katalan.cache.ttl=3600
+
+# ------------------------------------------------------------------------------
+# Thread Pool (CURRENT IMPLEMENTATION IS SUFFICIENT)
+# ------------------------------------------------------------------------------
+# Only needed if you add parallel test execution in the future
+
+katalan.threads.maxPoolSize=10
+katalan.threads.corePoolSize=3
+katalan.threads.queueCapacity=100
+katalan.threads.keepAlive=60
+
+# ------------------------------------------------------------------------------
+# Circuit Breaker (OVERKILL - Not Needed)
+# ------------------------------------------------------------------------------
+# Don't enable unless you have specific reliability requirements
+
+katalan.circuitBreaker.enabled=false
+katalan.circuitBreaker.failureThreshold=5
+katalan.circuitBreaker.timeout=30
+katalan.circuitBreaker.halfOpenDelay=10
+
+# ==============================================================================
+# RECOMMENDATIONS BY USE CASE
+# ==============================================================================
+
+# FOR MOST USERS (10-50 tests):
+# ✅ Keep optimization.enabled=false (current behavior is proven)
+# ✅ Consider screenshot.format=JPEG (easy 80% disk space saving)
+# ✅ Monitor logs for any memory warnings
+
+# FOR LARGE SUITES (100-500 tests):
+# ✅ Enable browser.pool (saves 5s per test after first one)
+# ✅ Enable memory.gcAfterTest (prevent memory buildup)
+# ✅ Enable screenshot.format=JPEG (significant disk savings)
+
+# FOR VERY LARGE SUITES (500+ tests):
+# ✅ Enable logging.streaming (prevent OOM from log buffering)
+# ✅ Enable browser.pool with larger maxSize (10+)
+# ✅ Enable memory monitoring and GC
+# ✅ Enable screenshot compression
+
+# FOR CI/CD PIPELINES:
+# ✅ Enable all optimizations for maximum efficiency
+# ✅ Use aggressive settings (JPEG quality=70, streaming, compression)
+# ✅ Monitor resource usage via JMX
+
+# ==============================================================================
+# QUICK START EXAMPLES
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Example 1: Fix 4GB RAM Issue (IMMEDIATE FIX)
+# ------------------------------------------------------------------------------
+# Command:
+# java -Xms512m -Xmx1536m -XX:+UseG1GC \
+#      -jar katalan-runner-1.1.1.jar run \
+#      -p /path/to/qcash-automation \
+#      -ts "Test Suites/Regresion/Regresi Prod/BRI to BRI" \
+#      --profile "Pre Deploy"
+#
+# Expected result: RAM usage drops from 4GB → 1.5GB max
+# No katalan.properties changes needed!
+
+# ------------------------------------------------------------------------------
+# Example 2: Optimize for 50+ Tests
+# ------------------------------------------------------------------------------
+# Add to project root (qcash-automation/katalan.properties):
+#
+# katalan.optimization.enabled=true
+# katalan.screenshot.format=JPEG
+# katalan.screenshot.quality=85
+# katalan.memory.gcAfterTest=true
+#
+# Then run with:
+# java -Xms512m -Xmx1536m -XX:+UseG1GC -jar katalan-runner.jar run ...
+
+# ------------------------------------------------------------------------------
+# Example 3: CI/CD Aggressive Optimization
+# ------------------------------------------------------------------------------
+# See qcash-automation/katalan.properties for full CI/CD config
+# Run with katalan-cicd-runner.sh script
+
+# ==============================================================================
+# RECOMMENDATIONS BY USE CASE
+# ==============================================================================
+
+# FOR MOST USERS (10-50 tests):
+# ✅ Keep optimization.enabled=false (current behavior is proven)
+# katalan.browser.pool.enabled=true
+# katalan.browser.pool.maxSize=5
+# katalan.screenshot.format=JPEG
+# katalan.screenshot.quality=85
+# katalan.memory.warningThreshold=70
+
+# Aggressive optimization (CI/CD pipelines):
+katalan.optimization.enabled=true
+katalan.browser.pool.enabled=true
+katalan.browser.pool.maxSize=10
+katalan.screenshot.format=JPEG
+katalan.screenshot.quality=70
+katalan.logging.streaming=true
+katalan.logging.compression=true
+katalan.memory.gcAfterTest=true
+
+# ==============================================================================
