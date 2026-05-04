@@ -41,3 +41,5 @@ test-output/
 *.bak
 *.swp
 *~
+
+katalan.properties

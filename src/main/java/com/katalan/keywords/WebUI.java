@@ -42,11 +42,40 @@ public class WebUI {
         logger.info("🌐 openBrowser() called with URL: {}", url);
         ExecutionContext context = ExecutionContext.getCurrent();
         
-        // CRITICAL: ALWAYS create NEW browser instance on every openBrowser() call!
-        // DO NOT reuse existing driver. Each openBrowser() = new Chrome session.
-        // All browsers stay alive until JVM shutdown, then DriverCleanupManager kills ALL.
-        logger.info("✅ Creating NEW browser instance (previous driver will stay alive)");
+        // CRITICAL FIX: Close existing driver BEFORE creating new one!
+        // Previously: each openBrowser() leaked the previous driver (stayed alive until JVM shutdown)
+        // Now: openBrowser() acts like a "reset" - closes old, creates new
+        WebDriver existingDriver = context.getWebDriver();
+        if (existingDriver != null) {
+            logger.info("🔒 Closing existing browser before opening new one (preventing leak)");
+            try {
+                existingDriver.quit();
+                logger.debug("✅ Previous browser closed successfully");
+            } catch (Exception e) {
+                logger.warn("Failed to close previous browser: {}", e.getMessage());
+                // Try force-stop the ChromeDriverService
+                try {
+                    if (existingDriver instanceof org.openqa.selenium.chrome.ChromeDriver) {
+                        java.lang.reflect.Field serviceField = org.openqa.selenium.chromium.ChromiumDriver.class
+                            .getDeclaredField("service");
+                        serviceField.setAccessible(true);
+                        org.openqa.selenium.chrome.ChromeDriverService service = 
+                            (org.openqa.selenium.chrome.ChromeDriverService) serviceField.get(existingDriver);
+                        if (service != null && service.isRunning()) {
+                            service.stop();
+                            logger.info("✅ Previous Chrome service force-stopped");
+                        }
+                    }
+                } catch (Exception fbEx) {
+                    logger.error("Force cleanup failed: {}", fbEx.getMessage());
+                }
+            } finally {
+                context.setWebDriver(null);
+            }
+        }
         
+        // Create NEW browser instance
+        logger.info("✅ Creating NEW browser instance");
         WebDriver driver = com.katalan.core.driver.WebDriverFactory.createDriver(context.getRunConfiguration());
         context.setWebDriver(driver);
         logger.info("✅ NEW browser created and set as current driver");
