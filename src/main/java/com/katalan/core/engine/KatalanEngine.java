@@ -250,10 +250,8 @@ public class KatalanEngine {
             TestCaseResult tcResult = executeTestCase(testCase);
             suiteResult.addTestCaseResult(tcResult);
             
-            // IMPORTANT: DO NOT cleanup browser here (Katalon behavior)
-            // Each test case that calls openBrowser() will get a NEW browser instance
-            // by setting context driver to null BEFORE test execution.
-            // All browsers are killed at shutdown via DriverCleanupManager.
+            // Browser is closed after each test case in executeTestCase() method
+            // Each test case gets a fresh browser session when calling openBrowser()
             
             // Fail fast mode
             if (config.isFailFast() && tcResult.getStatus() != TestCase.TestCaseStatus.PASSED) {
@@ -385,10 +383,11 @@ public class KatalanEngine {
         }
         
         // CRITICAL: Clear WebDriver from context so next openBrowser() creates NEW browser.
-        // DO NOT quit the driver here! Let it stay alive. DriverCleanupManager will kill
-        // ALL browsers at JVM shutdown. This gives us multiple concurrent browser sessions
-        // (TC01 browser + TC02 browser + TC03 browser all alive until end).
-        logger.info("🔄 Clearing driver from context (old browser stays alive, new openBrowser will create new one)");
+        // Browser will be closed via driver.quit() after @AfterTestCase (end of this method).
+        // This ensures each test case gets a fresh browser session:
+        // TC1: openBrowser -> test steps -> @AfterTestCase -> close browser
+        // TC2: openBrowser -> test steps -> @AfterTestCase -> close browser
+        logger.info("🔄 Clearing driver from context (ready for fresh browser in this test case)");
         context.setWebDriver(null);
         
         int attempts = 0;
@@ -498,6 +497,21 @@ public class KatalanEngine {
             listenerRegistry.invokeAfterTestCase(tcCtx);
         } catch (Exception e) {
             logger.error("@AfterTestCase listener error: {}", e.getMessage(), e);
+        }
+        
+        // CRITICAL: Close browser after each test case (Katalon behavior)
+        // This ensures each test case gets a fresh browser session:
+        // TC1: openBrowser -> click -> close
+        // TC2: openBrowser -> click -> close
+        WebDriver driver = context.getWebDriver();
+        if (driver != null) {
+            try {
+                logger.info("🔒 Closing browser after test case: {}", testCase.getName());
+                driver.quit();
+                context.setWebDriver(null);
+            } catch (Exception e) {
+                logger.warn("Failed to close browser after test case: {}", e.getMessage());
+            }
         }
         
         // Log test end
