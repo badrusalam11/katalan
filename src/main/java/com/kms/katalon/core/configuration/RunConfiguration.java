@@ -126,6 +126,25 @@ public class RunConfiguration {
     public static String getExecutionSourceName() {
         return "Katalan Runner";
     }
+
+    /**
+     * Get execution source id (Katalon parity).
+     * In Katalon this returns the unique id of the test case/suite being run.
+     * We resolve it from the engine context: prefer current test case name,
+     * fall back to current test suite name, then to the source string.
+     */
+    // public static String getExecutionSourceId() {
+    //     try {
+    //         ExecutionContext ctx = ExecutionContext.getCurrent();
+    //         if (ctx != null) {
+    //             String tcName = ctx.getCurrentTestCaseName();
+    //             if (tcName != null && !tcName.isEmpty()) return tcName;
+    //             String tsName = ctx.getCurrentTestSuiteName();
+    //             if (tsName != null && !tsName.isEmpty()) return tsName;
+    //         }
+    //     } catch (Exception ignored) { /* fall through */ }
+    //     return getExecutionSource();
+    // }
     
     /**
      * Get the default timeout for wait operations
