@@ -477,11 +477,22 @@ public class KatalanEngine {
             } finally {
                 // ALWAYS check if this was a BDD test and capture the info (even on failure)
                 Object isBddTest = context.getProperty("isBddTest");
+                Object dbgScenarioData = context.getProperty("bddScenarioData");
+                logger.info("BDD-CAPTURE[finally] tc='{}' isBddTest={} featureFile={} featureName={} scenarios={}",
+                        testCase.getName(),
+                        isBddTest,
+                        context.getProperty("featureFile"),
+                        context.getProperty("featureName"),
+                        (dbgScenarioData instanceof List) ? ((List<?>) dbgScenarioData).size() : "null/notList");
                 if (Boolean.TRUE.equals(isBddTest) && !result.isBddTest()) {
                     result.setBddTest(true);
                     Object featureFile = context.getProperty("featureFile");
                     if (featureFile != null) {
                         result.setFeatureFile(featureFile.toString());
+                    }
+                    Object featureName = context.getProperty("featureName");
+                    if (featureName != null && (result.getFeatureFile() == null || result.getFeatureFile().isEmpty())) {
+                        result.setFeatureFile(featureName.toString());
                     }
                     
                     // Capture hierarchical BDD scenario data
@@ -490,12 +501,20 @@ public class KatalanEngine {
                         @SuppressWarnings("unchecked")
                         List<Map<String, Object>> scenarioData = (List<Map<String, Object>>) bddScenarioData;
                         result.setBddScenarioData(scenarioData);
+                        // Use the FIRST scenario's name as the test case scenario label
+                        if (!scenarioData.isEmpty()) {
+                            Object scName = scenarioData.get(0).get("scenarioName");
+                            if (scName != null && !scName.toString().isEmpty()) {
+                                result.setScenarioName(scName.toString());
+                            }
+                        }
                         logger.debug("Captured {} BDD scenarios for {}", scenarioData.size(), testCase.getName());
                     }
                     
                     // Clear BDD tracking for next test case
                     context.setProperty("isBddTest", null);
                     context.setProperty("featureFile", null);
+                    context.setProperty("featureName", null);
                     context.setProperty("bddScenarioData", null);
                 }
             }

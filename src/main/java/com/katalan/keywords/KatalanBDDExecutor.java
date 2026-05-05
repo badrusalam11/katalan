@@ -331,6 +331,14 @@ public class KatalanBDDExecutor {
         
         // Extract feature name from content
         this.currentFeatureName = extractFeatureName(featureContent);
+
+        // Mark current execution as a BDD test so the engine's finally block
+        // captures bddScenarioData onto the TestCaseResult (used by PDF report).
+        if (context != null) {
+            context.setProperty("isBddTest", true);
+            context.setProperty("featureFile", featurePath.toString());
+            context.setProperty("featureName", this.currentFeatureName);
+        }
         
         List<Scenario> scenarios = parseFeature(featureContent);
         
@@ -367,6 +375,8 @@ public class KatalanBDDExecutor {
                 scenarioData.put("statistics", stats);
                 scenarioData.put("type", "TEST_CASE");
                 scenarioData.put("name", "Start Test Case : SCENARIO " + scenario.name);
+                scenarioData.put("scenarioName", scenario.name);
+                scenarioData.put("featureName", currentFeatureName != null ? currentFeatureName : "");
                 scenarioData.put("description", "");
                 scenarioData.put("retryCount", 0);
                 scenarioData.put("status", "COMPLETED");
@@ -395,6 +405,8 @@ public class KatalanBDDExecutor {
                 scenarioData.put("statistics", stats);
                 scenarioData.put("type", "TEST_CASE");
                 scenarioData.put("name", "Start Test Case : SCENARIO " + scenario.name);
+                scenarioData.put("scenarioName", scenario.name);
+                scenarioData.put("featureName", currentFeatureName != null ? currentFeatureName : "");
                 scenarioData.put("description", "");
                 scenarioData.put("retryCount", 0);
                 scenarioData.put("status", "COMPLETED");
@@ -495,6 +507,9 @@ public class KatalanBDDExecutor {
         kwLogger.endBddStep(step.keyword, step.text);
         
         Map<String, Object> stepData = new LinkedHashMap<>();
+        stepData.put("keyword", step.keyword != null ? step.keyword.trim() : "");
+        stepData.put("text", step.text);
+        stepData.put("line", step.lineNumber);
         stepData.put("name", step.keyword + " " + step.text);
         stepData.put("result", "SKIPPED");
         stepData.put("startTime", Instant.now().toString());
@@ -516,6 +531,10 @@ public class KatalanBDDExecutor {
         kwLogger.startBddStep(step.keyword, stepName, step.lineNumber, stepUuid);
         
         Map<String, Object> stepData = new LinkedHashMap<>();
+        // BDD step metadata (Given/When/Then keyword + raw text + line)
+        stepData.put("keyword", step.keyword != null ? step.keyword.trim() : "");
+        stepData.put("text", stepName);
+        stepData.put("line", step.lineNumber);
         Instant stepStart = Instant.now();
         
         // Find matching step definition
@@ -623,6 +642,26 @@ public class KatalanBDDExecutor {
                 for (int i = 0; i < limit; i++) {
                     logger.error("      at {}", trace[i]);
                 }
+
+                // Always extract & log user .groovy source file(s) involved
+                // so reports (and humans) can jump straight to the offending line.
+                java.util.List<String> userFrames = extractUserGroovyFrames(root);
+                if (!userFrames.isEmpty()) {
+                    logger.error("    📍 Source file(s) involved:");
+                    for (String f : userFrames) {
+                        logger.error("        ➜ {}", f);
+                    }
+                    // Persist into step data so PDF/HTML report can render reliably
+                    stepData.put("sourceFrames", userFrames);
+                }
+
+                // Also persist full root cause + stack trace string into step data
+                StringBuilder stSb = new StringBuilder();
+                stSb.append(exType).append(": ").append(rootMsg).append("\n");
+                for (StackTraceElement el : trace) {
+                    stSb.append("\tat ").append(el).append("\n");
+                }
+                stepData.put("stackTrace", stSb.toString());
             }
             
             // ========================================================================
@@ -635,7 +674,7 @@ public class KatalanBDDExecutor {
                     org.openqa.selenium.WebDriver driver = context.getWebDriver();
                     if (driver != null) {
                         try {
-                            String timestamp = String.valueOf(System.currentTimeMillis());
+                            String timestamp = System.currentTimeMillis() + "_error";
                             String screenshotPath = WebUI.takeScreenshot(timestamp);
                             logger.info("📸 Screenshot captured on step failure: {}", screenshotPath);
                             
@@ -655,6 +694,30 @@ public class KatalanBDDExecutor {
                 logger.debug("Could not check screenshot config: {}", configEx.getMessage());
             }
             
+            // Emit End action record so log parsers (PDF report) can close the step.
+            // Persist BDD_STEP_RESULT=FAILED + source frames + error message into the
+            // End action's properties so the PDF report can render them reliably.
+            try {
+                Map<String, String> endProps = new LinkedHashMap<>();
+                Object srcFrames = stepData.get("sourceFrames");
+                if (srcFrames instanceof java.util.List) {
+                    java.util.List<?> list = (java.util.List<?>) srcFrames;
+                    if (!list.isEmpty()) {
+                        StringBuilder sb = new StringBuilder();
+                        for (int i = 0; i < list.size(); i++) {
+                            if (i > 0) sb.append("\n");
+                            sb.append(String.valueOf(list.get(i)));
+                        }
+                        endProps.put("BDD_STEP_SOURCE_FILES", sb.toString());
+                    }
+                }
+                endProps.put("BDD_STEP_ERROR_MESSAGE", exType + ": " + rootMsg);
+                kwLogger.endBddStep(step.keyword, stepName, "FAILED", endProps);
+            } catch (Throwable t) {
+                // Best-effort log emission - never fail test because of logging
+                logger.debug("Could not emit FAILED endBddStep record: {}", t.getMessage());
+            }
+
             // Return step data instead of throwing - let caller handle the failure
             return stepData;
         }
@@ -1135,7 +1198,50 @@ public class KatalanBDDExecutor {
             this.lineNumber = lineNumber;
         }
     }
-    
+
+    /**
+     * Extract user-code (.groovy) frames from a Throwable's stack trace.
+     * Filters out internal Java/Katalon/Selenium/Cucumber frames so the
+     * caller can see exactly which user file/line caused the failure.
+     *
+     * Returned strings look like: {@code "CSWeb.groovy:55  →  website.CSWeb.cari()"}.
+     */
+    private static java.util.List<String> extractUserGroovyFrames(Throwable t) {
+        java.util.LinkedHashSet<String> result = new java.util.LinkedHashSet<>();
+        if (t == null) return new java.util.ArrayList<>();
+
+        // Walk causes too, in case the real .groovy frame is wrapped
+        Throwable cur = t;
+        int depth = 0;
+        while (cur != null && depth < 8) {
+            for (StackTraceElement el : cur.getStackTrace()) {
+                String file = el.getFileName();
+                String fqMethod = el.getClassName() + "." + el.getMethodName();
+                int line = el.getLineNumber();
+                if (file == null || !file.endsWith(".groovy")) continue;
+                if (line <= 0) continue;
+
+                String lower = fqMethod.toLowerCase();
+                if (lower.startsWith("com.kms.")) continue;
+                if (lower.startsWith("com.katalan.")) continue;
+                if (lower.startsWith("org.codehaus.")) continue;
+                if (lower.startsWith("org.openqa.")) continue;
+                if (lower.startsWith("io.cucumber.")) continue;
+                if (lower.startsWith("java.")) continue;
+                if (lower.startsWith("jdk.")) continue;
+                if (lower.startsWith("sun.")) continue;
+                if (lower.startsWith("groovy.")) continue;
+                if (lower.startsWith("picocli.")) continue;
+
+                result.add(String.format("%s:%d  →  %s()", file, line, fqMethod));
+                if (result.size() >= 8) return new java.util.ArrayList<>(result);
+            }
+            cur = cur.getCause();
+            depth++;
+        }
+        return new java.util.ArrayList<>(result);
+    }
+
     private static class StepDefinition {
         Pattern pattern;
         Method method;

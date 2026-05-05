@@ -1349,9 +1349,12 @@ public class WebUI {
      * Take screenshot with filename
      */
     public static String takeScreenshot(String filename) {
-        // If filename is provided, use timestamp-based naming (Katalon format)
-        long timestamp = System.currentTimeMillis();
-        return takeScreenshotInternal(String.valueOf(timestamp), "com.kms.katalon.core.webui.keyword.builtin.TakeScreenshotKeyword.takeScreenshot");
+        // Use the provided filename (caller controls naming, e.g. "<ts>_error" for failure shots).
+        // Fallback to current timestamp if none was passed.
+        String name = (filename == null || filename.isEmpty())
+                ? String.valueOf(System.currentTimeMillis())
+                : filename;
+        return takeScreenshotInternal(name, "com.kms.katalon.core.webui.keyword.builtin.TakeScreenshotKeyword.takeScreenshot");
     }
     
     /**

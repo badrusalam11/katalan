@@ -96,6 +96,29 @@ public class PDFReportGenerator {
 
         ExecutionResult exec = this.result != null ? this.result : buildResultFromLog();
 
+        // DEBUG: log BDD state per test case
+        try {
+            for (TestSuiteResult ts : exec.getSuiteResults()) {
+                for (TestCaseResult tc : ts.getTestCaseResults()) {
+                    java.util.List<java.util.Map<String, Object>> bs = tc.getBddScenarioData();
+                    logger.info("PDF[BDD-DEBUG] tc='{}' bdd={} feature='{}' scenarios={}",
+                            tc.getTestCaseName(), tc.isBddTest(), tc.getFeatureFile(),
+                            bs == null ? "null" : String.valueOf(bs.size()));
+                }
+            }
+        } catch (Exception ignored) { /* debug only */ }
+
+        // If engine-provided result has no BDD data but execution0.log does,
+        // re-parse the log to populate Cucumber sections.
+        if (!hasAnyBddData(exec)) {
+            try {
+                ExecutionResult logExec = buildResultFromLog();
+                mergeBddDataFromLog(exec, logExec);
+            } catch (Exception e) {
+                logger.warn("Failed to merge BDD data from log: {}", e.getMessage());
+            }
+        }
+
         // Ensure totals are correct before rendering (passed/failed/error counts)
         try {
             exec.recalculateTotals();
@@ -128,6 +151,7 @@ public class PDFReportGenerator {
                 addInfoGrid(doc, exec);
                 addTestCaseTable(doc, exec);
                 addExecutionEnvironment(doc, exec);
+                addCucumberScenarioTable(doc, exec);
                 addTestCaseDetailPages(doc, exec);
             }
         }
@@ -505,6 +529,10 @@ public class PDFReportGenerator {
 
         doc.add(grid);
 
+        // Cucumber Given/When/Then steps (BDD scenarios only) — shown
+        // BETWEEN the test-case detail grid and the failure summary.
+        addCucumberStepsBlock(doc, tc);
+
         // If test case failed or errored, include failure summary and truncated stacktrace + console snippet
         if (tc.getStatus() == TestCase.TestCaseStatus.FAILED || tc.getStatus() == TestCase.TestCaseStatus.ERROR) {
             // Failure header
@@ -517,42 +545,46 @@ public class PDFReportGenerator {
             Paragraph em = new Paragraph(errMsg.split("\n")[0]).setFontSize(9).setFontColor(COLOR_TEXT_MUTED);
             doc.add(em);
 
-            // Stacktrace (truncated to first 30 lines)
+            // Combine stacktrace and console for analysis
             String st = tc.getStackTrace() != null ? tc.getStackTrace() : "";
-            if (!st.isEmpty()) {
-                String[] lines = st.split("\n");
-                StringBuilder truncated = new StringBuilder();
-                int max = Math.min(lines.length, 30);
-                for (int i = 0; i < max; i++) {
-                    truncated.append(lines[i]).append("\n");
-                }
-                if (lines.length > max) truncated.append("... (truncated)");
+            String console = tc.getConsoleOutput() != null ? tc.getConsoleOutput() : "";
 
-                Paragraph stPara = new Paragraph(truncated.toString()).setFontSize(8).setFontColor(COLOR_TEXT_MUTED);
-                stPara.setBorder(new SolidBorder(COLOR_BORDER, 0.5f)).setPadding(6).setMarginTop(6).setMarginBottom(6);
-                doc.add(stPara);
+            // === 1) Extract ONLY the meaningful ERROR message (filter out Selenium noise) ===
+            String coreError = extractCoreErrorMessage(console, st);
+            if (!coreError.isEmpty()) {
+                Paragraph errHdr = new Paragraph("❌ Error")
+                        .setFontSize(10).setBold().setFontColor(COLOR_ERROR).setMarginTop(8).setMarginBottom(4);
+                doc.add(errHdr);
+                Paragraph errPara = new Paragraph(coreError).setFontSize(9).setFontColor(COLOR_FAILED).setBold();
+                errPara.setBorder(new SolidBorder(COLOR_FAILED, 0.8f)).setPadding(6).setMarginBottom(6);
+                doc.add(errPara);
             }
 
-            // Add a short snippet from console output if available (first ERROR lines)
-            String console = tc.getConsoleOutput() != null ? tc.getConsoleOutput() : "";
-            if (!console.isEmpty()) {
-                Paragraph cHdr = new Paragraph("Console snippet (error-level lines)")
-                        .setFontSize(10).setBold().setFontColor(COLOR_TEXT).setMarginTop(6).setMarginBottom(4);
-                doc.add(cHdr);
-
-                // Extract lines that contain ERROR or WARN around the failure time (simple heuristic)
-                String[] clog = console.split("\n");
-                StringBuilder snippet = new StringBuilder();
-                int added = 0;
-                for (String l : clog) {
-                    if (l.contains(" ERROR ") || l.contains(" WARN ") || l.toLowerCase().contains("timeout") || l.toLowerCase().contains("expected condition")) {
-                        snippet.append(l).append("\n");
-                        added++;
-                        if (added >= 20) break;
-                    }
+            // === 2) Detect user's groovy files (most useful info!) ===
+            java.util.List<String> userFrames = extractUserGroovyFrames(st, console);
+            if (!userFrames.isEmpty()) {
+                Paragraph srcHdr = new Paragraph("📍 Source File(s) Involved")
+                        .setFontSize(10).setBold().setFontColor(COLOR_BRI_BLUE).setMarginTop(6).setMarginBottom(4);
+                doc.add(srcHdr);
+                StringBuilder srcSb = new StringBuilder();
+                for (String f : userFrames) {
+                    srcSb.append("➜  ").append(f).append("\n");
                 }
-                if (snippet.length() > 0) {
-                    Paragraph cPara = new Paragraph(snippet.toString()).setFontSize(8).setFontColor(COLOR_TEXT_MUTED);
+                Paragraph srcPara = new Paragraph(srcSb.toString().trim())
+                        .setFontSize(9).setFontColor(COLOR_BRI_BLUE).setBold();
+                srcPara.setBorder(new SolidBorder(COLOR_BRI_BLUE, 0.8f))
+                        .setBackgroundColor(COLOR_BG_LIGHT).setPadding(6).setMarginBottom(6);
+                doc.add(srcPara);
+            }
+
+            // === 3) Filtered console snippet (ERROR lines only, no Selenium noise) ===
+            if (!console.isEmpty()) {
+                String snippet = extractCleanErrorLines(console);
+                if (!snippet.isEmpty()) {
+                    Paragraph cHdr = new Paragraph("Console snippet (error-level lines)")
+                            .setFontSize(10).setBold().setFontColor(COLOR_TEXT).setMarginTop(6).setMarginBottom(4);
+                    doc.add(cHdr);
+                    Paragraph cPara = new Paragraph(snippet).setFontSize(8).setFontColor(COLOR_TEXT_MUTED);
                     cPara.setBorder(new SolidBorder(COLOR_BORDER, 0.5f)).setPadding(6).setMarginTop(6).setMarginBottom(6);
                     doc.add(cPara);
                 }
@@ -646,23 +678,48 @@ public class PDFReportGenerator {
      * (file name, size, dimension, created time) on the left and the image
      * on the right, with the absolute path printed below.
      */
+    // Cumulative size cap for embedded screenshot bytes (configurable; default 90 MB).
+    // Once exceeded, remaining screenshots are summarised instead of embedded.
+    private static final long PDF_SCREENSHOT_BUDGET_BYTES = parseScreenshotBudget();
+    private long screenshotBytesEmbedded = 0L;
+
+    private static long parseScreenshotBudget() {
+        try {
+            String v = System.getProperty("katalan.pdf.maxScreenshotMB");
+            if (v != null && !v.isEmpty()) {
+                return Long.parseLong(v.trim()) * 1024L * 1024L;
+            }
+        } catch (Exception ignored) { /* fall back */ }
+        return 90L * 1024L * 1024L; // ~90MB → leaves headroom under 100MB total PDF
+    }
+
     private void addScreenshotsBriStyle(Document doc, TestCaseResult tc) {
         java.util.List<Path> images = collectScreenshots(tc);
         if (images.isEmpty()) return;
 
-        int count = 0;
+        int embedded = 0;
+        int skipped = 0;
         for (Path img : images) {
-            if (count >= 8) {
-                doc.add(new Paragraph("... " + (images.size() - count) + " more screenshot(s) omitted")
-                        .setFontSize(8).setItalic().setFontColor(COLOR_TEXT_MUTED));
-                break;
+            if (screenshotBytesEmbedded >= PDF_SCREENSHOT_BUDGET_BYTES) {
+                skipped++;
+                continue;
             }
             try {
+                long before = screenshotBytesEmbedded;
                 addOneScreenshot(doc, img);
-                count++;
+                embedded++;
+                if (screenshotBytesEmbedded == before) {
+                    // estimate based on file size if compression didn't update counter
+                    try { screenshotBytesEmbedded += Files.size(img); } catch (Exception ignored) {}
+                }
             } catch (Exception e) {
                 logger.debug("Failed to embed screenshot {}: {}", img, e.getMessage());
             }
+        }
+        if (skipped > 0) {
+            doc.add(new Paragraph(skipped + " more screenshot(s) omitted to keep the PDF under "
+                    + (PDF_SCREENSHOT_BUDGET_BYTES / (1024 * 1024)) + "MB.")
+                    .setFontSize(8).setItalic().setFontColor(COLOR_TEXT_MUTED).setMarginBottom(8));
         }
     }
 
@@ -674,9 +731,19 @@ public class PDFReportGenerator {
                 .setBorderBottom(new SolidBorder(COLOR_BRI_BLUE, 1f))
                 .setPaddingBottom(2));
 
-        ImageData data = ImageDataFactory.create(img.toAbsolutePath().toString());
+        // Compress image bytes (max 1280px wide JPEG q=0.6) to keep PDF small.
+        byte[] compressed = compressImageBytes(img, 1280, 0.6f);
+        ImageData data;
         long sizeBytes;
-        try { sizeBytes = Files.size(img); } catch (Exception e) { sizeBytes = -1; }
+        if (compressed != null) {
+            data = ImageDataFactory.create(compressed);
+            sizeBytes = compressed.length;
+            screenshotBytesEmbedded += compressed.length;
+        } else {
+            data = ImageDataFactory.create(img.toAbsolutePath().toString());
+            try { sizeBytes = Files.size(img); } catch (Exception e) { sizeBytes = -1; }
+            if (sizeBytes > 0) screenshotBytesEmbedded += sizeBytes;
+        }
         String created;
         try {
             java.nio.file.attribute.BasicFileAttributes attrs = Files.readAttributes(
@@ -726,6 +793,49 @@ public class PDFReportGenerator {
                 .setFontSize(7).setFontColor(COLOR_TEXT_MUTED)
                 .setTextAlignment(TextAlignment.CENTER)
                 .setMarginTop(2).setMarginBottom(8));
+    }
+
+    /** Compress a screenshot to a JPEG byte array, downscaling to maxWidth and using the
+     *  given quality (0..1). Returns null on failure (caller falls back to raw file). */
+    private static byte[] compressImageBytes(Path src, int maxWidth, float quality) {
+        try {
+            java.awt.image.BufferedImage in = javax.imageio.ImageIO.read(src.toFile());
+            if (in == null) return null;
+            int w = in.getWidth();
+            int h = in.getHeight();
+            double scale = (w > maxWidth) ? ((double) maxWidth / w) : 1.0;
+            int nw = (int) Math.round(w * scale);
+            int nh = (int) Math.round(h * scale);
+            java.awt.image.BufferedImage out =
+                    new java.awt.image.BufferedImage(nw, nh, java.awt.image.BufferedImage.TYPE_INT_RGB);
+            java.awt.Graphics2D g = out.createGraphics();
+            g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION,
+                    java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            g.setRenderingHint(java.awt.RenderingHints.KEY_RENDERING,
+                    java.awt.RenderingHints.VALUE_RENDER_QUALITY);
+            g.setColor(java.awt.Color.WHITE);
+            g.fillRect(0, 0, nw, nh);
+            g.drawImage(in, 0, 0, nw, nh, null);
+            g.dispose();
+            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+            java.util.Iterator<javax.imageio.ImageWriter> writers =
+                    javax.imageio.ImageIO.getImageWritersByFormatName("jpg");
+            if (!writers.hasNext()) return null;
+            javax.imageio.ImageWriter writer = writers.next();
+            javax.imageio.ImageWriteParam param = writer.getDefaultWriteParam();
+            param.setCompressionMode(javax.imageio.ImageWriteParam.MODE_EXPLICIT);
+            param.setCompressionQuality(quality);
+            try (javax.imageio.stream.ImageOutputStream ios =
+                         javax.imageio.ImageIO.createImageOutputStream(baos)) {
+                writer.setOutput(ios);
+                writer.write(null, new javax.imageio.IIOImage(out, null, null), param);
+            } finally {
+                writer.dispose();
+            }
+            return baos.toByteArray();
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private Paragraph infoLine(String label, String value) {
@@ -1087,6 +1197,47 @@ public class PDFReportGenerator {
         return null;
     }
 
+    /** Returns true if any TestCaseResult in the given exec has bddScenarioData populated. */
+    private static boolean hasAnyBddData(ExecutionResult exec) {
+        if (exec == null) return false;
+        for (TestSuiteResult ts : exec.getSuiteResults()) {
+            for (TestCaseResult tc : ts.getTestCaseResults()) {
+                java.util.List<java.util.Map<String, Object>> bs = tc.getBddScenarioData();
+                if (bs != null && !bs.isEmpty()) return true;
+            }
+        }
+        return false;
+    }
+
+    /** Copy bddScenarioData/featureFile/scenarioName from a log-derived exec onto the engine exec. */
+    private static void mergeBddDataFromLog(ExecutionResult engineExec, ExecutionResult logExec) {
+        if (engineExec == null || logExec == null) return;
+        java.util.List<TestCaseResult> engineTcs = new java.util.ArrayList<>();
+        for (TestSuiteResult ts : engineExec.getSuiteResults()) engineTcs.addAll(ts.getTestCaseResults());
+        java.util.List<TestCaseResult> logTcs = new java.util.ArrayList<>();
+        for (TestSuiteResult ts : logExec.getSuiteResults()) logTcs.addAll(ts.getTestCaseResults());
+
+        // Pair by index (same order in execution0.log as engine emitted).
+        int n = Math.min(engineTcs.size(), logTcs.size());
+        for (int i = 0; i < n; i++) {
+            TestCaseResult etc = engineTcs.get(i);
+            TestCaseResult ltc = logTcs.get(i);
+            if (ltc.getBddScenarioData() != null && !ltc.getBddScenarioData().isEmpty()
+                    && (etc.getBddScenarioData() == null || etc.getBddScenarioData().isEmpty())) {
+                etc.setBddScenarioData(ltc.getBddScenarioData());
+            }
+            if ((etc.getFeatureFile() == null || etc.getFeatureFile().isEmpty())
+                    && ltc.getFeatureFile() != null && !ltc.getFeatureFile().isEmpty()) {
+                etc.setFeatureFile(ltc.getFeatureFile());
+            }
+            if ((etc.getScenarioName() == null || etc.getScenarioName().isEmpty())
+                    && ltc.getScenarioName() != null && !ltc.getScenarioName().isEmpty()) {
+                etc.setScenarioName(ltc.getScenarioName());
+            }
+            if (ltc.isBddTest()) etc.setBddTest(true);
+        }
+    }
+
     private ExecutionResult buildResultFromLog() {
         ExecutionResult er = new ExecutionResult();
         er.setName(reportDir.getFileName() != null ? reportDir.getFileName().toString() : "Report");
@@ -1115,6 +1266,12 @@ public class PDFReportGenerator {
             org.w3c.dom.NodeList records = xml.getElementsByTagName("record");
             TestCaseResult current = null;
             long testStart = 0;
+            // Hierarchical BDD tracking: list of scenario maps, each with children=steps
+            java.util.List<java.util.Map<String, Object>> bddScenarios = null;
+            java.util.Map<String, Object> currentScenario = null;
+            java.util.List<java.util.Map<String, Object>> currentSteps = null;
+            java.util.Map<String, Object> currentStep = null;
+            long currentStepStart = 0L;
             for (int i = 0; i < records.getLength(); i++) {
                 org.w3c.dom.Element r = (org.w3c.dom.Element) records.item(i);
                 String level   = text(r, "level");
@@ -1122,31 +1279,178 @@ public class PDFReportGenerator {
                 String millis  = text(r, "millis");
                 if (message == null) continue;
 
+                java.util.Map<String, String> props = readProperties(r);
+
                 if (message.startsWith("Start Test Case :")) {
                     String tcName = message.substring("Start Test Case :".length()).trim();
-                    current = new TestCaseResult(tcName);
-                    current.setStatus(TestCase.TestCaseStatus.PASSED);
-                    testStart = millis != null ? Long.parseLong(millis) : 0L;
-                    if (testStart > 0) {
-                        Instant ts = Instant.ofEpochMilli(testStart);
-                        current.setStartTime(ts);
-                        if (suiteStart == null) suiteStart = ts;
+                    String featureName  = props.get("BDD_FEATURE_NAME");
+                    String scenarioName = props.get("BDD_TESTCASE_NAME");
+
+                    // Distinguish OUTER (test case script) vs INNER (BDD scenario)
+                    boolean isInnerScenario = (featureName != null && !featureName.isEmpty())
+                            || tcName.startsWith("SCENARIO ");
+
+                    if (isInnerScenario && current != null) {
+                        // Open a new scenario inside the outer test case
+                        currentScenario = new java.util.LinkedHashMap<>();
+                        String scName = scenarioName != null && !scenarioName.isEmpty()
+                                ? scenarioName
+                                : (tcName.startsWith("SCENARIO ") ? tcName.substring("SCENARIO ".length()) : tcName);
+                        String featName = featureName != null ? featureName : "";
+                        currentScenario.put("scenarioName", scName);
+                        currentScenario.put("featureName", featName);
+                        currentScenario.put("name", "Start Test Case : SCENARIO " + scName);
+                        currentScenario.put("result", "PASSED");
+                        currentSteps = new java.util.ArrayList<>();
+                        currentScenario.put("children", currentSteps);
+                        if (bddScenarios == null) bddScenarios = new java.util.ArrayList<>();
+
+                        if (current.getFeatureFile() == null || current.getFeatureFile().isEmpty()) {
+                            if (!featName.isEmpty()) current.setFeatureFile(featName);
+                        }
+                        if (current.getScenarioName() == null || current.getScenarioName().isEmpty()) {
+                            current.setScenarioName(scName);
+                        }
+                        current.setBddTest(true);
+                    } else {
+                        // Outer test case
+                        current = new TestCaseResult(tcName);
+                        current.setStatus(TestCase.TestCaseStatus.PASSED);
+                        testStart = millis != null ? Long.parseLong(millis) : 0L;
+                        if (testStart > 0) {
+                            Instant ts = Instant.ofEpochMilli(testStart);
+                            current.setStartTime(ts);
+                            if (suiteStart == null) suiteStart = ts;
+                        }
+                        bddScenarios = new java.util.ArrayList<>();
+                        currentScenario = null;
+                        currentSteps = null;
+                        currentStep = null;
                     }
                 } else if (message.startsWith("End Test Case :") && current != null) {
-                    long end = millis != null ? Long.parseLong(millis) : testStart;
-                    if (end > 0) {
-                        Instant te = Instant.ofEpochMilli(end);
-                        current.setEndTime(te);
-                        suiteEnd = te;
+                    boolean isInnerEnd = currentScenario != null
+                            && (message.contains("SCENARIO ")
+                                || message.contains(String.valueOf(currentScenario.get("scenarioName"))));
+
+                    if (isInnerEnd && currentScenario != null) {
+                        // Flush any dangling step (e.g. failing step where End action was lost)
+                        if (currentStep != null && currentSteps != null) {
+                            currentStep.put("result", "FAILED");
+                            currentStep.put("status", "FAILED");
+                            currentSteps.add(currentStep);
+                            currentScenario.put("result", "FAILED");
+                        }
+                        // Close current scenario
+                        bddScenarios.add(currentScenario);
+                        currentScenario = null;
+                        currentSteps = null;
+                        currentStep = null;
+                    } else {
+                        // Close outer test case
+                        long end = millis != null ? Long.parseLong(millis) : testStart;
+                        if (end > 0) {
+                            Instant te = Instant.ofEpochMilli(end);
+                            current.setEndTime(te);
+                            suiteEnd = te;
+                        }
+                        if (bddScenarios != null && !bddScenarios.isEmpty()) {
+                            current.setBddScenarioData(bddScenarios);
+                            current.setBddTest(true);
+                        }
+                        suite.addTestCaseResult(current);
+                        current = null;
+                        bddScenarios = null;
+                        currentScenario = null;
+                        currentSteps = null;
+                        currentStep = null;
                     }
-                    suite.addTestCaseResult(current);
-                    current = null;
+                } else if (message.startsWith("Start action :") && currentScenario != null
+                        && props.get("BDD_STEP_KEYWORD") != null) {
+                    // BDD step start
+                    currentStep = new java.util.LinkedHashMap<>();
+                    currentStep.put("keyword", props.getOrDefault("BDD_STEP_KEYWORD", "").trim());
+                    String stepName = props.getOrDefault("BDD_STEP_NAME",
+                            message.substring("Start action :".length()).trim());
+                    currentStep.put("text", stepName);
+                    currentStep.put("name", stepName);
+                    currentStep.put("line", props.getOrDefault("BDD_STEP_LINE", ""));
+                    currentStep.put("result", "PASSED");
+                    currentStep.put("status", "PASSED");
+                    currentStep.put("errorMessage", "");
+                    currentStepStart = millis != null ? Long.parseLong(millis) : 0L;
+                    currentStep.put("startMillis", currentStepStart);
+                } else if (message.startsWith("End action :") && currentStep != null && currentSteps != null) {
+                    long endMs = millis != null ? Long.parseLong(millis) : currentStepStart;
+                    long durMs = currentStepStart > 0 ? Math.max(0L, endMs - currentStepStart) : 0L;
+                    currentStep.put("durationMs", durMs);
+                    // Honor explicit BDD_STEP_RESULT (FAILED) and source frames written by KatalanBDDExecutor.
+                    String stepResult = props.get("BDD_STEP_RESULT");
+                    if (stepResult != null && !stepResult.isEmpty()) {
+                        currentStep.put("result", stepResult);
+                        currentStep.put("status", stepResult);
+                        if ("FAILED".equalsIgnoreCase(stepResult) && currentScenario != null) {
+                            currentScenario.put("result", "FAILED");
+                        }
+                    }
+                    String srcFiles = props.get("BDD_STEP_SOURCE_FILES");
+                    if (srcFiles != null && !srcFiles.isEmpty()) {
+                        java.util.List<String> frames = new java.util.ArrayList<>();
+                        for (String line : srcFiles.split("\n")) {
+                            String t = line.trim();
+                            if (!t.isEmpty()) frames.add(t);
+                        }
+                        if (!frames.isEmpty()) currentStep.put("sourceFrames", frames);
+                    }
+                    String stepErr = props.get("BDD_STEP_ERROR_MESSAGE");
+                    if (stepErr != null && !stepErr.isEmpty()) {
+                        currentStep.put("errorMessage", stepErr);
+                    }
+                    currentSteps.add(currentStep);
+                    currentStep = null;
                 } else if (current != null && ("FAILED".equals(level) || "ERROR".equals(level))) {
                     current.setStatus("FAILED".equals(level)
                             ? TestCase.TestCaseStatus.FAILED
                             : TestCase.TestCaseStatus.ERROR);
                     String existing = current.getErrorMessage();
                     current.setErrorMessage(existing == null ? message : existing + "\n" + message);
+                    // Mark current scenario + step as failed
+                    if (currentScenario != null) {
+                        currentScenario.put("result", "FAILED");
+                    }
+                    if (currentStep != null) {
+                        currentStep.put("result", "FAILED");
+                        currentStep.put("status", "FAILED");
+                        String prev = (String) currentStep.get("errorMessage");
+                        currentStep.put("errorMessage",
+                                (prev == null || prev.isEmpty()) ? message : prev + "\n" + message);
+                    } else if (currentSteps != null && !currentSteps.isEmpty()) {
+                        // Failure record arrived AFTER the last step closed (or scenario closed
+                        // its step implicitly): propagate to the last step in the scenario.
+                        java.util.Map<String, Object> last = currentSteps.get(currentSteps.size() - 1);
+                        last.put("result", "FAILED");
+                        last.put("status", "FAILED");
+                        String prev = (String) last.get("errorMessage");
+                        last.put("errorMessage",
+                                (prev == null || prev.isEmpty()) ? message : prev + "\n" + message);
+                    } else if (currentScenario == null && bddScenarios != null && !bddScenarios.isEmpty()) {
+                        // Scenario already closed; mark the most recent scenario + its last step as failed.
+                        java.util.Map<String, Object> lastScn = bddScenarios.get(bddScenarios.size() - 1);
+                        lastScn.put("result", "FAILED");
+                        Object kids = lastScn.get("children");
+                        if (kids instanceof java.util.List) {
+                            @SuppressWarnings("unchecked")
+                            java.util.List<java.util.Map<String, Object>> ch =
+                                    (java.util.List<java.util.Map<String, Object>>) kids;
+                            if (!ch.isEmpty()) {
+                                java.util.Map<String, Object> last = ch.get(ch.size() - 1);
+                                last.put("result", "FAILED");
+                                last.put("status", "FAILED");
+                                String prev = (String) last.get("errorMessage");
+                                last.put("errorMessage",
+                                        (prev == null || prev.isEmpty()) ? message : prev + "\n" + message);
+                            }
+                        }
+                    }
                 }
             }
 
@@ -1166,6 +1470,23 @@ public class PDFReportGenerator {
     private static String text(org.w3c.dom.Element parent, String tag) {
         org.w3c.dom.NodeList n = parent.getElementsByTagName(tag);
         return n.getLength() > 0 ? n.item(0).getTextContent() : null;
+    }
+
+    /**
+     * Read all {@code <property name="X">value</property>} children of a record
+     * into a map. Used to extract BDD_* metadata from execution0.log.
+     */
+    private static java.util.Map<String, String> readProperties(org.w3c.dom.Element record) {
+        java.util.Map<String, String> map = new java.util.LinkedHashMap<>();
+        org.w3c.dom.NodeList props = record.getElementsByTagName("property");
+        for (int i = 0; i < props.getLength(); i++) {
+            org.w3c.dom.Element prop = (org.w3c.dom.Element) props.item(i);
+            String name = prop.getAttribute("name");
+            if (name == null || name.isEmpty()) continue;
+            String value = prop.getTextContent();
+            map.put(name, value != null ? value : "");
+        }
+        return map;
     }
     
     /**
@@ -1311,6 +1632,451 @@ public class PDFReportGenerator {
         }
         // Fallback to test case ID
         return tc.getTestCaseId() != null ? tc.getTestCaseId() : tc.getTestCaseName();
+    }
+
+    /* === Helper methods for failure rendering (focused error highlights) === */
+
+    /**
+     * Extract the most meaningful ERROR message from console/stacktrace,
+     * filtering out Selenium boilerplate (Build info, System info, Capabilities, Session ID).
+     */
+    private static String extractCoreErrorMessage(String console, String stackTrace) {
+        // 1) "[FAILED & STOP]" line in console (most meaningful)
+        if (console != null && !console.isEmpty()) {
+            for (String l : console.split("\n")) {
+                if (l.contains("[FAILED & STOP]") || l.contains("[FAILED]")) {
+                    return l.replaceAll(".*\\[FAILED[^\\]]*\\]\\s*", "").trim();
+                }
+            }
+            // 2) "Step failed:" line
+            for (String l : console.split("\n")) {
+                if (l.contains("Step failed:")) {
+                    return l.replaceAll(".*Step failed:\\s*", "").trim();
+                }
+            }
+            // 3) "Expected condition failed:" (selenium WebDriverWait failure)
+            for (String l : console.split("\n")) {
+                int idx = l.indexOf("Expected condition failed:");
+                if (idx >= 0) {
+                    String msg = l.substring(idx).trim();
+                    int tail = msg.indexOf("(tried for");
+                    if (tail > 0) msg = msg.substring(0, tail).trim();
+                    return msg;
+                }
+            }
+        }
+        // 4) Fallback: first non-noise line of stacktrace
+        if (stackTrace != null && !stackTrace.isEmpty()) {
+            for (String l : stackTrace.split("\n")) {
+                String s = l.trim();
+                if (s.isEmpty()) continue;
+                if (s.startsWith("Build info:") || s.startsWith("System info:")
+                        || s.startsWith("Driver info:") || s.startsWith("Capabilities")
+                        || s.startsWith("Session ID:") || s.startsWith("at ")
+                        || s.startsWith("...")) continue;
+                return s;
+            }
+        }
+        return "";
+    }
+
+    /**
+     * Extract user's groovy source files from stack trace / console.
+     * Filters out internal Java/Katalon/Selenium frames; keeps only user code
+     * like {@code website.CSWeb.cari(CSWeb.groovy:55)} or
+     * {@code fund_transfer.RTGS_Maker_Revamp.inPageEFT(RTGS_Maker_Revamp.groovy:271)}.
+     */
+    private static java.util.List<String> extractUserGroovyFrames(String stackTrace, String console) {
+        java.util.LinkedHashSet<String> result = new java.util.LinkedHashSet<>();
+        java.util.regex.Pattern p = java.util.regex.Pattern.compile(
+            "at\\s+([\\w.$]+)\\(([\\w$]+\\.groovy):(\\d+)\\)"
+        );
+
+        String combined = (stackTrace == null ? "" : stackTrace) + "\n" + (console == null ? "" : console);
+        java.util.regex.Matcher m = p.matcher(combined);
+        while (m.find()) {
+            String fqMethod = m.group(1);   // e.g., website.CSWeb.cari
+            String file = m.group(2);       // e.g., CSWeb.groovy
+            String line = m.group(3);       // e.g., 55
+
+            // Skip internal/library packages
+            String lower = fqMethod.toLowerCase();
+            if (lower.startsWith("com.kms.")) continue;
+            if (lower.startsWith("com.katalan.")) continue;
+            if (lower.startsWith("org.codehaus.")) continue;
+            if (lower.startsWith("org.openqa.")) continue;
+            if (lower.startsWith("io.cucumber.")) continue;
+            if (lower.startsWith("java.")) continue;
+            if (lower.startsWith("jdk.")) continue;
+            if (lower.startsWith("sun.")) continue;
+            if (lower.startsWith("groovy.")) continue;
+            if (lower.startsWith("picocli.")) continue;
+
+            result.add(String.format("%s:%s  →  %s()", file, line, fqMethod));
+            if (result.size() >= 6) break; // keep concise
+        }
+
+        // Also parse the pretty "➜ Filename.groovy:NN  →  pkg.Class.method()" lines
+        // emitted by KatalanBDDExecutor via slf4j (these show up in console output).
+        java.util.regex.Pattern arrowPattern = java.util.regex.Pattern.compile(
+            "➜\\s+([\\w$]+\\.groovy):(\\d+)\\s+→\\s+([\\w.$]+(?:\\([^)]*\\))?)"
+        );
+        java.util.regex.Matcher am = arrowPattern.matcher(combined);
+        while (am.find()) {
+            String file = am.group(1);
+            String line = am.group(2);
+            String fq = am.group(3).replaceAll("\\(.*\\)$", "");
+            result.add(String.format("%s:%s  →  %s()", file, line, fq));
+            if (result.size() >= 6) break;
+        }
+
+        return new java.util.ArrayList<>(result);
+    }
+
+    /**
+     * Filter console lines to keep only meaningful error/warn lines for the snippet,
+     * removing Selenium driver boilerplate (Build info, System info, Capabilities, Session ID, stack frames).
+     */
+    private static String extractCleanErrorLines(String console) {
+        if (console == null || console.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        int added = 0;
+        for (String l : console.split("\n")) {
+            String s = l.trim();
+            // Skip Selenium driver boilerplate
+            if (s.startsWith("Build info:")) continue;
+            if (s.startsWith("System info:")) continue;
+            if (s.startsWith("Driver info:")) continue;
+            if (s.startsWith("Capabilities ")) continue;
+            if (s.startsWith("Capabilities{")) continue;
+            if (s.startsWith("Session ID:")) continue;
+            // Skip internal stack frames in console
+            if (s.startsWith("at ")) continue;
+            if (s.startsWith("...")) continue;
+
+            if (l.contains(" ERROR ") || l.contains(" WARN ")
+                    || l.toLowerCase().contains("expected condition")
+                    || l.toLowerCase().contains("[failed")
+                    || l.toLowerCase().contains("step failed")) {
+                sb.append(l).append("\n");
+                added++;
+                if (added >= 15) break;
+            }
+        }
+        return sb.toString();
+    }
+
+    // =====================================================================
+    //  Cucumber Scenario rendering (BDD)
+    // =====================================================================
+
+    /**
+     * Render the "Cucumber Scenario" overview table directly below the
+     * Execution Environment block. Only emitted when at least one test case
+     * is a BDD/Cucumber scenario.
+     *
+     * Columns: # | Fitur | Scenario | Category | Status
+     */
+    private void addCucumberScenarioTable(Document doc, ExecutionResult exec) {
+        // Collect (testCase, scenarioMap) pairs across the whole run.
+        // bddScenarioData on a TestCaseResult is hierarchical:
+        //   List< Map { name, scenarioName, featureName, result, children:[steps], statistics, ... } >
+        java.util.List<Object[]> rows = new java.util.ArrayList<>();
+        for (TestSuiteResult s : exec.getSuiteResults()) {
+            for (TestCaseResult tc : s.getTestCaseResults()) {
+                java.util.List<java.util.Map<String, Object>> scenarios = tc.getBddScenarioData();
+                if (scenarios != null && !scenarios.isEmpty()) {
+                    for (java.util.Map<String, Object> sc : scenarios) {
+                        rows.add(new Object[]{tc, sc});
+                    }
+                } else if (tc.isBddTest()
+                        || (tc.getFeatureFile() != null && !tc.getFeatureFile().isEmpty())
+                        || (tc.getScenarioName() != null && !tc.getScenarioName().isEmpty())
+                        || (tc.getTestCaseName() != null && tc.getTestCaseName().startsWith("SCENARIO "))) {
+                    rows.add(new Object[]{tc, null});
+                }
+            }
+        }
+        if (rows.isEmpty()) return;
+
+        // Section header
+        doc.add(new Paragraph("Cucumber Scenario")
+                .setFontSize(13).setBold().setFontColor(COLOR_TEXT)
+                .setMarginTop(10).setMarginBottom(6));
+
+        Table table = new Table(UnitValue.createPercentArray(new float[]{0.6f, 3.0f, 4.0f, 1.6f, 1.4f}))
+                .useAllAvailableWidth()
+                .setMarginBottom(12);
+
+        table.addHeaderCell(thCell("#"));
+        table.addHeaderCell(thCell("Fitur"));
+        table.addHeaderCell(thCell("Scenario"));
+        table.addHeaderCell(thCell("Category"));
+        table.addHeaderCell(thCell("Status"));
+
+        int idx = 1;
+        for (Object[] row : rows) {
+            TestCaseResult tc = (TestCaseResult) row[0];
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, Object> sc = (java.util.Map<String, Object>) row[1];
+
+            String fitur;
+            String scenario;
+            String statusStr;
+            DeviceRgb statusColor;
+
+            if (sc != null) {
+                String featName = String.valueOf(sc.getOrDefault("featureName", ""));
+                if (featName.isEmpty() && tc.getFeatureFile() != null) {
+                    featName = extractFeatureLabel(tc.getFeatureFile());
+                }
+                fitur = featName.isEmpty() ? DASH : featName;
+
+                String scName = String.valueOf(sc.getOrDefault("scenarioName", ""));
+                if (scName.isEmpty()) {
+                    String n = String.valueOf(sc.getOrDefault("name", ""));
+                    if (n.startsWith("Start Test Case : SCENARIO ")) {
+                        scName = n.substring("Start Test Case : SCENARIO ".length());
+                    } else {
+                        scName = n;
+                    }
+                }
+                scenario = scName.isEmpty() ? DASH : scName;
+
+                String result = String.valueOf(sc.getOrDefault("result", "PASSED")).toUpperCase();
+                boolean failed = "FAILED".equals(result) || "ERROR".equals(result);
+                statusStr = failed ? "FAILED" : ("SKIPPED".equals(result) ? "SKIPPED" : "PASSED");
+                statusColor = failed ? COLOR_FAILED : ("SKIPPED".equals(result) ? COLOR_SKIPPED : COLOR_PASSED);
+            } else {
+                fitur = tc.getFeatureFile() != null && !tc.getFeatureFile().isEmpty()
+                        ? extractFeatureLabel(tc.getFeatureFile()) : DASH;
+                scenario = tc.getScenarioName() != null && !tc.getScenarioName().isEmpty()
+                        ? tc.getScenarioName() : cleanTestCaseName(tc.getTestCaseName());
+                statusStr = tc.getStatus() != null ? tc.getStatus().name() : DASH;
+                statusColor = statusColor(tc.getStatus());
+            }
+
+            String category = tc.getTag() != null && !tc.getTag().isEmpty()
+                    ? tc.getTag() : "Cucumber";
+
+            table.addCell(tdCell(String.valueOf(idx++)).setTextAlignment(TextAlignment.CENTER));
+            table.addCell(tdCell(fitur));
+            table.addCell(tdCell(scenario));
+            table.addCell(tdCell(category).setTextAlignment(TextAlignment.CENTER));
+            table.addCell(new Cell()
+                    .add(new Paragraph(statusStr).setBold().setFontSize(9).setFontColor(statusColor))
+                    .setBorder(new SolidBorder(COLOR_BORDER, 0.5f))
+                    .setPadding(6)
+                    .setTextAlignment(TextAlignment.CENTER));
+        }
+
+        doc.add(table);
+    }
+
+    /**
+     * Extract a human label from a feature file path or name.
+     * "Feature Files/Login/Login_Valid.feature" -> "Login_Valid"
+     */
+    private static String extractFeatureLabel(String feature) {
+        if (feature == null || feature.isEmpty()) return DASH;
+        String s = feature.replace('\\', '/');
+        int slash = s.lastIndexOf('/');
+        if (slash >= 0) s = s.substring(slash + 1);
+        if (s.toLowerCase().endsWith(".feature")) s = s.substring(0, s.length() - ".feature".length());
+        return s;
+    }
+
+    /**
+     * Render the Cucumber Given/When/Then step list inside a test case detail
+     * page (called BEFORE the failure summary). Only emitted when the test
+     * case is a BDD scenario with step data.
+     */
+    private void addCucumberStepsBlock(Document doc, TestCaseResult tc) {
+        if (tc == null) return;
+        java.util.List<java.util.Map<String, Object>> scenarios = tc.getBddScenarioData();
+        if (scenarios == null || scenarios.isEmpty()) return;
+
+        DeviceRgb GREEN = COLOR_PASSED;
+        DeviceRgb FAIL_BG = new DeviceRgb(252, 230, 232);
+
+        for (java.util.Map<String, Object> sc : scenarios) {
+            // Resolve feature/scenario labels
+            String featureLabel = String.valueOf(sc.getOrDefault("featureName", ""));
+            if (featureLabel.isEmpty() && tc.getFeatureFile() != null) {
+                featureLabel = extractFeatureLabel(tc.getFeatureFile());
+            }
+            if (featureLabel.isEmpty()) featureLabel = "Feature";
+
+            String scenarioLabel = String.valueOf(sc.getOrDefault("scenarioName", ""));
+            if (scenarioLabel.isEmpty()) {
+                String n = String.valueOf(sc.getOrDefault("name", ""));
+                if (n.startsWith("Start Test Case : SCENARIO ")) {
+                    scenarioLabel = n.substring("Start Test Case : SCENARIO ".length());
+                } else {
+                    scenarioLabel = n;
+                }
+            }
+
+            String scResult = String.valueOf(sc.getOrDefault("result", "PASSED")).toUpperCase();
+            DeviceRgb headBg = ("FAILED".equals(scResult) || "ERROR".equals(scResult)) ? COLOR_FAILED : GREEN;
+
+            // Feature/Scenario header band
+            Table head = new Table(UnitValue.createPercentArray(new float[]{1}))
+                    .useAllAvailableWidth().setMarginTop(10);
+            Cell hCell = new Cell()
+                    .setBackgroundColor(headBg)
+                    .setBorder(Border.NO_BORDER)
+                    .setPadding(8);
+            hCell.add(new Paragraph("Feature: " + featureLabel)
+                    .setBold().setFontSize(11).setFontColor(ColorConstants.WHITE).setMarginBottom(2));
+            if (!scenarioLabel.isEmpty()) {
+                hCell.add(new Paragraph("Scenario: " + scenarioLabel)
+                        .setFontSize(10).setFontColor(ColorConstants.WHITE));
+            }
+            head.addCell(hCell);
+            doc.add(head);
+
+            // Step rows from scenario.children
+            @SuppressWarnings("unchecked")
+            java.util.List<java.util.Map<String, Object>> steps =
+                    (java.util.List<java.util.Map<String, Object>>) sc.get("children");
+            if (steps == null || steps.isEmpty()) {
+                doc.add(new Paragraph("(no steps recorded)")
+                        .setFontSize(9).setItalic().setFontColor(COLOR_TEXT_MUTED).setMarginBottom(8));
+                continue;
+            }
+
+            Table table = new Table(UnitValue.createPercentArray(new float[]{0.9f, 5.5f, 1.2f, 1.2f}))
+                    .useAllAvailableWidth()
+                    .setMarginBottom(10);
+            table.addHeaderCell(thCell("Keyword"));
+            table.addHeaderCell(thCell("Step"));
+            table.addHeaderCell(thCell("Duration"));
+            table.addHeaderCell(thCell("Status"));
+
+            for (java.util.Map<String, Object> step : steps) {
+                String keyword = String.valueOf(step.getOrDefault("keyword", "")).trim();
+                String name    = String.valueOf(step.getOrDefault("text",
+                                  step.getOrDefault("name", ""))).trim();
+                // If name still includes the keyword prefix, strip it
+                if (!keyword.isEmpty() && name.toLowerCase().startsWith(keyword.toLowerCase() + " ")) {
+                    name = name.substring(keyword.length() + 1).trim();
+                }
+
+                // Determine status: prefer "result" (PASSED/FAILED/SKIPPED), fall back to status
+                String result = String.valueOf(step.getOrDefault("result", "")).trim().toUpperCase();
+                if (result.isEmpty()) {
+                    result = String.valueOf(step.getOrDefault("status", "PASSED")).trim().toUpperCase();
+                }
+                boolean failed  = "FAILED".equals(result) || "ERROR".equals(result);
+                boolean skipped = "SKIPPED".equals(result) || "NOT_RUN".equals(result);
+
+                long durMs = computeStepDurationMs(step);
+
+                // Error message: pull from logs[level=FAILED] or errorMessage
+                String errorMsg = extractStepErrorMessage(step);
+
+                DeviceRgb statusColor = failed  ? COLOR_FAILED
+                                       : skipped ? COLOR_SKIPPED
+                                       : COLOR_PASSED;
+                DeviceRgb rowBg = failed ? FAIL_BG : new DeviceRgb(255, 255, 255);
+
+                Cell kwCell = new Cell()
+                        .add(new Paragraph(keyword.isEmpty() ? "—" : keyword)
+                                .setBold().setFontSize(9).setFontColor(COLOR_BRI_BLUE))
+                        .setBackgroundColor(rowBg)
+                        .setBorder(new SolidBorder(COLOR_BORDER, 0.5f))
+                        .setPadding(6);
+                Cell nameCell = new Cell()
+                        .add(new Paragraph(name).setFontSize(9).setFontColor(COLOR_TEXT))
+                        .setBackgroundColor(rowBg)
+                        .setBorder(new SolidBorder(COLOR_BORDER, 0.5f))
+                        .setPadding(6);
+                if (failed && !errorMsg.isEmpty()) {
+                    String firstLine = errorMsg.split("\\r?\\n")[0];
+                    if (firstLine.length() > 400) firstLine = firstLine.substring(0, 400) + "...";
+                    nameCell.add(new Paragraph(firstLine)
+                            .setFontSize(8).setItalic().setFontColor(COLOR_FAILED).setMarginTop(3));
+                }
+                // Show source file from sourceFrames if available
+                Object sourceFramesObj = step.get("sourceFrames");
+                if (sourceFramesObj instanceof java.util.List) {
+                    @SuppressWarnings("unchecked")
+                    java.util.List<String> sourceFrames = (java.util.List<String>) sourceFramesObj;
+                    if (!sourceFrames.isEmpty()) {
+                        String firstFrame = sourceFrames.get(0);
+                        nameCell.add(new Paragraph("📍 " + firstFrame)
+                                .setFontSize(7).setBold().setFontColor(new DeviceRgb(230, 126, 34))
+                                .setMarginTop(2));
+                    }
+                }
+                Cell durCell = new Cell()
+                        .add(new Paragraph(formatStepDuration(durMs))
+                                .setFontSize(8).setFontColor(COLOR_TEXT_MUTED))
+                        .setBackgroundColor(rowBg)
+                        .setBorder(new SolidBorder(COLOR_BORDER, 0.5f))
+                        .setPadding(6).setTextAlignment(TextAlignment.CENTER);
+                Cell stCell = new Cell()
+                        .add(new Paragraph(failed ? "FAILED" : (skipped ? "SKIPPED" : "PASSED"))
+                                .setBold().setFontSize(9).setFontColor(statusColor))
+                        .setBackgroundColor(rowBg)
+                        .setBorder(new SolidBorder(COLOR_BORDER, 0.5f))
+                        .setPadding(6).setTextAlignment(TextAlignment.CENTER);
+
+                table.addCell(kwCell);
+                table.addCell(nameCell);
+                table.addCell(durCell);
+                table.addCell(stCell);
+            }
+
+            doc.add(table);
+        }
+    }
+
+    /** Compute step duration in ms from startTime/endTime ISO strings, with fallbacks. */
+    private static long computeStepDurationMs(java.util.Map<String, Object> step) {
+        Object dur = step.get("durationMs");
+        if (dur instanceof Number) return ((Number) dur).longValue();
+        try {
+            Object st = step.get("startTime");
+            Object et = step.get("endTime");
+            if (st instanceof String && et instanceof String) {
+                Instant a = Instant.parse((String) st);
+                Instant b = Instant.parse((String) et);
+                return Math.max(0L, b.toEpochMilli() - a.toEpochMilli());
+            }
+        } catch (Exception ignored) { /* best-effort */ }
+        return 0L;
+    }
+
+    /** Pull a sensible error message from a step's logs[] or fields. */
+    @SuppressWarnings("unchecked")
+    private static String extractStepErrorMessage(java.util.Map<String, Object> step) {
+        Object em = step.get("errorMessage");
+        if (em instanceof String && !((String) em).isEmpty()) return (String) em;
+        Object logs = step.get("logs");
+        if (logs instanceof java.util.List) {
+            for (Object o : (java.util.List<Object>) logs) {
+                if (o instanceof java.util.Map) {
+                    java.util.Map<String, Object> log = (java.util.Map<String, Object>) o;
+                    String level = String.valueOf(log.getOrDefault("level", "")).toUpperCase();
+                    if ("FAILED".equals(level) || "ERROR".equals(level)) {
+                        return String.valueOf(log.getOrDefault("message", ""));
+                    }
+                }
+            }
+        }
+        return "";
+    }
+
+    private static String formatStepDuration(long ms) {
+        if (ms <= 0) return "0ms";
+        if (ms < 1000) return ms + "ms";
+        double s = ms / 1000.0;
+        if (s < 60) return String.format("%.2fs", s);
+        long mins = (long) (s / 60);
+        double rem = s - mins * 60;
+        return String.format("%dm %.2fs", mins, rem);
     }
 
     private static class FooterHandler implements IEventHandler {

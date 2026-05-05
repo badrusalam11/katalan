@@ -192,10 +192,27 @@ public class XmlKeywordLogger {
      * Log BDD step end.
      */
     public void endBddStep(String keyword, String stepName) {
+        endBddStep(keyword, stepName, null, null);
+    }
+
+    /**
+     * Log BDD step end with explicit result status and extra properties (used for FAILED steps
+     * to persist BDD_STEP_RESULT + BDD_STEP_SOURCE_FILES into execution0.log so PDF reports
+     * can render them even when the engine result has no BDD data).
+     */
+    public void endBddStep(String keyword, String stepName, String stepResult, Map<String, String> extraProps) {
         int currentNested = nestedLevel.get() - 1;
         if (currentNested < 0) currentNested = 0;
         nestedLevel.set(currentNested);
-        logRecord("END", "endKeyword", "End action : " + stepName, currentNested, Collections.emptyMap());
+        Map<String, String> props = new LinkedHashMap<>();
+        if (stepResult != null && !stepResult.isEmpty()) {
+            props.put("BDD_STEP_RESULT", stepResult);
+        }
+        if (extraProps != null && !extraProps.isEmpty()) {
+            props.putAll(extraProps);
+        }
+        logRecord("END", "endKeyword", "End action : " + stepName, currentNested,
+                props.isEmpty() ? Collections.emptyMap() : props);
     }
     
     /**
