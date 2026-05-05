@@ -6,7 +6,7 @@
 
     <groupId>com.katalan</groupId>
     <artifactId>katalan-runner</artifactId>
-    <version>1.1.3</version>
+    <version>1.1.4</version>
     <packaging>jar</packaging>
 
     <name>katalan Runner</name>
