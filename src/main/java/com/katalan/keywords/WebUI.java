@@ -633,6 +633,32 @@ public class WebUI {
     // ==================== Wait Keywords ====================
     
     /**
+     * Normalize timeout value to match Katalon behavior.
+     * 
+     * KATALON BEHAVIOR: When timeout=0 is passed to any wait/verify keyword,
+     * it means "wait up to the default timeout (from RunConfiguration), and
+     * return immediately as soon as the condition is met". It does NOT mean
+     * "wait literally 0 seconds".
+     * 
+     * This method converts timeout=0 to RunConfiguration.getTimeOut() (default 30s).
+     * Negative timeouts are also normalized to the default.
+     * 
+     * @param timeout the requested timeout in seconds (0 = use default)
+     * @return the actual timeout to use (always >= 1)
+     */
+    private static int normalizeTimeout(int timeout) {
+        if (timeout <= 0) {
+            try {
+                int defaultTimeout = com.kms.katalon.core.configuration.RunConfiguration.getTimeOut();
+                return defaultTimeout > 0 ? defaultTimeout : 30;
+            } catch (Throwable t) {
+                return 30; // Fallback default
+            }
+        }
+        return timeout;
+    }
+    
+    /**
      * Wait for element to be present
      */
     public static void waitForElementPresent(TestObject testObject, int timeout) {
@@ -644,7 +670,8 @@ public class WebUI {
      * Uses 50ms polling for fast detection (consistent with other waits)
      */
     public static void waitForElementPresent(TestObject testObject, int timeout, Object failureHandling) {
-        logger.info("Waiting for element present: {}", describe(testObject));
+        timeout = normalizeTimeout(timeout);
+        logger.info("Waiting for element present: {} (timeout={}s)", describe(testObject), timeout);
         try {
             WebDriver driver = getDriver();
             By locator = testObject.toSeleniumBy();
@@ -678,7 +705,8 @@ public class WebUI {
      * Uses 50ms polling for fast detection (consistent with other waits)
      */
     public static void waitForElementVisible(TestObject testObject, int timeout, Object failureHandling) {
-        logger.info("Waiting for element visible: {}", describe(testObject));
+        timeout = normalizeTimeout(timeout);
+        logger.info("Waiting for element visible: {} (timeout={}s)", describe(testObject), timeout);
         try {
             WebDriver driver = getDriver();
             By locator = testObject.toSeleniumBy();
@@ -712,7 +740,8 @@ public class WebUI {
      * Uses 50ms polling for fast detection (consistent with other waits)
      */
     public static void waitForElementClickable(TestObject testObject, int timeout, Object failureHandling) {
-        logger.info("Waiting for element clickable: {}", describe(testObject));
+        timeout = normalizeTimeout(timeout);
+        logger.info("Waiting for element clickable: {} (timeout={}s)", describe(testObject), timeout);
         try {
             WebDriver driver = getDriver();
             By locator = testObject.toSeleniumBy();
@@ -746,7 +775,8 @@ public class WebUI {
      * Wait for element to not be present with failure handling
      */
     public static void waitForElementNotPresent(TestObject testObject, int timeout, Object failureHandling) {
-        logger.info("Waiting for element not present: {}", testObject.getName());
+        timeout = normalizeTimeout(timeout);
+        logger.info("Waiting for element not present: {} (timeout={}s)", testObject.getName(), timeout);
         try {
             WebDriver driver = getDriver();
             By locator = testObject.toSeleniumBy();
@@ -793,7 +823,8 @@ public class WebUI {
      * Wait for page load
      */
     public static void waitForPageLoad(int timeout) {
-        logger.info("Waiting for page load");
+        timeout = normalizeTimeout(timeout);
+        logger.info("Waiting for page load (timeout={}s)", timeout);
         WebDriverWait wait = new WebDriverWait(getDriver(), Duration.ofSeconds(timeout));
         wait.until(driver -> {
             String state = (String) ((JavascriptExecutor) driver).executeScript("return document.readyState");
@@ -1186,7 +1217,8 @@ public class WebUI {
      * Wait for alert
      */
     public static void waitForAlert(int timeout) {
-        logger.info("Waiting for alert");
+        timeout = normalizeTimeout(timeout);
+        logger.info("Waiting for alert (timeout={}s)", timeout);
         WebDriverWait wait = new WebDriverWait(getDriver(), Duration.ofSeconds(timeout));
         wait.until(ExpectedConditions.alertIsPresent());
     }
@@ -2233,7 +2265,8 @@ public class WebUI {
      * Wait for element to be NOT clickable with failure handling
      */
     public static void waitForElementNotClickable(TestObject testObject, int timeout, Object failureHandling) {
-        logger.info("Waiting for element to be NOT clickable: {}", describe(testObject));
+        timeout = normalizeTimeout(timeout);
+        logger.info("Waiting for element to be NOT clickable: {} (timeout={}s)", describe(testObject), timeout);
         try {
             WebDriver driver = getDriver();
             By by = testObject.toSeleniumBy();
@@ -2274,7 +2307,8 @@ public class WebUI {
      */
     public static void waitForElementNotHasAttribute(TestObject testObject, String attributeName, 
                                                      int timeout, Object failureHandling) {
-        logger.info("Waiting for element to NOT have attribute '{}': {}", attributeName, describe(testObject));
+        timeout = normalizeTimeout(timeout);
+        logger.info("Waiting for element to NOT have attribute '{}': {} (timeout={}s)", attributeName, describe(testObject), timeout);
         try {
             WebDriver driver = getDriver();
             By by = testObject.toSeleniumBy();
@@ -2319,7 +2353,8 @@ public class WebUI {
      * Wait for element to be NOT visible with failure handling
      */
     public static void waitForElementNotVisible(TestObject testObject, int timeout, Object failureHandling) {
-        logger.info("Waiting for element to be NOT visible: {}", describe(testObject));
+        timeout = normalizeTimeout(timeout);
+        logger.info("Waiting for element to be NOT visible: {} (timeout={}s)", describe(testObject), timeout);
         try {
             WebDriver driver = getDriver();
             By by = testObject.toSeleniumBy();

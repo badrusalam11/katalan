@@ -43,6 +43,16 @@ public class GroovySourcePreprocessor {
         if (m.find()) {
             result = m.replaceAll("($1 as $2)");
         }
+        
+        // ========================================================================
+        // KATALON BEHAVIOR: timeout=0 means "wait up to default timeout, return
+        // immediately when found", NOT "wait 0 seconds"!
+        // 
+        // This is now handled at RUNTIME inside com.katalan.keywords.WebUI 
+        // (see normalizeTimeout() helper). That approach handles ALL cases
+        // including when timeout is passed as a runtime variable, which
+        // source-level regex preprocessing cannot catch.
+        // ========================================================================
 
         // Comment out unsupported Katalon imports so Groovy compiler doesn't fail.
         // We only comment out packages not stubbed in our compat layer.
