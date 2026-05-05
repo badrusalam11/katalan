@@ -8,10 +8,10 @@ REM Get the directory of this script
 set "SCRIPT_DIR=%~dp0"
 
 REM Find the JAR file
-set "JAR_FILE=%SCRIPT_DIR%target\katalan-runner-1.0.0.jar"
+set "JAR_FILE=%SCRIPT_DIR%target\katalan-runner-1.1.2.jar"
 
 if not exist "%JAR_FILE%" (
-    echo Error: katalan-runner-1.0.0.jar not found!
+    echo Error: katalan-runner-1.1.2.jar not found!
     echo Please build the project first: mvn clean package
     exit /b 1
 )
