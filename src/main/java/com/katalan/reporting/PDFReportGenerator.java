@@ -704,6 +704,15 @@ public class PDFReportGenerator {
 
         int embedded = 0;
         int skipped = 0;
+        int totalToEmbed = 0;
+        
+        // Count how many will actually be embedded (not skipped)
+        for (Path img : images) {
+            if (screenshotBytesEmbedded + getFileSize(img) < PDF_SCREENSHOT_BUDGET_BYTES) {
+                totalToEmbed++;
+            }
+        }
+        
         for (Path img : images) {
             if (screenshotBytesEmbedded >= PDF_SCREENSHOT_BUDGET_BYTES) {
                 skipped++;
@@ -713,6 +722,13 @@ public class PDFReportGenerator {
                 long before = screenshotBytesEmbedded;
                 addOneScreenshot(doc, img);
                 embedded++;
+                
+                // Add page break after every 2 screenshots to prevent images from being cut off
+                // But not after the last screenshot
+                if (embedded % 2 == 0 && embedded < totalToEmbed) {
+                    doc.add(new AreaBreak());
+                }
+                
                 if (screenshotBytesEmbedded == before) {
                     // estimate based on file size if compression didn't update counter
                     try { screenshotBytesEmbedded += Files.size(img); } catch (Exception ignored) {}
@@ -725,6 +741,14 @@ public class PDFReportGenerator {
             doc.add(new Paragraph(skipped + " more screenshot(s) omitted to keep the PDF under "
                     + (PDF_SCREENSHOT_BUDGET_BYTES / (1024 * 1024)) + "MB.")
                     .setFontSize(8).setItalic().setFontColor(COLOR_TEXT_MUTED).setMarginBottom(8));
+        }
+    }
+    
+    private long getFileSize(Path file) {
+        try {
+            return Files.size(file);
+        } catch (Exception e) {
+            return 0;
         }
     }
 
