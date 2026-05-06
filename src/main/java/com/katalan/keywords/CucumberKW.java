@@ -81,12 +81,20 @@ public class CucumberKW {
             throw new RuntimeException("Feature file not found: " + featurePath);
         }
         
-        // Mark current test case as BDD in the execution context
-        // Store ABSOLUTE path (not relative)
+        // Mark current test case as BDD in the execution context.
+        // Store the path relative to project root (e.g. "Include/features/.../file.feature")
+        // so reports can show portable paths. KatalanBDDExecutor will overwrite this with
+        // its own relativization later, but we set it here as an early signal.
         ExecutionContext ctx = ExecutionContext.getCurrent();
         if (ctx != null) {
             ctx.setProperty("isBddTest", true);
-            ctx.setProperty("featureFile", featurePath.toString()); // Store absolute path
+            String storedPath = featureFile; // already relative as passed by user
+            try {
+                Path absFeature = featurePath.toAbsolutePath();
+                Path absProject = projectPath.toAbsolutePath();
+                storedPath = absProject.relativize(absFeature).toString().replace('\\', '/');
+            } catch (Exception ignored) { /* keep storedPath as-is */ }
+            ctx.setProperty("featureFile", storedPath);
             if (tags != null) {
                 ctx.setProperty("cucumberTags", tags);
             }

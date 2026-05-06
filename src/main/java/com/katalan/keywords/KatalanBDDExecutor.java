@@ -55,6 +55,7 @@ public class KatalanBDDExecutor {
     
     // Current feature name (for BDD logging)
     private String currentFeatureName;
+    private String currentFeatureFileRelative;
 
     // Small LRU cache for resolved step matches (stepText -> StepMatch)
     // Avoid re-scanning all patterns for repeated steps (common in BDD)
@@ -332,11 +333,24 @@ public class KatalanBDDExecutor {
         // Extract feature name from content
         this.currentFeatureName = extractFeatureName(featureContent);
 
+        // Compute feature file path relative to project root (e.g. "Include/features/...")
+        // so reports can show a portable, repo-friendly path instead of an absolute path.
+        String relativeFeaturePath = featurePath.toString();
+        try {
+            if (projectPath != null) {
+                Path rel = projectPath.toAbsolutePath().relativize(featurePath.toAbsolutePath());
+                relativeFeaturePath = rel.toString().replace('\\', '/');
+            }
+        } catch (Exception ignored) { /* fall back to absolute path */ }
+        this.currentFeatureFileRelative = relativeFeaturePath;
+
         // Mark current execution as a BDD test so the engine's finally block
         // captures bddScenarioData onto the TestCaseResult (used by PDF report).
         if (context != null) {
             context.setProperty("isBddTest", true);
-            context.setProperty("featureFile", featurePath.toString());
+            // Store relative path (preferred for reports). Engine no longer falls back
+            // to featureName so this is the single source of truth.
+            context.setProperty("featureFile", relativeFeaturePath);
             context.setProperty("featureName", this.currentFeatureName);
         }
         
@@ -377,6 +391,7 @@ public class KatalanBDDExecutor {
                 scenarioData.put("name", "Start Test Case : SCENARIO " + scenario.name);
                 scenarioData.put("scenarioName", scenario.name);
                 scenarioData.put("featureName", currentFeatureName != null ? currentFeatureName : "");
+                scenarioData.put("featureFile", currentFeatureFileRelative != null ? currentFeatureFileRelative : "");
                 scenarioData.put("description", "");
                 scenarioData.put("retryCount", 0);
                 scenarioData.put("status", "COMPLETED");
@@ -407,6 +422,7 @@ public class KatalanBDDExecutor {
                 scenarioData.put("name", "Start Test Case : SCENARIO " + scenario.name);
                 scenarioData.put("scenarioName", scenario.name);
                 scenarioData.put("featureName", currentFeatureName != null ? currentFeatureName : "");
+                scenarioData.put("featureFile", currentFeatureFileRelative != null ? currentFeatureFileRelative : "");
                 scenarioData.put("description", "");
                 scenarioData.put("retryCount", 0);
                 scenarioData.put("status", "COMPLETED");
@@ -447,7 +463,7 @@ public class KatalanBDDExecutor {
         // Log BDD scenario start (Katalon-style)
         XmlKeywordLogger kwLogger = XmlKeywordLogger.getInstance();
         String scenarioUuid = UUID.randomUUID().toString();
-        kwLogger.startBddScenario(scenario.name, currentFeatureName != null ? currentFeatureName : "Unknown Feature", scenario.lineNumber, scenarioUuid);
+        kwLogger.startBddScenario(scenario.name, currentFeatureName != null ? currentFeatureName : "Unknown Feature", scenario.lineNumber, scenarioUuid, currentFeatureFileRelative);
         
         int stepIndex = 0;
         Exception failedException = null;
