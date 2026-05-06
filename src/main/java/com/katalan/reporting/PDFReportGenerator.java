@@ -382,11 +382,15 @@ public class PDFReportGenerator {
                 .setVerticalAlignment(VerticalAlignment.MIDDLE)
                 .setTextAlignment(TextAlignment.CENTER);
         
-        // Try to load Chrome icon from assets
+        // Try to load Chrome icon from JAR resources (distributed with the JAR)
         try {
-            Path chromeIcon = Paths.get("/Users/computer/Documents/repository/katalan/assets/image/chrome_icon.png");
-            if (Files.exists(chromeIcon)) {
-                ImageData imgData = ImageDataFactory.create(chromeIcon.toString());
+            // Try to load from classpath (works when packaged in JAR or running from IDE)
+            java.io.InputStream iconStream = getClass().getClassLoader()
+                    .getResourceAsStream("chrome_icon.png");
+            if (iconStream != null) {
+                byte[] iconBytes = iconStream.readAllBytes();
+                iconStream.close();
+                ImageData imgData = ImageDataFactory.create(iconBytes);
                 Image img = new Image(imgData)
                         .setWidth(48)
                         .setHeight(48)
@@ -394,7 +398,8 @@ public class PDFReportGenerator {
                 Paragraph imgParagraph = new Paragraph().add(img).setTextAlignment(TextAlignment.CENTER);
                 iconCell.add(imgParagraph);
             } else {
-                // Fallback to emoji if image not found
+                // Fallback to emoji if resource not found
+                logger.debug("Chrome icon not found in classpath resources, using emoji");
                 iconCell.add(new Paragraph("\uD83C\uDF10")
                         .setFontSize(48)
                         .setTextAlignment(TextAlignment.CENTER));
@@ -1305,8 +1310,13 @@ public class PDFReportGenerator {
                         currentScenario.put("children", currentSteps);
                         if (bddScenarios == null) bddScenarios = new java.util.ArrayList<>();
 
-                        if (current.getFeatureFile() == null || current.getFeatureFile().isEmpty()) {
-                            if (!featName.isEmpty()) current.setFeatureFile(featName);
+                        // Recover relative feature file path from log property if available
+                        String featFile = props.get("BDD_FEATURE_FILE");
+                        if (featFile != null && !featFile.isEmpty()) {
+                            currentScenario.put("featureFile", featFile);
+                            if (current.getFeatureFile() == null || current.getFeatureFile().isEmpty()) {
+                                current.setFeatureFile(featFile);
+                            }
                         }
                         if (current.getScenarioName() == null || current.getScenarioName().isEmpty()) {
                             current.setScenarioName(scName);
@@ -1929,6 +1939,19 @@ public class PDFReportGenerator {
                     .setPadding(8);
             hCell.add(new Paragraph("Feature: " + featureLabel)
                     .setBold().setFontSize(11).setFontColor(ColorConstants.WHITE).setMarginBottom(2));
+            
+            // Add feature file path (relative to project root, e.g., Include/features/.../file.feature)
+            // Prefer scenario-level featureFile (more specific), fallback to test-case-level
+            String featureFilePath = String.valueOf(sc.getOrDefault("featureFile", ""));
+            if (featureFilePath.isEmpty() && tc.getFeatureFile() != null) {
+                featureFilePath = tc.getFeatureFile();
+            }
+            if (!featureFilePath.isEmpty()) {
+                hCell.add(new Paragraph("📄 " + featureFilePath)
+                        .setFontSize(8).setItalic().setFontColor(new DeviceRgb(230, 240, 255))
+                        .setMarginBottom(3).setMarginTop(2));
+            }
+            
             if (!scenarioLabel.isEmpty()) {
                 hCell.add(new Paragraph("Scenario: " + scenarioLabel)
                         .setFontSize(10).setFontColor(ColorConstants.WHITE));

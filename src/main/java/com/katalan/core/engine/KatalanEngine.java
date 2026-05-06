@@ -490,10 +490,9 @@ public class KatalanEngine {
                     if (featureFile != null) {
                         result.setFeatureFile(featureFile.toString());
                     }
-                    Object featureName = context.getProperty("featureName");
-                    if (featureName != null && (result.getFeatureFile() == null || result.getFeatureFile().isEmpty())) {
-                        result.setFeatureFile(featureName.toString());
-                    }
+                    // NOTE: do NOT fall back to featureName here — featureName is the
+                    // human-readable label (e.g. "Transfer Swift") not a path. Only featureFile
+                    // (set by CucumberKW + KatalanBDDExecutor) holds the actual feature file path.
                     
                     // Capture hierarchical BDD scenario data
                     Object bddScenarioData = context.getProperty("bddScenarioData");

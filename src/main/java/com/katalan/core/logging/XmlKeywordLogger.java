@@ -154,6 +154,14 @@ public class XmlKeywordLogger {
      * Properties: BDD_TESTCASE_TYPE, BDD_TESTCASE_NAME, BDD_FEATURE_NAME, etc.
      */
     public void startBddScenario(String scenarioName, String featureName, int line, String uuid) {
+        startBddScenario(scenarioName, featureName, line, uuid, null);
+    }
+
+    /**
+     * Log BDD scenario start with optional feature file path (relative to project).
+     * The path is persisted as BDD_FEATURE_FILE so reports can recover it from execution0.log.
+     */
+    public void startBddScenario(String scenarioName, String featureName, int line, String uuid, String featureFilePath) {
         nestedLevel.set(2); // BDD scenarios are nested under test case
         Map<String, String> props = new LinkedHashMap<>();
         props.put("BDD_TESTCASE_TYPE", "scenario");
@@ -162,6 +170,9 @@ public class XmlKeywordLogger {
         props.put("BDD_TESTRUN_UUID", uuid);
         props.put("BDD_TESTCASE_NAME", scenarioName);
         props.put("BDD_FEATURE_NAME", featureName);
+        if (featureFilePath != null && !featureFilePath.isEmpty()) {
+            props.put("BDD_FEATURE_FILE", featureFilePath);
+        }
         logRecord("START", "startTest", "Start Test Case : SCENARIO " + scenarioName, 2, props);
     }
     
