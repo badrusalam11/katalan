@@ -203,21 +203,24 @@ public class WebDriverFactory {
 
         if (config.isHeadless()) {
             // ============================================================
-            // CRITICAL: FORCE VIEWPORT SIZE VIA mobileEmulation
-            // This is the ONLY reliable way to set window size in headless!
-            // --window-size flag is IGNORED in headless mode!
+            // HEADLESS MODE: Only add --headless=new flag here.
+            // Viewport will be set AFTER driver creation via CDP
+            // Emulation.setDeviceMetricsOverride with mobile=false.
+            //
+            // WHY NOT mobileEmulation:
+            //   mobileEmulation sets Chrome's internal mobile=true flag which
+            //   activates touch emulation, pointer:coarse, hover:none, and
+            //   maxTouchPoints>0. Websites detect this and switch to mobile
+            //   layout even at 1920px width — elementToBeClickable() then
+            //   fails because menu items are hidden/overlaid.
+            //
+            // WHY NOT --window-size / setSize():
+            //   Both are ignored/unreliable in headless Chrome.
+            //
+            // THE CORRECT SOLUTION: CDP Emulation.setDeviceMetricsOverride
+            //   with mobile=false forces desktop viewport (1920x1080) while
+            //   keeping ALL desktop pointer/hover/touch capabilities intact.
             // ============================================================
-            java.util.Map<String, Object> deviceMetrics = new java.util.HashMap<>();
-            deviceMetrics.put("width", 1920);
-            deviceMetrics.put("height", 1080);
-            deviceMetrics.put("pixelRatio", 1.0);
-            
-            java.util.Map<String, Object> mobileEmulation = new java.util.HashMap<>();
-            mobileEmulation.put("deviceMetrics", deviceMetrics);
-            mobileEmulation.put("userAgent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36");
-            
-            options.setExperimentalOption("mobileEmulation", mobileEmulation);
-            
             options.addArguments(
                 "--headless=new",
                 "--disable-gpu",
@@ -230,7 +233,7 @@ public class WebDriverFactory {
                 "--no-first-run",
                 "--no-default-browser-check"
             );
-            
+
             options.setExperimentalOption(
                 "excludeSwitches",
                 java.util.Arrays.asList("enable-automation")
@@ -296,6 +299,44 @@ public class WebDriverFactory {
         
         logger.info("WebDriver configured with timeouts - implicit: {}s (FAST), pageLoad: {}s, script: {}s", 
             0, 60, 30);
+
+        // ============================================================
+        // HEADLESS VIEWPORT via CDP Emulation.setDeviceMetricsOverride
+        // This is the ONLY correct way to set viewport in headless Chrome
+        // while keeping desktop behavior (pointer:fine, hover:hover,
+        // maxTouchPoints=0, mobile=false).
+        //
+        // mobileEmulation sets mobile=true internally → CSS responsive
+        // breakpoints trigger → elements hidden/overlaid → clicks fail.
+        // CDP with mobile=false has NONE of those side effects.
+        // ============================================================
+        if (config.isHeadless()) {
+            try {
+                java.util.Map<String, Object> cdpParams = new java.util.HashMap<>();
+                cdpParams.put("width", 1920);
+                cdpParams.put("height", 1080);
+                cdpParams.put("deviceScaleFactor", 1);
+                cdpParams.put("mobile", false);
+                cdpParams.put("screenWidth", 1920);
+                cdpParams.put("screenHeight", 1080);
+                driver.executeCdpCommand("Emulation.setDeviceMetricsOverride", cdpParams);
+                logger.info("Headless viewport set via CDP Emulation.setDeviceMetricsOverride (1920x1080, mobile=false)");
+
+                // Verify
+                Object result = driver.executeScript(
+                    "return JSON.stringify({" +
+                    "  w: window.innerWidth," +
+                    "  h: window.innerHeight," +
+                    "  touch: navigator.maxTouchPoints," +
+                    "  hover: matchMedia('(hover:hover)').matches," +
+                    "  pointer: matchMedia('(pointer:fine)').matches" +
+                    "});"
+                );
+                logger.info("Headless viewport verification: {}", result);
+            } catch (Exception e) {
+                logger.warn("CDP Emulation.setDeviceMetricsOverride failed: {} — viewport may be incorrect", e.getMessage());
+            }
+        }
         
         // ============================================================
         // Track PIDs for cleanup manager
@@ -464,17 +505,16 @@ public class WebDriverFactory {
         driver.manage().timeouts().scriptTimeout(Duration.ofSeconds(config.getScriptTimeout()));
         
         // For non-headless: maximize window
-        // For headless: window size already forced via mobileEmulation in ChromeOptions
+        // For headless: viewport is set via CDP Emulation.setDeviceMetricsOverride
+        //               in createChromeDriver() after driver creation
         if (!config.isHeadless()) {
             driver.manage().window().maximize();
         } else {
-            // Verify headless viewport size (for logging only)
             try {
                 org.openqa.selenium.Dimension actualSize = driver.manage().window().getSize();
-                logger.info("Headless mode: Viewport forced to 1920x1080 via mobileEmulation (actual: {}x{})", 
-                           actualSize.getWidth(), actualSize.getHeight());
+                logger.info("Headless mode: window size reported as {}x{}", actualSize.getWidth(), actualSize.getHeight());
             } catch (Exception e) {
-                logger.warn("Could not verify headless viewport size: {}", e.getMessage());
+                logger.warn("Could not read headless window size: {}", e.getMessage());
             }
         }
         
