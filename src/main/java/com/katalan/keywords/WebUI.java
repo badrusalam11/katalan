@@ -243,28 +243,43 @@ public class WebUI {
         WebDriver driver = getDriver();
         By by = testObject.toSeleniumBy();
         
-        // Use WebDriverWait with fast polling (100ms) - trusts Selenium's optimization
-        // No immediate check needed - WebDriverWait handles early return internally
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(100));
-        
-        // Wait for element to be clickable
-        WebElement element = wait.until(ExpectedConditions.elementToBeClickable(by));
-        
-        // Scroll into view to avoid "not interactable" when the element is off-screen
-        try {
-            ((JavascriptExecutor) driver).executeScript(
-                "arguments[0].scrollIntoView({block:'center', inline:'center'});", element);
-        } catch (Exception ignored) {}
-        
-        // Attempt click with fallback to JS click
-        try {
-            element.click();
-        } catch (ElementNotInteractableException e) {
-            logger.warn("Native click failed ({}), retrying with JS click", e.getClass().getSimpleName());
+        // Retry mechanism for stale element reference
+        int maxRetries = 3;
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                ((JavascriptExecutor) driver).executeScript("arguments[0].click();", element);
-            } catch (Exception jsEx) {
-                throw e; // rethrow original
+                // Use WebDriverWait with fast polling (100ms)
+                WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(100));
+                
+                // Wait for element to be clickable
+                WebElement element = wait.until(ExpectedConditions.elementToBeClickable(by));
+                
+                // Scroll into view to avoid "not interactable" when the element is off-screen
+                try {
+                    ((JavascriptExecutor) driver).executeScript(
+                        "arguments[0].scrollIntoView({block:'center', inline:'center'});", element);
+                } catch (Exception ignored) {}
+                
+                // Re-find element after scroll to avoid stale reference
+                element = driver.findElement(by);
+                
+                // Attempt click with fallback to JS click
+                try {
+                    element.click();
+                    return; // Success - exit method
+                } catch (ElementNotInteractableException e) {
+                    logger.warn("Native click failed ({}), retrying with JS click", e.getClass().getSimpleName());
+                    // Re-find again in case element changed
+                    element = driver.findElement(by);
+                    ((JavascriptExecutor) driver).executeScript("arguments[0].click();", element);
+                    return; // Success - exit method
+                }
+            } catch (StaleElementReferenceException e) {
+                if (attempt == maxRetries) {
+                    logger.error("Click failed after {} attempts due to stale element: {}", maxRetries, describe(testObject));
+                    throw new StepFailedException("Element is stale after " + maxRetries + " attempts: " + describe(testObject), e);
+                }
+                logger.warn("Stale element detected on attempt {}/{}, retrying...", attempt, maxRetries);
+                try { Thread.sleep(200); } catch (InterruptedException ignored) {}
             }
         }
     }
@@ -1311,7 +1326,7 @@ public class WebUI {
     public static void focus(TestObject testObject, int timeout) {
         logger.info("Focusing on: {}", testObject.getName());
         WebElement element = waitForElement(testObject, timeout);
-        new Actions(getDriver()).moveToElement(element).click().perform();
+        new Actions(getDriver()).moveToElement(element).perform();
     }
     
     // ==================== JavaScript Keywords ====================
