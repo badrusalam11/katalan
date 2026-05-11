@@ -33,6 +33,12 @@ public class GroovyScriptExecutor {
     private final ExecutionContext context;
     private final Path projectPath;
     private GroovyClassLoader groovyClassLoader;
+    /**
+     * Canonical paths of JARs already registered with the Groovy classloader.
+     * Prevents duplicate URL entries when the same JAR appears in multiple
+     * scanned directories or when {@code createShell()} is called again.
+     */
+    private final java.util.Set<String> addedJarCanonicalPaths = new java.util.LinkedHashSet<>();
     
     public GroovyScriptExecutor(ExecutionContext context) {
         this.context = context;
@@ -192,22 +198,34 @@ public class GroovyScriptExecutor {
     }
     
     /**
-     * Load all JAR files from a directory into the classloader
+     * Load all JAR files from a directory into the classloader.
+     * Duplicate JARs (same canonical path) are silently skipped and reported
+     * at DEBUG level to avoid bloating the classloader URL list.
      */
     private void loadJarsFromDirectory(GroovyClassLoader classLoader, Path directory) {
+        int found = 0, added = 0, skipped = 0;
         try {
-            Files.walk(directory, 1)
+            java.util.List<Path> jars = Files.walk(directory, 1)
                 .filter(p -> p.toString().toLowerCase().endsWith(".jar"))
-                .forEach(jarPath -> {
-                    try {
-                        classLoader.addURL(jarPath.toUri().toURL());
-                        logger.info("Added JAR to classpath: {}", jarPath.getFileName());
-                    } catch (Exception e) {
-                        logger.warn("Could not add JAR to classpath: {} - {}", jarPath, e.getMessage());
-                    }
-                });
+                .collect(java.util.stream.Collectors.toList());
+            found = jars.size();
+            for (Path jarPath : jars) {
+                String canonical = jarPath.toAbsolutePath().normalize().toString();
+                if (addedJarCanonicalPaths.add(canonical)) {
+                    classLoader.addURL(jarPath.toUri().toURL());
+                    added++;
+                    logger.debug("[startup] groovy-classpath: added {}", jarPath.getFileName());
+                } else {
+                    skipped++;
+                    logger.debug("[startup] groovy-classpath: skipped duplicate {}", jarPath.getFileName());
+                }
+            }
         } catch (IOException e) {
             logger.warn("Could not scan directory for JARs: {} - {}", directory, e.getMessage());
+        }
+        if (found > 0) {
+            logger.debug("[startup] groovy-classpath: dir={} found={} added={} skipped={}",
+                    directory.getFileName(), found, added, skipped);
         }
     }
     

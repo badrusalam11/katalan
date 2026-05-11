@@ -74,14 +74,25 @@ public class KatalanBDDExecutor {
         this.projectPath = projectPath;
         this.stepsPath = stepsPath;
         this.stepInstances = new HashMap<>();
+
+        // --- bootstrap phase 1: GroovyShell creation ---
+        long t0 = System.currentTimeMillis();
         this.groovyShell = createGroovyShell();
+        long shellMs = System.currentTimeMillis() - t0;
+        logger.debug("[startup] cucumber-bootstrap: GroovyShell created in {} ms", shellMs);
+
         this.tagFilter = null;
         
         // Store this executor in context so WebUI.callTestCase can use it
         context.setProperty("executor", this);
         
-        // Load step definitions with caching
+        // --- bootstrap phase 2: step-definition loading (with cache) ---
+        long t1 = System.currentTimeMillis();
         this.stepDefinitions = loadStepDefinitionsWithCache();
+        long stepDefsMs = System.currentTimeMillis() - t1;
+
+        logger.info("[startup] cucumber-bootstrap: step-defs={} loaded in {} ms (GroovyShell init: {} ms)",
+                stepDefinitions.size(), stepDefsMs, shellMs);
     }
     
     /**
@@ -355,9 +366,14 @@ public class KatalanBDDExecutor {
         }
         
         List<Scenario> scenarios = parseFeature(featureContent);
+
+        // --- feature-parse diagnostics ---
+        logger.debug("[startup] cucumber-bootstrap: feature '{}' parsed: {} scenario(s)",
+                this.currentFeatureName, scenarios.size());
         
         int failedCount = 0;
         int scenarioIndex = 0;
+        long featureStartMs = System.currentTimeMillis();
         for (Scenario scenario : scenarios) {
             // Apply tag filter - skip scenarios that don't match
             if (tagFilter != null && !tagFilter.isEmpty() && !scenarioMatchesTagFilter(scenario, tagFilter)) {
@@ -450,7 +466,11 @@ public class KatalanBDDExecutor {
         
         // Store hierarchical data in context for the report generator
         context.setProperty("bddScenarioData", new ArrayList<>(scenarioDataList));
-        
+
+        long featureTotalMs = System.currentTimeMillis() - featureStartMs;
+        logger.info("[startup] cucumber-feature: '{}' scenarios={} failed={} total_time={} ms",
+                this.currentFeatureName, scenarios.size(), failedCount, featureTotalMs);
+
         return failedCount;
     }
     
