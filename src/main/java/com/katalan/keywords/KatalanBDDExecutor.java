@@ -1,5 +1,6 @@
 package com.katalan.keywords;
 
+import com.katalan.core.cache.KeywordClassCache;
 import com.katalan.core.context.ExecutionContext;
 import com.katalan.core.compat.GlobalVariable;
 import com.katalan.core.compat.FailureHandling;
@@ -1483,7 +1484,60 @@ public class KatalanBDDExecutor {
                 logger.error("Keyword file not found: {}", keywordFile);
                 return null;
             }
-            
+
+            // ----------------------------------------------------------------
+            // Phase-2 optimisation: check keyword-class cache before compiling.
+            //
+            // Safe to cache the Class (not the instance) because:
+            //  - A compiled Groovy class is immutable after compilation.
+            //  - A fresh instance is created via newInstance() below, so no
+            //    mutable execution state is shared across test cases.
+            //  - Invalidation uses file lastModified: if the source changes
+            //    the entry is evicted and the class recompiled.
+            // ----------------------------------------------------------------
+            final Path resolvedKeywordFile = keywordFile;
+            try {
+                long fileLastMod = Files.getLastModifiedTime(resolvedKeywordFile).toMillis();
+                KeywordClassCache.KeywordClassEntry cached =
+                        KeywordClassCache.get(resolvedKeywordFile);
+                if (cached != null) {
+                    // Cache hit: skip compilation, create fresh instance.
+                    try {
+                        return cached.clazz.getDeclaredConstructor().newInstance();
+                    } catch (Exception instantiateEx) {
+                        logger.debug("[cache] keyword-class: cached newInstance() failed for {} — {}; falling back to compile",
+                                className, instantiateEx.getMessage());
+                        // Fall through to compilation below.
+                    }
+                }
+
+                // Cache miss (or fallback): compile normally.
+                Object instance = compileAndInstantiateKeyword(className, resolvedKeywordFile);
+                if (instance != null) {
+                    // Store the compiled class in cache for next test case.
+                    try {
+                        KeywordClassCache.put(resolvedKeywordFile, instance.getClass(), fileLastMod);
+                    } catch (Exception cacheEx) {
+                        logger.debug("[cache] keyword-class: put failed (non-fatal): {}", cacheEx.getMessage());
+                    }
+                }
+                return instance;
+
+            } catch (Exception e) {
+                // Any cache infrastructure error → fall back to non-cached compile.
+                logger.debug("[cache] keyword-class: cache lookup failed for {} — {}; using non-cached path",
+                        className, e.getMessage());
+                return compileAndInstantiateKeyword(className, resolvedKeywordFile);
+            }
+        }
+
+        /**
+         * Compile and instantiate a keyword class from its resolved source file.
+         * This is the original non-cached implementation, preserved verbatim for
+         * use both as the cache-miss code path and as the fallback if the cache
+         * infrastructure itself encounters an error.
+         */
+        private Object compileAndInstantiateKeyword(String className, Path keywordFile) {
             try {
                 String script = Files.readString(keywordFile);
                 
