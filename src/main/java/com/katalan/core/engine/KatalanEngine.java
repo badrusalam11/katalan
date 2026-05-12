@@ -40,15 +40,26 @@ public class KatalanEngine {
     private final ConsoleOutputCapturer consoleCapturer;
     private ExecutionResult executionResult;
     private final OptimizationConfig optimizationConfig;
+    /** Startup profiler — spans constructor + initialize(). Kept for initialize() phase recording. */
+    private final StartupProfiler startupProfiler;
     
     public KatalanEngine(RunConfiguration config) {
+        this.startupProfiler = new StartupProfiler("engine-init");
+        startupProfiler.logMemorySnapshot("before-constructor");
+
         this.config = config;
+
+        startupProfiler.begin("ExecutionContext.setup");
         this.context = new ExecutionContext(config);
         ExecutionContext.setCurrent(context);
+        startupProfiler.end("ExecutionContext.setup");
         
         // Load optimization settings from katalan.properties
+        startupProfiler.begin("OptimizationConfig.load");
         this.optimizationConfig = OptimizationConfig.load(config.getProjectPath());
-        logger.info("🚀 Optimization enabled: {}", optimizationConfig.isOptimizationEnabled());
+        startupProfiler.end("OptimizationConfig.load");
+
+        logger.info("\uD83D\uDE80 Optimization enabled: {}", optimizationConfig.isOptimizationEnabled());
         if (optimizationConfig.isOptimizationEnabled()) {
             logger.info("  - Browser pool: {}", optimizationConfig.isBrowserPoolEnabled());
             logger.info("  - Streaming logger: {}", optimizationConfig.isLoggingStreaming());
@@ -58,11 +69,17 @@ public class KatalanEngine {
         
         // Set context for ObjectRepository static methods
         com.katalan.core.compat.ObjectRepository.setContext(context);
+
+        startupProfiler.begin("GroovyScriptExecutor.init");
         this.scriptExecutor = new GroovyScriptExecutor(context);
+        startupProfiler.end("GroovyScriptExecutor.init");
+
         this.suiteParser = new TestSuiteParser(config.getProjectPath());
         this.listenerRegistry = new TestListenerRegistry();
         this.consoleCapturer = new ConsoleOutputCapturer();
         this.executionResult = new ExecutionResult();
+
+        startupProfiler.logMemorySnapshot("after-constructor");
     }
     
     /**
@@ -70,23 +87,32 @@ public class KatalanEngine {
      */
     public void initialize() throws IOException {
         logger.info("Initializing katalan Engine");
+        startupProfiler.logMemorySnapshot("before-initialize");
         
         // Initialize driver cleanup manager (registers shutdown hook)
+        startupProfiler.begin("DriverCleanupManager.init");
         com.katalan.core.driver.DriverCleanupManager.initialize();
+        startupProfiler.end("DriverCleanupManager.init");
         
         // Load Object Repository
         if (config.getProjectPath() != null && Files.exists(config.getProjectPath())) {
+            startupProfiler.begin("ObjectRepository.load");
             Map<String, TestObject> repository = ObjectRepositoryParser.loadObjectRepository(config.getProjectPath());
             context.setObjectRepository(repository);
+            startupProfiler.end("ObjectRepository.load");
             
             // Load Global Variables from Profiles
+            startupProfiler.begin("GlobalVariables.load");
             loadGlobalVariables();
+            startupProfiler.end("GlobalVariables.load");
 
             // Append project JARs (Drivers/, Libs/, bin/lib/) to the SYSTEM
             // classloader so that keywords which internally spin up their own
             // `new GroovyShell()` (e.g. denstoo.reporting.CSReport) can resolve
             // project-local classes the same way they do inside Katalon Studio.
+            startupProfiler.begin("SystemClasspath.appendJars");
             SystemClasspathAppender.appendProjectJars(config.getProjectPath());
+            startupProfiler.end("SystemClasspath.appendJars");
         }
         
         // DO NOT create WebDriver here!
@@ -95,11 +121,17 @@ public class KatalanEngine {
         // By not creating driver here, CSWeb will properly call WebUI.openBrowser(url).
         
         // Load Test Listeners (Katalon-compatible lifecycle hooks)
+        startupProfiler.begin("TestListeners.load");
         try {
             listenerRegistry.loadListeners(config.getProjectPath(), scriptExecutor.getGroovyClassLoader());
         } catch (Exception e) {
             logger.warn("Failed to load Test Listeners: {}", e.getMessage());
         }
+        startupProfiler.end("TestListeners.load");
+
+        startupProfiler.count("listeners.loaded", listenerRegistry.getListeners().size());
+        startupProfiler.logMemorySnapshot("after-initialize");
+        startupProfiler.logSummary();
         
         logger.info("katalan Engine initialized");
     }
@@ -341,6 +373,10 @@ public class KatalanEngine {
                 suiteResult.getPassedTests(),
                 suiteResult.getFailedTests(),
                 suiteResult.getErrorTests());
+
+        // Phase-2: log runtime cache summary so operators can see how much
+        // repeated compilation work was avoided in this run.
+        com.katalan.core.cache.RuntimeCacheManager.getInstance().logSummary();
         
         return executionResult;
     }

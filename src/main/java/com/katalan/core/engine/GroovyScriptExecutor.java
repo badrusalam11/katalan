@@ -1,6 +1,7 @@
 package com.katalan.core.engine;
 
 import com.katalan.core.context.ExecutionContext;
+import com.katalan.core.cache.CompiledScriptCache;
 import com.katalan.core.model.TestObject;
 import com.katalan.core.compat.FailureHandling;
 import com.katalan.core.compat.GlobalVariable;
@@ -33,6 +34,12 @@ public class GroovyScriptExecutor {
     private final ExecutionContext context;
     private final Path projectPath;
     private GroovyClassLoader groovyClassLoader;
+    /**
+     * Canonical paths of JARs already registered with the Groovy classloader.
+     * Prevents duplicate URL entries when the same JAR appears in multiple
+     * scanned directories or when {@code createShell()} is called again.
+     */
+    private final java.util.Set<String> addedJarCanonicalPaths = new java.util.LinkedHashSet<>();
     
     public GroovyScriptExecutor(ExecutionContext context) {
         this.context = context;
@@ -192,32 +199,106 @@ public class GroovyScriptExecutor {
     }
     
     /**
-     * Load all JAR files from a directory into the classloader
+     * Load all JAR files from a directory into the classloader.
+     * Duplicate JARs (same canonical path) are silently skipped and reported
+     * at DEBUG level to avoid bloating the classloader URL list.
      */
     private void loadJarsFromDirectory(GroovyClassLoader classLoader, Path directory) {
+        int found = 0, added = 0, skipped = 0;
         try {
-            Files.walk(directory, 1)
+            java.util.List<Path> jars = Files.walk(directory, 1)
                 .filter(p -> p.toString().toLowerCase().endsWith(".jar"))
-                .forEach(jarPath -> {
-                    try {
-                        classLoader.addURL(jarPath.toUri().toURL());
-                        logger.info("Added JAR to classpath: {}", jarPath.getFileName());
-                    } catch (Exception e) {
-                        logger.warn("Could not add JAR to classpath: {} - {}", jarPath, e.getMessage());
-                    }
-                });
+                .collect(java.util.stream.Collectors.toList());
+            found = jars.size();
+            for (Path jarPath : jars) {
+                String canonical = jarPath.toAbsolutePath().normalize().toString();
+                if (addedJarCanonicalPaths.add(canonical)) {
+                    classLoader.addURL(jarPath.toUri().toURL());
+                    added++;
+                    logger.debug("[startup] groovy-classpath: added {}", jarPath.getFileName());
+                } else {
+                    skipped++;
+                    logger.debug("[startup] groovy-classpath: skipped duplicate {}", jarPath.getFileName());
+                }
+            }
         } catch (IOException e) {
             logger.warn("Could not scan directory for JARs: {} - {}", directory, e.getMessage());
+        }
+        if (found > 0) {
+            logger.debug("[startup] groovy-classpath: dir={} found={} added={} skipped={}",
+                    directory.getFileName(), found, added, skipped);
         }
     }
     
     /**
-     * Execute a Groovy script file
+     * Execute a Groovy script file.
+     *
+     * <p><b>Phase-2 optimisation:</b> the compiled {@code Script} <em>class</em>
+     * is cached in {@link CompiledScriptCache} keyed by (absolute path, lastModified).
+     * On a cache hit a fresh {@link groovy.lang.Script} instance is created from
+     * the cached class and the <em>current</em> {@link groovy.lang.Binding} — this
+     * is identical to what {@code GroovyShell.parse()} would do internally.
+     *
+     * <p>This is safe because:
+     * <ul>
+     *   <li>A Groovy {@code Script} class is stateless; all variable state lives
+     *       in the {@code Binding} which is injected fresh on each execution.</li>
+     *   <li>The cache is invalidated by {@code lastModified} so a changed file
+     *       is always recompiled.</li>
+     *   <li>On any cache error the method falls back to the original
+     *       {@code shell.parse()} path without altering behaviour.</li>
+     * </ul>
+     *
+     * <p>The main benefit is in {@code callTestCase()} scenarios where the same
+     * helper/shared test-case script is compiled multiple times in one suite run.
      */
     public Object executeScript(Path scriptPath) throws IOException {
         logger.info("Executing script: {}", scriptPath);
+
+        long lastModified;
+        try {
+            lastModified = java.nio.file.Files.getLastModifiedTime(scriptPath).toMillis();
+        } catch (IOException e) {
+            // Can't read metadata — fall through to non-cached path.
+            lastModified = -1;
+        }
+
+        // --- Phase-2 cache check (best-effort) ---
+        if (lastModified >= 0) {
+            try {
+                Class<? extends groovy.lang.Script> cachedClass =
+                        CompiledScriptCache.get(scriptPath);
+                if (cachedClass != null) {
+                    groovy.lang.Script script =
+                            org.codehaus.groovy.runtime.InvokerHelper.createScript(cachedClass, binding);
+                    return script.run();
+                }
+            } catch (Exception cacheEx) {
+                logger.debug("[cache] compiled-script: cache hit failed for {} — {}; falling back to compile",
+                        scriptPath.getFileName(), cacheEx.getMessage());
+                CompiledScriptCache.STATS.recordError();
+            }
+        }
+
+        // Cache miss or fallback: compile normally.
         String scriptContent = Files.readString(scriptPath);
-        return executeScript(scriptContent, scriptPath.getFileName().toString());
+        String processedScript = preprocessKatalonScript(scriptContent);
+
+        groovy.lang.Script script = shell.parse(processedScript, scriptPath.getFileName().toString());
+
+        // Store the compiled class for future reuse (best-effort).
+        if (lastModified >= 0) {
+            try {
+                @SuppressWarnings("unchecked")
+                Class<? extends groovy.lang.Script> compiledClass =
+                        (Class<? extends groovy.lang.Script>) script.getClass();
+                CompiledScriptCache.put(scriptPath, compiledClass, lastModified);
+            } catch (Exception putEx) {
+                logger.debug("[cache] compiled-script: cache put failed (non-fatal): {}", putEx.getMessage());
+            }
+        }
+
+        return script.run();
     }
     
     /**
