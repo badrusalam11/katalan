@@ -373,6 +373,10 @@ public class KatalanEngine {
                 suiteResult.getPassedTests(),
                 suiteResult.getFailedTests(),
                 suiteResult.getErrorTests());
+
+        // Phase-2: log runtime cache summary so operators can see how much
+        // repeated compilation work was avoided in this run.
+        com.katalan.core.cache.RuntimeCacheManager.getInstance().logSummary();
         
         return executionResult;
     }

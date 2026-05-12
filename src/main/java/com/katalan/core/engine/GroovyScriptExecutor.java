@@ -1,6 +1,7 @@
 package com.katalan.core.engine;
 
 import com.katalan.core.context.ExecutionContext;
+import com.katalan.core.cache.CompiledScriptCache;
 import com.katalan.core.model.TestObject;
 import com.katalan.core.compat.FailureHandling;
 import com.katalan.core.compat.GlobalVariable;
@@ -230,12 +231,74 @@ public class GroovyScriptExecutor {
     }
     
     /**
-     * Execute a Groovy script file
+     * Execute a Groovy script file.
+     *
+     * <p><b>Phase-2 optimisation:</b> the compiled {@code Script} <em>class</em>
+     * is cached in {@link CompiledScriptCache} keyed by (absolute path, lastModified).
+     * On a cache hit a fresh {@link groovy.lang.Script} instance is created from
+     * the cached class and the <em>current</em> {@link groovy.lang.Binding} — this
+     * is identical to what {@code GroovyShell.parse()} would do internally.
+     *
+     * <p>This is safe because:
+     * <ul>
+     *   <li>A Groovy {@code Script} class is stateless; all variable state lives
+     *       in the {@code Binding} which is injected fresh on each execution.</li>
+     *   <li>The cache is invalidated by {@code lastModified} so a changed file
+     *       is always recompiled.</li>
+     *   <li>On any cache error the method falls back to the original
+     *       {@code shell.parse()} path without altering behaviour.</li>
+     * </ul>
+     *
+     * <p>The main benefit is in {@code callTestCase()} scenarios where the same
+     * helper/shared test-case script is compiled multiple times in one suite run.
      */
     public Object executeScript(Path scriptPath) throws IOException {
         logger.info("Executing script: {}", scriptPath);
+
+        long lastModified;
+        try {
+            lastModified = java.nio.file.Files.getLastModifiedTime(scriptPath).toMillis();
+        } catch (IOException e) {
+            // Can't read metadata — fall through to non-cached path.
+            lastModified = -1;
+        }
+
+        // --- Phase-2 cache check (best-effort) ---
+        if (lastModified >= 0) {
+            try {
+                Class<? extends groovy.lang.Script> cachedClass =
+                        CompiledScriptCache.get(scriptPath);
+                if (cachedClass != null) {
+                    groovy.lang.Script script =
+                            org.codehaus.groovy.runtime.InvokerHelper.createScript(cachedClass, binding);
+                    return script.run();
+                }
+            } catch (Exception cacheEx) {
+                logger.debug("[cache] compiled-script: cache hit failed for {} — {}; falling back to compile",
+                        scriptPath.getFileName(), cacheEx.getMessage());
+                CompiledScriptCache.STATS.recordError();
+            }
+        }
+
+        // Cache miss or fallback: compile normally.
         String scriptContent = Files.readString(scriptPath);
-        return executeScript(scriptContent, scriptPath.getFileName().toString());
+        String processedScript = preprocessKatalonScript(scriptContent);
+
+        groovy.lang.Script script = shell.parse(processedScript, scriptPath.getFileName().toString());
+
+        // Store the compiled class for future reuse (best-effort).
+        if (lastModified >= 0) {
+            try {
+                @SuppressWarnings("unchecked")
+                Class<? extends groovy.lang.Script> compiledClass =
+                        (Class<? extends groovy.lang.Script>) script.getClass();
+                CompiledScriptCache.put(scriptPath, compiledClass, lastModified);
+            } catch (Exception putEx) {
+                logger.debug("[cache] compiled-script: cache put failed (non-fatal): {}", putEx.getMessage());
+            }
+        }
+
+        return script.run();
     }
     
     /**
