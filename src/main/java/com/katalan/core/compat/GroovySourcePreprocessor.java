@@ -1,5 +1,6 @@
 package com.katalan.core.compat;
 
+import com.katalan.core.cache.PreprocessedSourceCache;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -183,11 +184,51 @@ public class GroovySourcePreprocessor {
     /**
      * Create a temp directory and preprocess the given source directory into it.
      * Returns the temp directory path.
+     *
+     * <p><b>Phase-2 optimisation:</b> the result is cached in
+     * {@link PreprocessedSourceCache} keyed by ({@code srcDir}, {@code tagName},
+     * max-lastModified).  Subsequent calls with the same arguments within the
+     * same JVM run skip the copy entirely and return the already-created temp
+     * directory.  This is safe because:
+     * <ul>
+     *   <li>The output is a pure function of the source directory content.</li>
+     *   <li>Source files are not expected to change between test cases in one run.</li>
+     *   <li>Callers only add the temp path to a classloader URL list, which is
+     *       idempotent for the same path.</li>
+     * </ul>
+     * On any cache error / validation failure the method falls back to the
+     * original (non-cached) behaviour.
      */
     public static Path createPreprocessedCopy(Path srcDir, String tagName) throws IOException {
+        // --- Phase-2 cache check (best-effort) ---
+        try {
+            Path cached = PreprocessedSourceCache.get(srcDir, tagName);
+            if (cached != null) {
+                return cached;
+            }
+        } catch (Exception e) {
+            logger.debug("[cache] PreprocessedSourceCache.get failed, falling back: {}", e.getMessage());
+        }
+
+        // Cache miss or fallback: perform the actual copy.
+        long maxMod;
+        try {
+            maxMod = PreprocessedSourceCache.maxLastModified(srcDir);
+        } catch (Exception e) {
+            maxMod = System.currentTimeMillis(); // conservative — won't match future checks
+        }
+
         Path tmp = Files.createTempDirectory("katalan-" + tagName + "-");
         tmp.toFile().deleteOnExit();
         preprocessDirectory(srcDir, tmp);
+
+        // Store result in cache (best-effort — ignore errors).
+        try {
+            PreprocessedSourceCache.put(srcDir, tagName, tmp, maxMod);
+        } catch (Exception e) {
+            logger.debug("[cache] PreprocessedSourceCache.put failed (non-fatal): {}", e.getMessage());
+        }
+
         return tmp;
     }
 }

@@ -120,6 +120,9 @@ public class KatalanCLI implements Callable<Integer> {
         
         @Option(names = {"-v", "--verbose"}, description = "Enable verbose logging")
         private boolean verbose;
+
+        @Option(names = {"--debug"}, description = "Enable DEBUG-level startup diagnostics (per-JAR, per-listener, memory snapshots)")
+        private boolean debug;
         
         // Capture all unmatched options starting with -g_ for GlobalVariable overrides
         // Example: -g_nama_tester=John will set GlobalVariable.nama_tester = "John"
@@ -128,6 +131,15 @@ public class KatalanCLI implements Callable<Integer> {
         
         @Override
         public Integer call() {
+            // Wire --debug BEFORE any engine/profiler code runs so the flag is
+            // visible from the very first StartupProfiler instance created in
+            // the KatalanEngine constructor.
+            if (debug) {
+                com.katalan.core.engine.StartupProfiler.setDebugEnabled(true);
+                enableDebugLogging();
+                System.out.println("[DEBUG] Startup diagnostics enabled – DEBUG log level active");
+            }
+
             printBanner();
             
             try {
@@ -344,6 +356,45 @@ public class KatalanCLI implements Callable<Integer> {
                 "\nSearched in: " + projectPath.resolve("Test Suites"));
         }
         
+        /**
+         * Programmatically lower the Logback log level for the {@code com.katalan}
+         * package to DEBUG and remove the INFO threshold gate on the CONSOLE
+         * appender so debug lines reach the terminal.
+         *
+         * <p>Uses the Logback classic API which is already on the classpath.
+         * Falls back gracefully if the ILoggerFactory is not a Logback
+         * LoggerContext (e.g. during unit tests with a different SLF4J binding).</p>
+         */
+        private static void enableDebugLogging() {
+            try {
+                org.slf4j.ILoggerFactory factory = org.slf4j.LoggerFactory.getILoggerFactory();
+                if (!(factory instanceof ch.qos.logback.classic.LoggerContext)) {
+                    return; // not Logback – nothing to do
+                }
+                ch.qos.logback.classic.LoggerContext ctx =
+                        (ch.qos.logback.classic.LoggerContext) factory;
+
+                // Lower com.katalan package to DEBUG
+                ctx.getLogger("com.katalan").setLevel(ch.qos.logback.classic.Level.DEBUG);
+
+                // Remove the INFO ThresholdFilter on the CONSOLE appender so
+                // debug messages actually reach stdout.
+                ch.qos.logback.classic.Logger root =
+                        ctx.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
+                java.util.Iterator<ch.qos.logback.core.Appender<ch.qos.logback.classic.spi.ILoggingEvent>>
+                        it = root.iteratorForAppenders();
+                while (it.hasNext()) {
+                    ch.qos.logback.core.Appender<ch.qos.logback.classic.spi.ILoggingEvent> appender = it.next();
+                    if ("CONSOLE".equals(appender.getName())) {
+                        appender.clearAllFilters();
+                        break;
+                    }
+                }
+            } catch (Exception e) {
+                System.err.println("Warning: could not enable debug logging: " + e.getMessage());
+            }
+        }
+
         private void printBanner() {
             String version = com.katalan.core.Version.getVersion();
             System.out.println();

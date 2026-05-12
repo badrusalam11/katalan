@@ -1,5 +1,6 @@
 package com.katalan.keywords;
 
+import com.katalan.core.cache.KeywordClassCache;
 import com.katalan.core.context.ExecutionContext;
 import com.katalan.core.compat.GlobalVariable;
 import com.katalan.core.compat.FailureHandling;
@@ -74,14 +75,25 @@ public class KatalanBDDExecutor {
         this.projectPath = projectPath;
         this.stepsPath = stepsPath;
         this.stepInstances = new HashMap<>();
+
+        // --- bootstrap phase 1: GroovyShell creation ---
+        long t0 = System.currentTimeMillis();
         this.groovyShell = createGroovyShell();
+        long shellMs = System.currentTimeMillis() - t0;
+        logger.debug("[startup] cucumber-bootstrap: GroovyShell created in {} ms", shellMs);
+
         this.tagFilter = null;
         
         // Store this executor in context so WebUI.callTestCase can use it
         context.setProperty("executor", this);
         
-        // Load step definitions with caching
+        // --- bootstrap phase 2: step-definition loading (with cache) ---
+        long t1 = System.currentTimeMillis();
         this.stepDefinitions = loadStepDefinitionsWithCache();
+        long stepDefsMs = System.currentTimeMillis() - t1;
+
+        logger.info("[startup] cucumber-bootstrap: step-defs={} loaded in {} ms (GroovyShell init: {} ms)",
+                stepDefinitions.size(), stepDefsMs, shellMs);
     }
     
     /**
@@ -355,9 +367,14 @@ public class KatalanBDDExecutor {
         }
         
         List<Scenario> scenarios = parseFeature(featureContent);
+
+        // --- feature-parse diagnostics ---
+        logger.debug("[startup] cucumber-bootstrap: feature '{}' parsed: {} scenario(s)",
+                this.currentFeatureName, scenarios.size());
         
         int failedCount = 0;
         int scenarioIndex = 0;
+        long featureStartMs = System.currentTimeMillis();
         for (Scenario scenario : scenarios) {
             // Apply tag filter - skip scenarios that don't match
             if (tagFilter != null && !tagFilter.isEmpty() && !scenarioMatchesTagFilter(scenario, tagFilter)) {
@@ -450,7 +467,11 @@ public class KatalanBDDExecutor {
         
         // Store hierarchical data in context for the report generator
         context.setProperty("bddScenarioData", new ArrayList<>(scenarioDataList));
-        
+
+        long featureTotalMs = System.currentTimeMillis() - featureStartMs;
+        logger.info("[startup] cucumber-feature: '{}' scenarios={} failed={} total_time={} ms",
+                this.currentFeatureName, scenarios.size(), failedCount, featureTotalMs);
+
         return failedCount;
     }
     
@@ -1463,7 +1484,60 @@ public class KatalanBDDExecutor {
                 logger.error("Keyword file not found: {}", keywordFile);
                 return null;
             }
-            
+
+            // ----------------------------------------------------------------
+            // Phase-2 optimisation: check keyword-class cache before compiling.
+            //
+            // Safe to cache the Class (not the instance) because:
+            //  - A compiled Groovy class is immutable after compilation.
+            //  - A fresh instance is created via newInstance() below, so no
+            //    mutable execution state is shared across test cases.
+            //  - Invalidation uses file lastModified: if the source changes
+            //    the entry is evicted and the class recompiled.
+            // ----------------------------------------------------------------
+            final Path resolvedKeywordFile = keywordFile;
+            try {
+                long fileLastMod = Files.getLastModifiedTime(resolvedKeywordFile).toMillis();
+                KeywordClassCache.KeywordClassEntry cached =
+                        KeywordClassCache.get(resolvedKeywordFile);
+                if (cached != null) {
+                    // Cache hit: skip compilation, create fresh instance.
+                    try {
+                        return cached.clazz.getDeclaredConstructor().newInstance();
+                    } catch (Exception instantiateEx) {
+                        logger.debug("[cache] keyword-class: cached newInstance() failed for {} — {}; falling back to compile",
+                                className, instantiateEx.getMessage());
+                        // Fall through to compilation below.
+                    }
+                }
+
+                // Cache miss (or fallback): compile normally.
+                Object instance = compileAndInstantiateKeyword(className, resolvedKeywordFile);
+                if (instance != null) {
+                    // Store the compiled class in cache for next test case.
+                    try {
+                        KeywordClassCache.put(resolvedKeywordFile, instance.getClass(), fileLastMod);
+                    } catch (Exception cacheEx) {
+                        logger.debug("[cache] keyword-class: put failed (non-fatal): {}", cacheEx.getMessage());
+                    }
+                }
+                return instance;
+
+            } catch (Exception e) {
+                // Any cache infrastructure error → fall back to non-cached compile.
+                logger.debug("[cache] keyword-class: cache lookup failed for {} — {}; using non-cached path",
+                        className, e.getMessage());
+                return compileAndInstantiateKeyword(className, resolvedKeywordFile);
+            }
+        }
+
+        /**
+         * Compile and instantiate a keyword class from its resolved source file.
+         * This is the original non-cached implementation, preserved verbatim for
+         * use both as the cache-miss code path and as the fallback if the cache
+         * infrastructure itself encounters an error.
+         */
+        private Object compileAndInstantiateKeyword(String className, Path keywordFile) {
             try {
                 String script = Files.readString(keywordFile);
                 

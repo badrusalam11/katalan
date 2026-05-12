@@ -20,6 +20,7 @@ import org.slf4j.LoggerFactory;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;
+import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -162,6 +163,24 @@ public class TestListenerRegistry {
         // Stable load order
         groovyFiles.sort(Comparator.comparing(Path::toString));
 
+        // ---------------------------------------------------------------
+        // Collect project JAR URLs ONCE here, then reuse for every listener
+        // loader.  The original code called addJarsToLoader() inside the
+        // per-listener loop which caused 3 × N directory scans for N listeners.
+        // Collecting once reduces that to exactly 3 scans regardless of N.
+        // NOTE: Both Libs/, Drivers/, and bin/lib/ are still scanned; the
+        // compatibility guarantee (listeners can see all project JARs) is
+        // fully preserved — only the discovery work is deduplicated.
+        // ---------------------------------------------------------------
+        List<URL> projectJarUrls = collectProjectJarUrls(projectPath);
+        logger.debug("[startup] listener-loader: collected {} project JAR URL(s) for {} listener file(s)",
+                projectJarUrls.size(), groovyFiles.size());
+
+        long listenerLoadStart = System.currentTimeMillis();
+        long slowestMs = 0;
+        String slowestName = null;
+        int failCount = 0;
+
         for (Path file : groovyFiles) {
             // Fresh classloader per listener so a transitive compilation
             // failure in one listener does not poison the compilation of
@@ -173,16 +192,17 @@ public class TestListenerRegistry {
             if (includeClasspath != null)  listenerLoader.addClasspath(includeClasspath);
             listenerLoader.addClasspath(listenersWorkDir.toString());
 
-            // Add project's JAR libraries so custom keywords referenced
-            // transitively by listeners can resolve their types.
-            addJarsToLoader(listenerLoader, projectPath.resolve("Libs"));
-            addJarsToLoader(listenerLoader, projectPath.resolve("Drivers"));
-            addJarsToLoader(listenerLoader, projectPath.resolve("bin").resolve("lib"));
+            // Add project's JAR libraries — use pre-collected URLs (no re-scan).
+            for (URL url : projectJarUrls) {
+                listenerLoader.addURL(url);
+            }
 
+            long t0 = System.currentTimeMillis();
             try {
                 Class<?> clazz = listenerLoader.parseClass(file.toFile());
                 Object instance = clazz.getDeclaredConstructor().newInstance();
-                
+                long td = System.currentTimeMillis() - t0;
+
                 // Parse listener source to extract statement structure for detailed logging
                 try {
                     Path originalFile = listenersDir.resolve(listenersWorkDir.relativize(file));
@@ -193,13 +213,18 @@ public class TestListenerRegistry {
                         );
                     }
                 } catch (Exception parseEx) {
-                    logger.debug("Could not parse listener source for {}: {}", 
+                    logger.debug("Could not parse listener source for {}: {}",
                             clazz.getName(), parseEx.getMessage());
                 }
-                
+
                 listenerInstances.add(new Entry(instance, listenerLoader));
-                logger.info("Loaded Test Listener: {}", clazz.getName());
+                logger.info("Loaded Test Listener: {} ({} ms)", clazz.getName(), td);
+                logger.debug("[startup] listener '{}' loaded in {} ms", clazz.getName(), td);
+
+                if (td > slowestMs) { slowestMs = td; slowestName = clazz.getName(); }
             } catch (Throwable t) {
+                long td = System.currentTimeMillis() - t0;
+                failCount++;
                 // Extract root cause message; full trace at debug level only.
                 Throwable root = t;
                 while (root.getCause() != null && root.getCause() != root) root = root.getCause();
@@ -207,13 +232,46 @@ public class TestListenerRegistry {
                         file.getFileName(),
                         root.getClass().getSimpleName(),
                         summarise(root.getMessage()));
-                logger.debug("Listener load stacktrace for {}", file.getFileName(), t);
+                logger.debug("[startup] listener '{}' FAILED in {} ms", file.getFileName(), td, t);
                 // Best-effort: release any cached class references
                 try { listenerLoader.clearCache(); } catch (Throwable ignored) {}
             }
         }
 
+        long totalListenerMs = System.currentTimeMillis() - listenerLoadStart;
+        logger.info("[startup] Test Listeners: loaded={}, failed={}, total_time={} ms",
+                listenerInstances.size(), failCount, totalListenerMs);
+        if (slowestName != null) {
+            logger.info("[startup] Slowest listener: {} ({} ms)", slowestName, slowestMs);
+        }
         logger.info("Test Listener registry initialised with {} listener(s)", listenerInstances.size());
+    }
+
+    /**
+     * Collect all project JAR {@link URL}s from {@code Libs/}, {@code Drivers/},
+     * and {@code bin/lib/} in one pass.  Used to pre-populate each per-listener
+     * {@link GroovyClassLoader} without re-scanning the directories N times.
+     *
+     * @param projectPath root of the Katalon project
+     * @return unmodifiable list of JAR URLs (never {@code null})
+     */
+    private static List<URL> collectProjectJarUrls(Path projectPath) {
+        List<URL> urls = new ArrayList<>();
+        for (String dir : new String[]{"Libs", "Drivers", "bin/lib"}) {
+            Path d = projectPath.resolve(dir);
+            if (!Files.isDirectory(d)) continue;
+            try {
+                Files.walk(d, 1)
+                        .filter(p -> p.toString().toLowerCase().endsWith(".jar"))
+                        .forEach(jar -> {
+                            try {
+                                urls.add(jar.toUri().toURL());
+                                logger.debug("[startup] listener-jar: {}", jar.getFileName());
+                            } catch (Exception ignored) { /* best-effort */ }
+                        });
+            } catch (Exception ignored) { /* best-effort */ }
+        }
+        return Collections.unmodifiableList(urls);
     }
 
     /**
@@ -231,23 +289,6 @@ public class TestListenerRegistry {
             if (++kept >= 8) { out.append("    ..."); break; }
         }
         return out.toString().stripTrailing();
-    }
-
-    /**
-     * Add every {@code .jar} found (non-recursively) inside {@code dir} to the
-     * given GroovyClassLoader. Silently ignores non-existent directories.
-     */
-    private static void addJarsToLoader(GroovyClassLoader loader, Path dir) {
-        if (dir == null || !Files.isDirectory(dir)) return;
-        try {
-            Files.walk(dir, 1)
-                    .filter(p -> p.toString().toLowerCase().endsWith(".jar"))
-                    .forEach(jar -> {
-                        try {
-                            loader.addURL(jar.toUri().toURL());
-                        } catch (Exception ignored) { /* best-effort */ }
-                    });
-        } catch (Exception ignored) { /* best-effort */ }
     }
 
     /** Get loaded listener instances (read-only). */
