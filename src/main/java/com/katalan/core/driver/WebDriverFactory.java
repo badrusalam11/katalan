@@ -185,7 +185,8 @@ public class WebDriverFactory {
             "--allow-running-insecure-content",
             "--safebrowsing-disable-download-protection",
             "--safebrowsing-disable-extension-blacklist",
-            "--disable-features=InsecureDownloadWarnings,PasswordCheck,PasswordLeakDetection,InsecureFormWarnings",
+            // NOTE: All --disable-features must be in ONE flag (Chrome only reads the last one)
+            "--disable-features=InsecureDownloadWarnings,PasswordCheck,PasswordLeakDetection,InsecureFormWarnings,DevToolsRiskyProtocols,CalculateNativeWinOcclusion",
             "--password-store=basic",
             // ============================================================
             // Stability fixes for Windows Server + Chrome 147+
@@ -195,10 +196,10 @@ public class WebDriverFactory {
             "--disable-renderer-backgrounding",
             "--disable-hang-monitor",
             "--disable-ipc-flooding-protection",
-            "--disable-features=CalculateNativeWinOcclusion",
             "--force-color-profile=srgb",
             "--metrics-recording-only",
-            "--disable-client-side-phishing-detection"
+            "--disable-client-side-phishing-detection",
+            "--no-first-run"
         );
 
         if (config.isHeadless()) {
