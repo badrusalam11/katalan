@@ -600,6 +600,11 @@ public class KatalanEngine {
                     logger.info("🔒 Closing browser after test case: {}", testCase.getName());
                     driver.quit();
                     logger.debug("✅ Browser closed successfully");
+                    // Wait for Chrome process to fully die before next TC opens a new one.
+                    // driver.quit() is async — Chrome needs ~200-500ms to release ports/sockets.
+                    // Without this delay, the next TC's openBrowser() may fail on Windows Server
+                    // when system resources (ports, sockets) from the old Chrome are not yet freed.
+                    try { Thread.sleep(500); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
                 } catch (Exception quitEx) {
                     logger.warn("driver.quit() failed: {}", quitEx.getMessage());
                     
