@@ -21,6 +21,8 @@ import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.List;
@@ -31,6 +33,9 @@ import java.util.List;
 public class KatalanEngine {
     
     private static final Logger logger = LoggerFactory.getLogger(KatalanEngine.class);
+    private static final String SEPARATOR = "--------------------------------------------------------------------------------";
+    private static final DateTimeFormatter SUITE_LOG_FMT =
+            DateTimeFormatter.ofPattern("dd-MMM-yyyy HH:mm:ss").withZone(ZoneId.systemDefault());
     
     private final RunConfiguration config;
     private final ExecutionContext context;
@@ -286,14 +291,31 @@ public class KatalanEngine {
             logger.error("@BeforeTestSuite listener error: {}", e.getMessage(), e);
         }
         
-        for (TestCase testCase : suite.getTestCases()) {
+        List<TestCase> testCases = suite.getTestCases();
+        int totalTestCases = testCases.size();
+        int completedTestCases = 0;
+
+        for (TestCase testCase : testCases) {
             if (context.shouldStop()) {
                 logger.warn("Execution stopped by request");
                 break;
             }
-            
+
+            // Log progress BEFORE executing the test case
+            logSuiteProgress(suite.getName(), completedTestCases, totalTestCases);
+
+            // Log test case RUNNING state
+            logTestCaseResult(testCase.getId(), null);  // null = RUNNING
+
             TestCaseResult tcResult = executeTestCase(testCase);
             suiteResult.addTestCaseResult(tcResult);
+            completedTestCases++;
+
+            // Log test case result (PASSED / FAILED / ERROR)
+            logTestCaseResult(testCase.getId(), tcResult.getStatus());
+
+            // Log progress AFTER executing the test case
+            logSuiteProgress(suite.getName(), completedTestCases, totalTestCases);
             
             // Browser is closed after each test case in executeTestCase() method
             // Each test case gets a fresh browser session when calling openBrowser()
@@ -812,6 +834,47 @@ public class KatalanEngine {
         return listenerRegistry;
     }
     
+    /**
+     * Log Katalon-style progress separator block:
+     * <pre>
+     * --------------------------------------------------------------------------------
+     * Test Suites/Suite Name..........2/5(40%)
+     * --------------------------------------------------------------------------------
+     * </pre>
+     */
+    private void logSuiteProgress(String suiteName, int completed, int total) {
+        String timestamp = SUITE_LOG_FMT.format(Instant.now());
+        int pct = total > 0 ? (int) Math.round(completed * 100.0 / total) : 0;
+        String progressLine = "Test Suites/" + suiteName + ".........." + completed + "/" + total + "(" + pct + "%)";
+        logger.info(SEPARATOR);
+        logger.info(progressLine);
+        logger.info(SEPARATOR);
+        // Also print to stdout so CI/CD build logs capture the same lines
+        System.out.println("build\t" + timestamp + "\t" + SEPARATOR);
+        System.out.println("build\t" + timestamp + "\t" + progressLine);
+        System.out.println("build\t" + timestamp + "\t" + SEPARATOR);
+    }
+
+    /**
+     * Log Katalon-style test case result separator block:
+     * <pre>
+     * --------------------------------------------------------------------------------
+     * Test Cases/My Case..........PASSED
+     * --------------------------------------------------------------------------------
+     * </pre>
+     */
+    private void logTestCaseResult(String testCaseId, TestCase.TestCaseStatus status) {
+        String timestamp = SUITE_LOG_FMT.format(Instant.now());
+        String statusLabel = status != null ? status.name() : "RUNNING";
+        String resultLine = testCaseId + ".........." + statusLabel;
+        logger.info(SEPARATOR);
+        logger.info(resultLine);
+        logger.info(SEPARATOR);
+        System.out.println("build\t" + timestamp + "\t" + SEPARATOR);
+        System.out.println("build\t" + timestamp + "\t" + resultLine);
+        System.out.println("build\t" + timestamp + "\t" + SEPARATOR);
+    }
+
     /**
      * Shutdown the engine
      */
