@@ -150,7 +150,7 @@ public class RunConfiguration {
      * Get the default timeout for wait operations
      */
     public static int getDefaultTimeout() {
-        return 30;
+        return 40;
     }
     
     /**
