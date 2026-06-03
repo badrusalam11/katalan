@@ -655,7 +655,7 @@ public class WebUI {
      * return immediately as soon as the condition is met". It does NOT mean
      * "wait literally 0 seconds".
      * 
-     * This method converts timeout=0 to RunConfiguration.getTimeOut() (default 30s).
+     * This method converts timeout=0 to RunConfiguration.getTimeOut() (default 40s).
      * Negative timeouts are also normalized to the default.
      * 
      * @param timeout the requested timeout in seconds (0 = use default)
@@ -665,9 +665,9 @@ public class WebUI {
         if (timeout <= 0) {
             try {
                 int defaultTimeout = com.kms.katalon.core.configuration.RunConfiguration.getTimeOut();
-                return defaultTimeout > 0 ? defaultTimeout : 30;
+                return defaultTimeout > 0 ? defaultTimeout : 40;
             } catch (Throwable t) {
-                return 30; // Fallback default
+                return 40; // Fallback default
             }
         }
         return timeout;
