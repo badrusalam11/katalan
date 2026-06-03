@@ -135,4 +135,28 @@ public class DriverCleanupManager {
         logger.debug("🧹 Manual cleanup triggered...");
         cleanupTrackedProcesses();
     }
+    
+    /**
+     * Get count of tracked processes (for monitoring in CI/CD)
+     */
+    public static int getTrackedProcessCount() {
+        return trackedDriverPids.size() + trackedChromePids.size();
+    }
+    
+    /**
+     * CI/CD-aware cleanup: Kill zombies if tracked count exceeds threshold
+     * Call this periodically (e.g., every 5 test cases) to prevent resource exhaustion
+     * 
+     * @param threshold Maximum allowed tracked processes before cleanup (default: 10)
+     * @return true if cleanup was performed
+     */
+    public static boolean cleanupIfNeeded(int threshold) {
+        int count = getTrackedProcessCount();
+        if (count > threshold) {
+            logger.warn("🚨 Tracked process count ({}) exceeds threshold ({}). Forcing cleanup...", count, threshold);
+            cleanupTrackedProcesses();
+            return true;
+        }
+        return false;
+    }
 }

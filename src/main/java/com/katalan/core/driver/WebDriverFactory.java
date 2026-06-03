@@ -199,7 +199,20 @@ public class WebDriverFactory {
             "--force-color-profile=srgb",
             "--metrics-recording-only",
             "--disable-client-side-phishing-detection",
-            "--no-first-run"
+            "--no-first-run",
+            // ============================================================
+            // Memory optimization for long-running test suites
+            // Prevents UnreachableBrowserException after multiple tests
+            // ============================================================
+            "--js-flags=--max-old-space-size=512",
+            // ============================================================
+            // CI/CD concurrent execution optimization
+            // Prevents resource exhaustion when multiple jobs run in parallel
+            // ============================================================
+            "--max-connections-per-host=6",
+            "--max-connections-per-proxy=6",
+            "--renderer-process-limit=4",
+            "--disable-gpu-compositing"
         );
 
         if (config.isHeadless()) {
@@ -232,7 +245,19 @@ public class WebDriverFactory {
                 "--force-device-scale-factor=1",
                 "--disable-setuid-sandbox",
                 "--no-first-run",
-                "--no-default-browser-check"
+                "--no-default-browser-check",
+                // Memory optimization for long-running test suites
+                "--disable-cache",
+                "--disk-cache-size=1",
+                "--media-cache-size=1",
+                "--aggressive-cache-discard",
+                "--disable-application-cache",
+                "--disable-offline-load-stale-cache",
+                "--js-flags=--max-old-space-size=512",
+                // CI/CD concurrent execution optimization
+                "--max-connections-per-host=6",
+                "--max-connections-per-proxy=6",
+                "--renderer-process-limit=4"
             );
 
             options.setExperimentalOption(
