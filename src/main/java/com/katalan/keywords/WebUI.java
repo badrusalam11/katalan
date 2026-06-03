@@ -237,6 +237,20 @@ public class WebUI {
     
     /**
      * Click on an element with timeout
+     * 
+     * Implementation notes:
+     * - Waits for element to be clickable (visible + enabled)
+     * - Includes 200ms PRE-click stability wait for SPA frameworks
+     * - Scrolls element into view before clicking
+     * - Has retry mechanism for stale element references
+     * - Falls back to JavaScript click if native click fails
+     * 
+     * The PRE-click stability wait is critical for dynamically rendered elements
+     * (e.g., in loops, after modal close, after previous form submission) where
+     * the element passes elementToBeClickable but React/Angular/Vue hasn't yet:
+     *   • Attached event handlers to the new DOM element
+     *   • Completed state transitions/animations
+     *   • Removed invisible overlays or loading indicators
      */
     public static void click(TestObject testObject, int timeout) {
         logger.info("Clicking on: {}", describe(testObject));
@@ -252,6 +266,13 @@ public class WebUI {
                 
                 // Wait for element to be clickable
                 WebElement element = wait.until(ExpectedConditions.elementToBeClickable(by));
+                
+                // PRE-CLICK STABILITY: Give SPA frameworks time to fully initialize the element
+                // This is critical for elements that are dynamically rendered/re-rendered (loops, modals)
+                // Prevents clicking on elements that are "clickable" but not yet ready
+                try {
+                    Thread.sleep(200); // 200ms pre-click stability wait
+                } catch (InterruptedException ignored) {}
                 
                 // Scroll into view to avoid "not interactable" when the element is off-screen
                 try {
