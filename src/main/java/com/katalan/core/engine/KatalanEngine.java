@@ -320,6 +320,23 @@ public class KatalanEngine {
             // Browser is closed after each test case in executeTestCase() method
             // Each test case gets a fresh browser session when calling openBrowser()
             
+            // ============================================================
+            // CI/CD-AWARE CLEANUP: Prevent resource exhaustion in concurrent environments
+            // Every 5 test cases, check if zombie processes need cleanup
+            // This is critical when multiple Katalan jobs run in parallel on the same server
+            // ============================================================
+            if (completedTestCases % 5 == 0) {
+                int trackedCount = com.katalan.core.driver.DriverCleanupManager.getTrackedProcessCount();
+                if (trackedCount > 0) {
+                    logger.debug("📊 Tracked processes after {} tests: {} (threshold: 10)", completedTestCases, trackedCount);
+                    // Force cleanup if too many zombies (CI/CD protection)
+                    if (com.katalan.core.driver.DriverCleanupManager.cleanupIfNeeded(10)) {
+                        logger.info("✅ Periodic cleanup completed. Waiting 2s for resources to free...");
+                        try { Thread.sleep(2000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                    }
+                }
+            }
+            
             // Fail fast mode
             if (config.isFailFast() && tcResult.getStatus() != TestCase.TestCaseStatus.PASSED) {
                 logger.warn("Fail fast mode: stopping execution after failure");
