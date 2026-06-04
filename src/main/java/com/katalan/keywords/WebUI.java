@@ -696,16 +696,20 @@ public class WebUI {
     
     /**
      * Wait for element to be present
+     * @return true if element is present within timeout, false otherwise
      */
-    public static void waitForElementPresent(TestObject testObject, int timeout) {
-        waitForElementPresent(testObject, timeout, null);
+    public static boolean waitForElementPresent(TestObject testObject, int timeout) {
+        return waitForElementPresent(testObject, timeout, null);
     }
     
     /**
      * Wait for element to be present with failure handling
      * Uses 50ms polling for fast detection (consistent with other waits)
+     * @return true if element is present within timeout, false otherwise
+     * 
+     * DEFAULT BEHAVIOR (like Katalon): Logs warning and returns false, does NOT stop test
      */
-    public static void waitForElementPresent(TestObject testObject, int timeout, Object failureHandling) {
+    public static boolean waitForElementPresent(TestObject testObject, int timeout, Object failureHandling) {
         timeout = normalizeTimeout(timeout);
         logger.info("Waiting for element present: {} (timeout={}s)", describe(testObject), timeout);
         try {
@@ -715,32 +719,43 @@ public class WebUI {
             // Use 50ms polling for fast detection (consistent with waitForElement)
             WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(50));
             wait.until(ExpectedConditions.presenceOfElementLocated(locator));
+            return true;
         } catch (Exception e) {
-            com.katalan.core.compat.FailureHandling mode = toFailureHandling(failureHandling);
+            // Katalon-compatible behavior: wait* methods log warning and return false by default
+            com.katalan.core.compat.FailureHandling mode = failureHandling != null 
+                ? toFailureHandling(failureHandling)
+                : com.katalan.core.compat.FailureHandling.CONTINUE_ON_FAILURE; // Default for wait methods
+            
             if (mode == com.katalan.core.compat.FailureHandling.STOP_ON_FAILURE) {
                 throw e instanceof RuntimeException ? (RuntimeException) e : new RuntimeException(e);
             }
-            // CONTINUE_ON_FAILURE or OPTIONAL - log and return
+            // CONTINUE_ON_FAILURE or OPTIONAL - log and return false
             if (mode == com.katalan.core.compat.FailureHandling.CONTINUE_ON_FAILURE) {
-                logger.warn("waitForElementPresent failed: {}", e.getMessage());
+                logger.warn("Web element with id: '{}' located by '{}' not found", 
+                    testObject.getName(), testObject.toSeleniumBy());
             } else {
                 logger.debug("waitForElementPresent failed (optional): {}", e.getMessage());
             }
+            return false;
         }
     }
     
     /**
      * Wait for element to be visible
+     * @return true if element is visible within timeout, false otherwise
      */
-    public static void waitForElementVisible(TestObject testObject, int timeout) {
-        waitForElementVisible(testObject, timeout, null);
+    public static boolean waitForElementVisible(TestObject testObject, int timeout) {
+        return waitForElementVisible(testObject, timeout, null);
     }
     
     /**
      * Wait for element to be visible with failure handling
      * Uses 50ms polling for fast detection (consistent with other waits)
+     * @return true if element is visible within timeout, false otherwise
+     * 
+     * DEFAULT BEHAVIOR (like Katalon): Logs warning and returns false, does NOT stop test
      */
-    public static void waitForElementVisible(TestObject testObject, int timeout, Object failureHandling) {
+    public static boolean waitForElementVisible(TestObject testObject, int timeout, Object failureHandling) {
         timeout = normalizeTimeout(timeout);
         logger.info("Waiting for element visible: {} (timeout={}s)", describe(testObject), timeout);
         try {
@@ -750,32 +765,43 @@ public class WebUI {
             // Use 50ms polling for fast detection (consistent with waitForElement)
             WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(50));
             wait.until(ExpectedConditions.visibilityOfElementLocated(locator));
+            return true;
         } catch (Exception e) {
-            com.katalan.core.compat.FailureHandling mode = toFailureHandling(failureHandling);
+            // Katalon-compatible behavior: wait* methods log warning and return false by default
+            com.katalan.core.compat.FailureHandling mode = failureHandling != null 
+                ? toFailureHandling(failureHandling)
+                : com.katalan.core.compat.FailureHandling.CONTINUE_ON_FAILURE; // Default for wait methods
+            
             if (mode == com.katalan.core.compat.FailureHandling.STOP_ON_FAILURE) {
                 throw e instanceof RuntimeException ? (RuntimeException) e : new RuntimeException(e);
             }
-            // CONTINUE_ON_FAILURE or OPTIONAL - log and return
+            // CONTINUE_ON_FAILURE or OPTIONAL - log and return false
             if (mode == com.katalan.core.compat.FailureHandling.CONTINUE_ON_FAILURE) {
-                logger.warn("waitForElementVisible failed: {}", e.getMessage());
+                logger.warn("Web element with id: '{}' located by '{}' not found", 
+                    testObject.getName(), testObject.toSeleniumBy());
             } else {
                 logger.debug("waitForElementVisible failed (optional): {}", e.getMessage());
             }
+            return false;
         }
     }
     
     /**
      * Wait for element to be clickable
+     * @return true if element is clickable within timeout, false otherwise
      */
-    public static void waitForElementClickable(TestObject testObject, int timeout) {
-        waitForElementClickable(testObject, timeout, null);
+    public static boolean waitForElementClickable(TestObject testObject, int timeout) {
+        return waitForElementClickable(testObject, timeout, null);
     }
     
     /**
      * Wait for element to be clickable with failure handling
      * Uses 50ms polling for fast detection (consistent with other waits)
+     * @return true if element is clickable within timeout, false otherwise
+     * 
+     * DEFAULT BEHAVIOR (like Katalon): Logs warning and returns false, does NOT stop test
      */
-    public static void waitForElementClickable(TestObject testObject, int timeout, Object failureHandling) {
+    public static boolean waitForElementClickable(TestObject testObject, int timeout, Object failureHandling) {
         timeout = normalizeTimeout(timeout);
         logger.info("Waiting for element clickable: {} (timeout={}s)", describe(testObject), timeout);
         try {
@@ -785,32 +811,43 @@ public class WebUI {
             // Use 50ms polling for fast detection (consistent with waitForElement)
             WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(50));
             wait.until(ExpectedConditions.elementToBeClickable(locator));
+            return true;
         } catch (Exception e) {
-            com.katalan.core.compat.FailureHandling mode = toFailureHandling(failureHandling);
+            // Katalon-compatible behavior: wait* methods log warning and return false by default
+            com.katalan.core.compat.FailureHandling mode = failureHandling != null 
+                ? toFailureHandling(failureHandling)
+                : com.katalan.core.compat.FailureHandling.CONTINUE_ON_FAILURE; // Default for wait methods
+            
             if (mode == com.katalan.core.compat.FailureHandling.STOP_ON_FAILURE) {
                 throw e instanceof RuntimeException ? (RuntimeException) e : new RuntimeException(e);
             }
-            // CONTINUE_ON_FAILURE or OPTIONAL - log and return
+            // CONTINUE_ON_FAILURE or OPTIONAL - log and return false (Katalon-style log format)
             if (mode == com.katalan.core.compat.FailureHandling.CONTINUE_ON_FAILURE) {
-                logger.warn("waitForElementClickable failed: {}", e.getMessage());
+                logger.warn("Web element with id: '{}' located by '{}' not found", 
+                    testObject.getName(), testObject.toSeleniumBy());
             } else {
                 logger.debug("waitForElementClickable failed (optional): {}", e.getMessage());
             }
+            return false;
         }
     }
     
     /**
      * Wait for element to not be present
      * Optimized to detect quickly if element never appears
+     * @return true if element is not present within timeout, false if still present
      */
-    public static void waitForElementNotPresent(TestObject testObject, int timeout) {
-        waitForElementNotPresent(testObject, timeout, null);
+    public static boolean waitForElementNotPresent(TestObject testObject, int timeout) {
+        return waitForElementNotPresent(testObject, timeout, null);
     }
     
     /**
      * Wait for element to not be present with failure handling
+     * @return true if element is not present within timeout, false if still present
+     * 
+     * DEFAULT BEHAVIOR (like Katalon): Logs warning and returns false, does NOT stop test
      */
-    public static void waitForElementNotPresent(TestObject testObject, int timeout, Object failureHandling) {
+    public static boolean waitForElementNotPresent(TestObject testObject, int timeout, Object failureHandling) {
         timeout = normalizeTimeout(timeout);
         logger.info("Waiting for element not present: {} (timeout={}s)", testObject.getName(), timeout);
         try {
@@ -822,12 +859,12 @@ public class WebUI {
                 List<WebElement> elements = driver.findElements(locator);
                 if (elements.isEmpty()) {
                     logger.debug("Element already not present, returning immediately");
-                    return;
+                    return true;
                 }
             } catch (Exception e) {
                 // Element not found - that's what we want
                 logger.debug("Element not found (exception), returning immediately");
-                return;
+                return true;
             }
             
             // Element is present, need to wait for it to disappear
@@ -835,6 +872,7 @@ public class WebUI {
             WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(50));
             try {
                 wait.until(ExpectedConditions.invisibilityOfElementLocated(locator));
+                return true;
             } catch (TimeoutException e) {
                 // Log warning like Katalon does when element still present after timeout
                 logger.warn("Element still present after {}s timeout: {} located by {}", 
@@ -842,30 +880,43 @@ public class WebUI {
                 throw e;
             }
         } catch (Exception e) {
-            com.katalan.core.compat.FailureHandling mode = toFailureHandling(failureHandling);
+            // Katalon-compatible behavior: wait* methods log warning and return false by default
+            com.katalan.core.compat.FailureHandling mode = failureHandling != null 
+                ? toFailureHandling(failureHandling)
+                : com.katalan.core.compat.FailureHandling.CONTINUE_ON_FAILURE; // Default for wait methods
+            
             if (mode == com.katalan.core.compat.FailureHandling.STOP_ON_FAILURE) {
                 throw e instanceof RuntimeException ? (RuntimeException) e : new RuntimeException(e);
             }
-            // CONTINUE_ON_FAILURE or OPTIONAL - log and return
+            // CONTINUE_ON_FAILURE or OPTIONAL - log and return false
             if (mode == com.katalan.core.compat.FailureHandling.CONTINUE_ON_FAILURE) {
-                logger.warn("waitForElementNotPresent failed: {}", e.getMessage());
+                logger.warn("Web element with id: '{}' located by '{}' still present", 
+                    testObject.getName(), testObject.toSeleniumBy());
             } else {
                 logger.debug("waitForElementNotPresent failed (optional): {}", e.getMessage());
             }
+            return false;
         }
     }
     
     /**
      * Wait for page load
+     * @return true if page loaded successfully within timeout, false otherwise
      */
-    public static void waitForPageLoad(int timeout) {
+    public static boolean waitForPageLoad(int timeout) {
         timeout = normalizeTimeout(timeout);
         logger.info("Waiting for page load (timeout={}s)", timeout);
-        WebDriverWait wait = new WebDriverWait(getDriver(), Duration.ofSeconds(timeout));
-        wait.until(driver -> {
-            String state = (String) ((JavascriptExecutor) driver).executeScript("return document.readyState");
-            return "complete".equals(state);
-        });
+        try {
+            WebDriverWait wait = new WebDriverWait(getDriver(), Duration.ofSeconds(timeout));
+            wait.until(driver -> {
+                String state = (String) ((JavascriptExecutor) driver).executeScript("return document.readyState");
+                return "complete".equals(state);
+            });
+            return true;
+        } catch (Exception e) {
+            logger.warn("waitForPageLoad failed: {}", e.getMessage());
+            return false;
+        }
     }
     
     /**
@@ -901,7 +952,10 @@ public class WebUI {
      */
     public static boolean verifyElementPresent(TestObject testObject, int timeout, Object failureHandling) {
         try {
-            waitForElementPresent(testObject, timeout);
+            boolean result = waitForElementPresent(testObject, timeout, failureHandling);
+            if (!result) {
+                throw new AssertionError("Element not present: " + describe(testObject));
+            }
             return true;
         } catch (Exception e) {
             com.katalan.core.compat.FailureHandling mode = toFailureHandling(failureHandling);
@@ -929,7 +983,10 @@ public class WebUI {
      */
     public static boolean verifyElementVisible(TestObject testObject, int timeout, Object failureHandling) {
         try {
-            waitForElementVisible(testObject, timeout);
+            boolean result = waitForElementVisible(testObject, timeout, failureHandling);
+            if (!result) {
+                throw new AssertionError("Element not visible: " + describe(testObject));
+            }
             return true;
         } catch (Exception e) {
             com.katalan.core.compat.FailureHandling mode = toFailureHandling(failureHandling);
@@ -958,7 +1015,10 @@ public class WebUI {
      */
     public static boolean verifyElementNotPresent(TestObject testObject, int timeout, Object failureHandling) {
         try {
-            waitForElementNotPresent(testObject, timeout);
+            boolean result = waitForElementNotPresent(testObject, timeout, failureHandling);
+            if (!result) {
+                throw new AssertionError("Element is still present: " + describe(testObject));
+            }
             return true;
         } catch (Exception e) {
             com.katalan.core.compat.FailureHandling mode = toFailureHandling(failureHandling);
@@ -1251,12 +1311,19 @@ public class WebUI {
     
     /**
      * Wait for alert
+     * @return true if alert appeared within timeout, false otherwise
      */
-    public static void waitForAlert(int timeout) {
+    public static boolean waitForAlert(int timeout) {
         timeout = normalizeTimeout(timeout);
         logger.info("Waiting for alert (timeout={}s)", timeout);
-        WebDriverWait wait = new WebDriverWait(getDriver(), Duration.ofSeconds(timeout));
-        wait.until(ExpectedConditions.alertIsPresent());
+        try {
+            WebDriverWait wait = new WebDriverWait(getDriver(), Duration.ofSeconds(timeout));
+            wait.until(ExpectedConditions.alertIsPresent());
+            return true;
+        } catch (Exception e) {
+            logger.warn("waitForAlert failed: {}", e.getMessage());
+            return false;
+        }
     }
     
     // ==================== Scroll Keywords ====================
