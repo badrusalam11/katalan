@@ -277,8 +277,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static boolean waitForElementVisible(TestObject to, int timeout) {
-        WebUI.waitForElementVisible(toKatalan(to), timeout);
-        return true;
+        return WebUI.waitForElementVisible(toKatalan(to), timeout);
     }
     
     public static boolean waitForElementVisible(TestObject to, int timeout, FailureHandling flowControl) {
@@ -294,8 +293,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static boolean waitForElementPresent(TestObject to, int timeout) {
-        WebUI.waitForElementPresent(toKatalan(to), timeout);
-        return true;
+        return WebUI.waitForElementPresent(toKatalan(to), timeout);
     }
     
     public static boolean waitForElementPresent(TestObject to, int timeout, FailureHandling flowControl) {
@@ -303,8 +301,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static boolean waitForElementNotPresent(TestObject to, int timeout) {
-        WebUI.waitForElementNotPresent(toKatalan(to), timeout);
-        return true;
+        return WebUI.waitForElementNotPresent(toKatalan(to), timeout);
     }
     
     public static boolean waitForElementNotPresent(TestObject to, int timeout, FailureHandling flowControl) {
@@ -312,8 +309,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static boolean waitForElementClickable(TestObject to, int timeout) {
-        WebUI.waitForElementClickable(toKatalan(to), timeout);
-        return true;
+        return WebUI.waitForElementClickable(toKatalan(to), timeout);
     }
     
     public static boolean waitForElementClickable(TestObject to, int timeout, FailureHandling flowControl) {
@@ -321,8 +317,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static boolean waitForPageLoad(int timeout) {
-        WebUI.waitForPageLoad(timeout);
-        return true;
+        return WebUI.waitForPageLoad(timeout);
     }
     
     public static boolean waitForPageLoad(int timeout, FailureHandling flowControl) {
@@ -330,8 +325,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static boolean waitForAlert(int timeout) {
-        WebUI.waitForAlert(timeout);
-        return true;
+        return WebUI.waitForAlert(timeout);
     }
     
     public static boolean waitForAlert(int timeout, FailureHandling flowControl) {
@@ -373,13 +367,11 @@ public class WebUiBuiltInKeywords {
     }
     
     public static boolean verifyElementNotVisible(TestObject to, FailureHandling flowControl) {
-        logNotSupported("verifyElementNotVisible");
-        return true;
+        return verifyElementNotVisible(to, 30, flowControl);
     }
     
     public static boolean verifyElementClickable(TestObject to, FailureHandling flowControl) {
-        logNotSupported("verifyElementClickable");
-        return true;
+        return verifyElementClickable(to, 30, flowControl);
     }
     
     public static boolean verifyElementText(TestObject to, String text) {
