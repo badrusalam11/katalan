@@ -366,8 +366,16 @@ public class WebUiBuiltInKeywords {
         return runBool(() -> WebUI.verifyElementVisible(toKatalan(to), timeout), flowControl);
     }
     
+    public static boolean verifyElementNotVisible(TestObject to) {
+        return verifyElementNotVisible(to, 30);
+    }
+    
     public static boolean verifyElementNotVisible(TestObject to, FailureHandling flowControl) {
         return verifyElementNotVisible(to, 30, flowControl);
+    }
+    
+    public static boolean verifyElementClickable(TestObject to) {
+        return verifyElementClickable(to, 30);
     }
     
     public static boolean verifyElementClickable(TestObject to, FailureHandling flowControl) {
