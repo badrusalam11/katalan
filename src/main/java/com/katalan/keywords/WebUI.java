@@ -1481,7 +1481,7 @@ public class WebUI {
             props.put("attachment", filename + ".png");
             props.put("testops-method-name", methodName);
             props.put("testops-execution-stacktrace", "");
-            kwLogger.logMessage("PASSED", "Taking screenshot successfully", props);
+            kwLogger.logMessage("PASSED", "Screenshot is taken", props);
             
             return destination.toString();
         } catch (IOException e) {
@@ -1619,13 +1619,18 @@ public class WebUI {
      */
     public static void comment(String message) {
         logger.info("[COMMENT] {}", message);
+        com.katalan.core.logging.XmlKeywordLogger.getInstance()
+                .logMessage("INFO", message, java.util.Collections.emptyMap());
     }
-    
+
     /**
      * Add comment to the test log with variable
      */
     public static void comment(String message, Object... args) {
-        logger.info("[COMMENT] {}", String.format(message.replace("{}", "%s"), args));
+        String formatted = String.format(message.replace("{}", "%s"), args);
+        logger.info("[COMMENT] {}", formatted);
+        com.katalan.core.logging.XmlKeywordLogger.getInstance()
+                .logMessage("INFO", formatted, java.util.Collections.emptyMap());
     }
     
     /**

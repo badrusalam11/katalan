@@ -80,6 +80,24 @@ public class PDFReportGenerator {
     /** Cache: test case name (as written in {@code execution0.log}) -> ordered list of attachment filenames. */
     private java.util.Map<String, java.util.List<String>> attachmentsByTestCase;
 
+    /** Cache: test case name -> ordered list of CSMobile testcase() scenarios. */
+    private java.util.Map<String, java.util.List<ScenarioInfo>> scenariosByTestCase;
+
+    /** A single scenario block extracted from a CSMobile.testcase() ⏺ marker. */
+    static final class ScenarioInfo {
+        final String fitur;
+        final String subfitur;
+        final String type;
+        boolean failed;
+        final java.util.List<String> screenshots = new java.util.ArrayList<>();
+
+        ScenarioInfo(String fitur, String subfitur, String type) {
+            this.fitur = fitur;
+            this.subfitur = subfitur;
+            this.type = type;
+        }
+    }
+
     public PDFReportGenerator(Path reportDir, ExecutionResult result) {
         this.reportDir = reportDir;
         this.result = result;
@@ -639,8 +657,18 @@ public class PDFReportGenerator {
             addFailureSection(doc, tc);
         }
 
-        // 5) Screenshots (with Information sidebar — BRI style)
-        addScreenshotsBriStyle(doc, tc);
+        // 5) CSMobile testcase() scenarios (scenario table + per-scenario screenshots)
+        //    If scenarios were found, show them instead of the flat screenshot block.
+        java.util.Map<String, java.util.List<ScenarioInfo>> scenarioIdx = parseCSMobileScenariosIndex();
+        java.util.List<ScenarioInfo> tcScenarios = lookupScenarios(scenarioIdx, tc.getTestCaseName());
+        boolean hasCSMobileScenarios = tcScenarios != null && !tcScenarios.isEmpty();
+        addCSMobileScenarioSection(doc, tc);
+
+        // 6) Screenshots (with Information sidebar — BRI style)
+        //    Skip flat screenshots if already rendered per-scenario above.
+        if (!hasCSMobileScenarios) {
+            addScreenshotsBriStyle(doc, tc);
+        }
     }
 
     private void addFailureSection(Document doc, TestCaseResult tc) {
@@ -1036,6 +1064,239 @@ public class PDFReportGenerator {
         }
         attachmentsByTestCase = idx;
         return idx;
+    }
+
+    /**
+     * Parse execution0.log for ⏺ markers written by CSMobile.testcase().
+     * Returns: testCaseName -> ordered list of ScenarioInfo (scenario boundary, type, screenshots, status).
+     *
+     * ⏺ marker format:
+     *   ⏺ Fitur: Subfitur [type=Positive] [dev=true] [prod=true] [skipped=false]
+     *
+     * Screenshots and FAILED records between consecutive ⏺ markers are attributed to the current scenario.
+     */
+    private synchronized java.util.Map<String, java.util.List<ScenarioInfo>> parseCSMobileScenariosIndex() {
+        if (scenariosByTestCase != null) return scenariosByTestCase;
+        java.util.Map<String, java.util.List<ScenarioInfo>> idx = new java.util.LinkedHashMap<>();
+        Path log = reportDir.resolve("execution0.log");
+        if (!Files.exists(log)) { scenariosByTestCase = idx; return idx; }
+        try {
+            javax.xml.parsers.DocumentBuilderFactory factory =
+                    javax.xml.parsers.DocumentBuilderFactory.newInstance();
+            factory.setValidating(false);
+            factory.setNamespaceAware(false);
+            factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+            factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+            javax.xml.parsers.DocumentBuilder builder = factory.newDocumentBuilder();
+            builder.setEntityResolver((p, sId) -> new org.xml.sax.InputSource(new java.io.StringReader("")));
+            org.w3c.dom.Document xml = builder.parse(log.toFile());
+            org.w3c.dom.NodeList records = xml.getElementsByTagName("record");
+
+            String currentTc = null;
+            ScenarioInfo currentScenario = null;
+
+            for (int i = 0; i < records.getLength(); i++) {
+                org.w3c.dom.Element rec = (org.w3c.dom.Element) records.item(i);
+                String message = text(rec, "message");
+                String level   = text(rec, "level");
+
+                if (message != null && message.startsWith("Start Test Case :")) {
+                    currentTc = message.substring("Start Test Case :".length()).trim();
+                    currentScenario = null;
+                } else if (message != null && message.startsWith("End Test Case :")) {
+                    currentTc = null;
+                    currentScenario = null;
+                } else if (message != null && message.startsWith("⏺ ")) {
+                    // Parse: "⏺ Fitur: Subfitur [type=X] [dev=...] [prod=...] [skipped=...]"
+                    String body = message.substring(2).trim();
+                    String fitur, subfitur, type = "Positive";
+
+                    int colon = body.indexOf(": ");
+                    if (colon > 0) {
+                        fitur = body.substring(0, colon).trim();
+                        String rest = body.substring(colon + 2);
+                        int bracket = rest.indexOf(" [type=");
+                        subfitur = bracket > 0 ? rest.substring(0, bracket).trim() : rest.trim();
+                    } else {
+                        // No ": " separator — treat whole thing as subfitur
+                        int bracket = body.indexOf(" [type=");
+                        fitur    = bracket > 0 ? body.substring(0, bracket).trim() : body.trim();
+                        subfitur = fitur;
+                    }
+
+                    // Extract [type=...]
+                    java.util.regex.Matcher m = java.util.regex.Pattern
+                            .compile("\\[type=([^\\]]+)\\]").matcher(message);
+                    if (m.find()) type = m.group(1);
+
+                    // Check [skipped=true] — skip means testcase returned false (condition skipped)
+                    boolean skippedFlag = message.contains("[skipped=true]");
+                    if (skippedFlag) {
+                        // Still record it but mark as skipped (don't add screenshots)
+                        currentScenario = null;
+                        continue;
+                    }
+
+                    currentScenario = new ScenarioInfo(fitur, subfitur, type);
+                    if (currentTc != null) {
+                        idx.computeIfAbsent(currentTc, k -> new java.util.ArrayList<>()).add(currentScenario);
+                    }
+                } else {
+                    // Within current scenario: collect attachments + detect failures
+                    if (currentScenario != null) {
+                        if ("FAILED".equals(level) || "ERROR".equals(level)) {
+                            currentScenario.failed = true;
+                        }
+                        org.w3c.dom.NodeList props = rec.getElementsByTagName("property");
+                        for (int j = 0; j < props.getLength(); j++) {
+                            org.w3c.dom.Element prop = (org.w3c.dom.Element) props.item(j);
+                            if ("attachment".equals(prop.getAttribute("name"))) {
+                                String file = prop.getTextContent();
+                                if (file != null && !file.trim().isEmpty()) {
+                                    currentScenario.screenshots.add(file.trim());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("Failed to parse execution0.log for CSMobile scenarios: {}", e.getMessage());
+        }
+        scenariosByTestCase = idx;
+        return idx;
+    }
+
+    private java.util.List<ScenarioInfo> lookupScenarios(
+            java.util.Map<String, java.util.List<ScenarioInfo>> idx, String testCaseName) {
+        if (testCaseName == null || testCaseName.isEmpty() || idx.isEmpty()) return null;
+        // 1. exact
+        java.util.List<ScenarioInfo> hit = idx.get(testCaseName);
+        if (hit != null) return hit;
+        // 2. suffix (log key may have "Test Cases/" prefix that tc.getTestCaseName() omits)
+        String needle = testCaseName.trim();
+        for (java.util.Map.Entry<String, java.util.List<ScenarioInfo>> e : idx.entrySet()) {
+            String key = e.getKey();
+            if (key.endsWith(needle) || needle.endsWith(key)) return e.getValue();
+        }
+        // 3. contains
+        String lcNeedle = needle.toLowerCase();
+        for (java.util.Map.Entry<String, java.util.List<ScenarioInfo>> e : idx.entrySet()) {
+            String lcKey = e.getKey().toLowerCase();
+            if (lcKey.contains(lcNeedle) || lcNeedle.contains(lcKey)) return e.getValue();
+        }
+        return null;
+    }
+
+    /**
+     * Render the CSMobile testcase() scenario section for a test case.
+     * Shows a # | Fitur | Scenario | Category | Status summary table,
+     * then per-scenario screenshots.
+     */
+    private void addCSMobileScenarioSection(Document doc, TestCaseResult tc) {
+        java.util.Map<String, java.util.List<ScenarioInfo>> idx = parseCSMobileScenariosIndex();
+        java.util.List<ScenarioInfo> scenarios = lookupScenarios(idx, tc.getTestCaseName());
+        if (scenarios == null || scenarios.isEmpty()) return;
+
+        // --- Section header ---
+        doc.add(new Paragraph("Test Scenario")
+                .setFontSize(12).setBold().setFontColor(COLOR_TEXT)
+                .setMarginTop(10).setMarginBottom(6));
+
+        // --- Summary table: # | Fitur | Scenario | Category | Status ---
+        Table table = new Table(UnitValue.createPercentArray(new float[]{0.5f, 2.5f, 4.0f, 1.5f, 1.5f}))
+                .useAllAvailableWidth()
+                .setMarginBottom(10);
+
+        for (String hdr : new String[]{"#", "Fitur", "Scenario", "Category", "Status"}) {
+            table.addHeaderCell(new Cell()
+                    .add(new Paragraph(hdr).setBold().setFontSize(9).setFontColor(ColorConstants.WHITE))
+                    .setBackgroundColor(COLOR_TBL_HEADER)
+                    .setBorder(Border.NO_BORDER)
+                    .setPadding(6));
+        }
+
+        int num = 1;
+        for (ScenarioInfo sc : scenarios) {
+            boolean failed = sc.failed;
+            DeviceRgb statusColor = failed ? COLOR_FAILED : COLOR_PASSED;
+            String statusStr = failed ? "FAILED" : "PASSED";
+
+            table.addCell(tdCell(String.valueOf(num++)).setTextAlignment(TextAlignment.CENTER));
+            table.addCell(tdCell(sc.fitur));
+            table.addCell(tdCell(sc.subfitur));
+            table.addCell(tdCell(sc.type).setTextAlignment(TextAlignment.CENTER));
+            table.addCell(new Cell()
+                    .add(new Paragraph(statusStr).setBold().setFontSize(9).setFontColor(statusColor))
+                    .setBorder(new SolidBorder(COLOR_BORDER, 0.5f))
+                    .setPadding(6)
+                    .setTextAlignment(TextAlignment.CENTER));
+        }
+        doc.add(table);
+
+        // --- Per-scenario screenshot grid (mobile compact layout: 4 columns) ---
+        for (ScenarioInfo sc : scenarios) {
+            if (sc.screenshots.isEmpty()) continue;
+
+            DeviceRgb headerColor = sc.failed ? COLOR_FAILED : COLOR_PASSED;
+            doc.add(new Paragraph("Fitur " + sc.fitur + ": " + sc.subfitur)
+                    .setFontSize(10).setBold().setFontColor(headerColor)
+                    .setMarginTop(10).setMarginBottom(4));
+
+            addMobileScreenshotGrid(doc, sc.screenshots);
+        }
+    }
+
+    private static final int MOBILE_GRID_COLS = 4;
+
+    private void addMobileScreenshotGrid(Document doc, java.util.List<String> fnames) {
+        java.util.List<Path> imgs = new java.util.ArrayList<>();
+        for (String fname : fnames) {
+            Path img = reportDir.resolve(fname);
+            if (!Files.exists(img)) img = reportDir.resolve(fname.replaceAll(".*/", ""));
+            if (Files.exists(img)) imgs.add(img);
+        }
+        if (imgs.isEmpty()) return;
+
+        float colWidth = 1f / MOBILE_GRID_COLS;
+        float[] colWidths = new float[MOBILE_GRID_COLS];
+        java.util.Arrays.fill(colWidths, colWidth);
+        Table grid = new Table(UnitValue.createPercentArray(colWidths))
+                .useAllAvailableWidth()
+                .setMarginBottom(8);
+
+        for (int i = 0; i < imgs.size(); i++) {
+            Path img = imgs.get(i);
+            Cell cell = new Cell()
+                    .setBorder(new SolidBorder(COLOR_BORDER, 0.3f))
+                    .setPadding(3)
+                    .setTextAlignment(TextAlignment.CENTER)
+                    .setVerticalAlignment(VerticalAlignment.MIDDLE);
+            try {
+                byte[] compressed = compressImageBytes(img, 480, 0.7f);
+                ImageData data = compressed != null
+                        ? ImageDataFactory.create(compressed)
+                        : ImageDataFactory.create(img.toAbsolutePath().toString());
+                if (compressed != null) screenshotBytesEmbedded += compressed.length;
+                Image pdfImg = new Image(data).setAutoScale(true).setMaxHeight(200f);
+                cell.add(pdfImg);
+            } catch (Exception e) {
+                cell.add(new Paragraph(img.getFileName().toString())
+                        .setFontSize(7).setFontColor(COLOR_TEXT_MUTED));
+                logger.debug("Could not embed mobile grid screenshot {}: {}", img, e.getMessage());
+            }
+            // Pad remaining cells in last row
+            grid.addCell(cell);
+        }
+        // Fill remaining cells in the last row so the grid is complete
+        int remainder = imgs.size() % MOBILE_GRID_COLS;
+        if (remainder != 0) {
+            for (int i = 0; i < MOBILE_GRID_COLS - remainder; i++) {
+                grid.addCell(new Cell().setBorder(Border.NO_BORDER));
+            }
+        }
+        doc.add(grid);
     }
 
     // ----- detail-grid helpers -----
