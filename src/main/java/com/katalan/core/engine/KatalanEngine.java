@@ -284,13 +284,24 @@ public class KatalanEngine {
         }
         
         // Inject into listener classloaders before @BeforeTestSuite
-        String finalReportFolder = absReportFolder != null 
-            ? absReportFolder 
-            : (config.getReportPath() != null 
-                ? config.getReportPath().toAbsolutePath().toString() 
+        String finalReportFolder = absReportFolder != null
+            ? absReportFolder
+            : (config.getReportPath() != null
+                ? config.getReportPath().toAbsolutePath().toString()
                 : System.getProperty("user.dir") + "/Reports");
         listenerRegistry.injectReportFolderIntoListeners(finalReportFolder);
-        
+
+        // Load the test suite's companion script (e.g. Test Suites/Android.groovy) so its
+        // @SetUp / @TearDown methods run around this suite — same as Katalon Studio.
+        if (suite.getSuitePath() != null) {
+            Path tsPath = suite.getSuitePath().toAbsolutePath().normalize();
+            String tsName = tsPath.getFileName().toString();
+            if (tsName.endsWith(".ts")) {
+                Path suiteGroovy = tsPath.getParent().resolve(tsName.replace(".ts", ".groovy"));
+                listenerRegistry.loadSuiteScript(suiteGroovy);
+            }
+        }
+
         try {
             listenerRegistry.invokeBeforeTestSuite(suiteCtx);
         } catch (Exception e) {
@@ -406,7 +417,8 @@ public class KatalanEngine {
         } catch (Exception e) {
             logger.error("@AfterTestSuite listener error: {}", e.getMessage(), e);
         }
-        
+        listenerRegistry.clearSuiteScriptListeners();
+
         // Log suite end
         java.util.Map<String, String> endSuiteProps = new java.util.LinkedHashMap<>();
         endSuiteProps.put("name", suite.getName());

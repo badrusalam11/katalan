@@ -695,7 +695,7 @@ public class Mobile {
             props.put("attachment", filename + ".png");
             props.put("testops-method-name", "com.kms.katalon.core.mobile.keyword.builtin.TakeScreenshotKeyword.takeScreenshot");
             props.put("testops-execution-stacktrace", "");
-            kwLogger.logMessage("PASSED", "Taking screenshot successfully", props);
+            kwLogger.logMessage("PASSED", "Screenshot is taken", props);
 
             return destination.toString();
         } catch (IOException e) {
@@ -716,6 +716,8 @@ public class Mobile {
 
     public static void comment(String message) {
         logger.info("[COMMENT] {}", message);
+        com.katalan.core.logging.XmlKeywordLogger.getInstance()
+                .logMessage("INFO", message, java.util.Collections.emptyMap());
     }
 
     public static void callTestCase(Object testCaseObj, Map<String, Object> variables) {
