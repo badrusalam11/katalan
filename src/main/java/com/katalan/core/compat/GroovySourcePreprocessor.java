@@ -57,23 +57,17 @@ public class GroovySourcePreprocessor {
 
         // Comment out unsupported Katalon imports so Groovy compiler doesn't fail.
         // We only comment out packages not stubbed in our compat layer.
-
-        // mobile.keyword.builtin.* - not stubbed (specific builtin keyword classes)
-        result = result.replaceAll(
-            "(?m)^(\\s*)import\\s+com\\.kms\\.katalon\\.core\\.mobile\\.keyword\\.builtin\\.([A-Za-z0-9_.]+)",
-            "$1// import com.kms.katalon.core.mobile.keyword.builtin.$2 - not supported"
-        );
+        //
+        // NOTE: com.kms.katalon.core.mobile.keyword.builtin.* and io.appium.* used to be
+        // stripped here because Mobile/Appium support didn't exist yet. Both are now real
+        // (io.appium.java_client is bundled; builtin.* keyword classes are stubbed/implemented
+        // as needed) - stripping them would silently break Mobile scripts instead of giving a
+        // clear "unable to resolve class" error for anything genuinely still missing.
 
         // javax.servlet.* - not bundled, rarely needed
         result = result.replaceAll(
             "(?m)^(\\s*)import\\s+javax\\.servlet\\.([A-Za-z0-9_.]+)",
             "$1// import javax.servlet.$2 - not bundled"
-        );
-
-        // Appium - not bundled (mobile)
-        result = result.replaceAll(
-            "(?m)^(\\s*)import\\s+io\\.appium\\.([A-Za-z0-9_.]+)",
-            "$1// import io.appium.$2 - not bundled"
         );
 
         // Eclipse OSGi - not bundled

@@ -82,9 +82,9 @@ public class KatalanCLI implements Callable<Integer> {
         @Option(names = {"-tc", "--test-case"}, description = "Test case file(s) to run (.groovy)")
         private List<Path> testCases;
         
-        @Option(names = {"-b", "--browser"}, description = "Browser to use (chrome, firefox, edge, safari)", defaultValue = "chrome")
-        private String browser;
-        
+        @Option(names = {"--platform"}, description = "What to run against: chrome, firefox, edge, safari, android, ios", defaultValue = "chrome")
+        private String platform;
+
         @Option(names = {"--headless"}, description = "Run browser in headless mode")
         private boolean headless;
         
@@ -117,7 +117,37 @@ public class KatalanCLI implements Callable<Integer> {
         
         @Option(names = {"--browser-path"}, description = "Custom browser binary path (e.g., Chrome/Chromium executable)")
         private String browserPath;
-        
+
+        @Option(names = {"--device-id", "--udid"}, description = "Mobile device UDID/serial to attach to (auto-detected from 'adb devices' if omitted and exactly one is connected)")
+        private String deviceId;
+
+        @Option(names = {"--platform-version"}, description = "Mobile OS version (e.g. 13)")
+        private String platformVersion;
+
+        @Option(names = {"--app"}, description = "Path to .apk/.ipa to install and launch for Mobile tests")
+        private String appFile;
+
+        @Option(names = {"--app-package"}, description = "Android package / iOS bundle id of an already-installed app to target")
+        private String appPackage;
+
+        @Option(names = {"--app-activity"}, description = "Android activity to launch (used with --app-package)")
+        private String appActivity;
+
+        @Option(names = {"--automation-name"}, description = "Appium automation engine (default: UiAutomator2 for Android, XCUITest for iOS)")
+        private String automationName;
+
+        @Option(names = {"--appium-url"}, description = "Use an already-running Appium server instead of auto-starting a local one")
+        private String appiumUrl;
+
+        @Option(names = {"--appium-port"}, description = "Port to use when auto-starting a local Appium server (0 = pick any free port)", defaultValue = "0")
+        private int appiumPort;
+
+        @Option(names = {"--reset"}, description = "Reset app state between Mobile sessions (default: noReset)")
+        private boolean mobileReset;
+
+        @Option(names = {"--full-reset"}, description = "Fully uninstall/reinstall the app for Mobile sessions")
+        private boolean mobileFullReset;
+
         @Option(names = {"-v", "--verbose"}, description = "Enable verbose logging")
         private boolean verbose;
 
@@ -155,7 +185,7 @@ public class KatalanCLI implements Callable<Integer> {
                 
                 // Build configuration
                 RunConfiguration.Builder configBuilder = RunConfiguration.builder()
-                        .browserType(parseBrowserType(browser))
+                        .browserType(parseBrowserType(platform))
                         .headless(headless)
                         .implicitWait(timeout)
                         .pageLoadTimeout(60)
@@ -165,16 +195,43 @@ public class KatalanCLI implements Callable<Integer> {
                         .takeScreenshotOnSuccess(screenshotOnSuccess)
                         .retryFailedTests(retryCount)
                         .failFast(failFast)
-                        .executionProfile(profile);
+                        .executionProfile(profile)
+                        .mobilePlatform("ios".equalsIgnoreCase(platform)
+                                ? RunConfiguration.MobilePlatform.IOS : RunConfiguration.MobilePlatform.ANDROID)
+                        .mobileNoReset(!mobileReset && !mobileFullReset)
+                        .mobileFullReset(mobileFullReset)
+                        .appiumServerPort(appiumPort);
+
+                if (deviceId != null && !deviceId.isEmpty()) {
+                    configBuilder.mobileDeviceId(deviceId);
+                }
+                if (platformVersion != null && !platformVersion.isEmpty()) {
+                    configBuilder.mobilePlatformVersion(platformVersion);
+                }
+                if (appFile != null && !appFile.isEmpty()) {
+                    configBuilder.mobileAppFile(appFile);
+                }
+                if (appPackage != null && !appPackage.isEmpty()) {
+                    configBuilder.mobileAppPackage(appPackage);
+                }
+                if (appActivity != null && !appActivity.isEmpty()) {
+                    configBuilder.mobileAppActivity(appActivity);
+                }
+                if (automationName != null && !automationName.isEmpty()) {
+                    configBuilder.mobileAutomationName(automationName);
+                }
+                if (appiumUrl != null && !appiumUrl.isEmpty()) {
+                    configBuilder.appiumServerUrl(appiumUrl);
+                }
                 
                 // Set profile as system property so reports can access it
                 if (profile != null && !profile.isEmpty()) {
                     System.setProperty("katalan.profile", profile);
                 }
                 
-                // Set browser as system property so reports can access it
-                if (browser != null && !browser.isEmpty()) {
-                    System.setProperty("katalan.browser", browser);
+                // Set platform as system property so reports can access it
+                if (platform != null && !platform.isEmpty()) {
+                    System.setProperty("katalan.browser", platform);
                 }
                 
                 // Set test suite name as system property so reports can access it

@@ -197,6 +197,12 @@ public class KatalanEngine {
         executionResult.setName(suite.getName());
         executionResult.markStarted();
         context.setCurrentTestSuiteName(suite.getName());
+        context.setCurrentTestSuiteId("Test Suites/" + suite.getId());
+        // Mirror in System properties so compat classes loaded by a different ClassLoader
+        // can read the current IDs without hitting ClassLoader-isolation issues with the
+        // thread-local in ExecutionContext (System is always the bootstrap ClassLoader).
+        System.setProperty("katalan.currentTestSuiteId", "Test Suites/" + suite.getId());
+        System.clearProperty("katalan.currentTestCaseId");
         
         TestSuiteResult suiteResult = new TestSuiteResult(suite.getName());
         suiteResult.setSuitePath(suite.getSuitePath());
@@ -439,7 +445,9 @@ public class KatalanEngine {
         testCase.markStarted();
         
         context.setCurrentTestCaseName(testCase.getName());
+        context.setCurrentTestCaseId(testCase.getId());
         context.setCurrentTestCasePath(testCase.getScriptPath());
+        System.setProperty("katalan.currentTestCaseId", testCase.getId());
         
         // Log test case start
         com.katalan.core.logging.XmlKeywordLogger kwLogger = com.katalan.core.logging.XmlKeywordLogger.getInstance();
@@ -659,7 +667,14 @@ public class KatalanEngine {
         endTestProps.put("name", testCase.getId()); // Use full ID with "Test Cases/" prefix
         endTestProps.put("id", testCase.getId()); // Already includes "Test Cases/" prefix
         kwLogger.endTest(testCase.getName(), testCase.getId(), endTestProps); // getId() already has prefix
-        
+
+        // Clear current test case id/name so @AfterTestSuite (and any code running between
+        // test cases) correctly falls back to the test SUITE id via getExecutionSourceId(),
+        // instead of seeing this just-finished test case as stale state.
+        context.setCurrentTestCaseId(null);
+        System.clearProperty("katalan.currentTestCaseId");
+        context.setCurrentTestCaseName(null);
+
         // CRITICAL: Aggressive memory cleanup after each test case
         // This reduces memory from 3-4GB to ~850MB per suite in CI/CD!
         performMemoryCleanup(testCase);
@@ -903,13 +918,17 @@ public class KatalanEngine {
     public void shutdown() {
         logger.info("Shutting down katalan Engine");
         
-        // CRITICAL: Close browser gracefully first (this closes driver properly)
-        // context.cleanup() calls driver.quit() which should close Chrome
+        // CRITICAL: Close browser/mobile session gracefully first (this closes drivers properly)
+        // context.cleanup() calls driver.quit() / mobileDriver.quit() which should close Chrome/Appium session
         context.cleanup();
-        
+
+        // Stop the locally-managed Appium server (no-op if Mobile keywords were never used,
+        // or if the run connected to an externally-managed server via --appium-url)
+        com.katalan.core.driver.AppiumServerManager.stopIfRunning();
+
         // Backup: Force kill any remaining tracked PIDs (fast, no orphan scan)
         // This only runs if driver.quit() didn't work properly
-        logger.debug("🧹 Cleanup tracked ChromeDriver PIDs (if any remaining)...");
+        logger.debug("🧹 Cleanup tracked ChromeDriver/Appium PIDs (if any remaining)...");
         com.katalan.core.driver.DriverCleanupManager.forceCleanup();
     }
 

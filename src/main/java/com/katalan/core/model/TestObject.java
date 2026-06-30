@@ -134,6 +134,16 @@ public class TestObject {
     public void addProperty(String key, String value) {
         this.properties.put(key, value);
     }
+
+    public void addProperty(String name, com.kms.katalon.core.testobject.ConditionType conditionType, String value) {
+        this.properties.put(name, value);
+    }
+
+    public void addProperty(String name, com.kms.katalon.core.testobject.ConditionType conditionType, String value, boolean isActive) {
+        if (isActive) {
+            this.properties.put(name, value);
+        }
+    }
     
     public SelectorMethod getSelectorMethod() {
         return selectorMethod;
