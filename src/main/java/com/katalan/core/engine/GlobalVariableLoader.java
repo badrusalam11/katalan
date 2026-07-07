@@ -98,7 +98,7 @@ public class GlobalVariableLoader {
     /**
      * Parse Groovy-style value string to Java object
      */
-    private static Object parseValue(String value) {
+    public static Object parseValue(String value) {
         if (value == null || value.isEmpty()) {
             return null;
         }

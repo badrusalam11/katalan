@@ -65,6 +65,25 @@ public class CucumberKW {
      * @param tags Cucumber tag expression (e.g., "@smoke", "@regression and not @slow")
      * @return Result status (0 = success, non-zero = failure)
      */
+    public static int runFeatureFileWithTags(String featureFile, String tag1, String tag2) {
+        String combinedTags = combineTags(tag1, tag2);
+        return runFeatureFileWithTags(featureFile, combinedTags);
+    }
+
+    /**
+     * Combine two tag expressions into a single Cucumber tag expression
+     * requiring both to match (e.g. "@Transfer" + "@TransferSesamaBRI" -&gt;
+     * "@Transfer and @TransferSesamaBRI").
+     */
+    private static String combineTags(String tag1, String tag2) {
+        boolean hasTag1 = tag1 != null && !tag1.isEmpty();
+        boolean hasTag2 = tag2 != null && !tag2.isEmpty();
+        if (hasTag1 && hasTag2) {
+            return tag1 + " and " + tag2;
+        }
+        return hasTag1 ? tag1 : (hasTag2 ? tag2 : null);
+    }
+
     public static int runFeatureFileWithTags(String featureFile, String tags) {
         logger.info("Running feature file: {} with tags: {}", featureFile, tags != null ? tags : "(none)");
         

@@ -235,53 +235,76 @@ public class MobileBuiltInKeywords {
         runVoid(() -> setDeviceOrientation(orientation), fh);
     }
 
-    // ==================== Element Interaction ====================
+    public static int getDeviceWidth() {
+        return Mobile.getDeviceWidth();
+    }
 
-    public static void tap(TestObject to) {
+    public static int getDeviceWidth(FailureHandling fh) {
+        return runObj(Mobile::getDeviceWidth, fh, 0);
+    }
+
+    public static int getDeviceHeight() {
+        return Mobile.getDeviceHeight();
+    }
+
+    public static int getDeviceHeight(FailureHandling fh) {
+        return runObj(Mobile::getDeviceHeight, fh, 0);
+    }
+
+    // ==================== Element Interaction ====================
+    //
+    // First parameter is `Object`, not `TestObject`, because findTestObject()
+    // resolves to the real com.kms.katalon...ObjectRepository static method
+    // (not the script-binding closure) whenever called from a Groovy class -
+    // e.g. Cucumber glue code - so it can hand back the Katalon-compat
+    // TestObject wrapper instead of katalan's native one. TestObject.from()
+    // accepts either and converts as needed.
+
+    public static void tap(Object to) {
         tap(to, DEFAULT_TIMEOUT);
     }
 
-    public static void tap(TestObject to, FailureHandling fh) {
+    public static void tap(Object to, FailureHandling fh) {
         runVoid(() -> tap(to, DEFAULT_TIMEOUT), fh);
     }
 
-    public static void tap(TestObject to, int timeout) {
-        Mobile.tap(to, timeout);
+    public static void tap(Object to, int timeout) {
+        Mobile.tap(TestObject.from(to), timeout);
     }
 
-    public static void tap(TestObject to, int timeout, FailureHandling fh) {
+    public static void tap(Object to, int timeout, FailureHandling fh) {
         runVoid(() -> tap(to, timeout), fh);
     }
 
-    public static void doubleTap(TestObject to) {
+    public static void doubleTap(Object to) {
         doubleTap(to, DEFAULT_TIMEOUT);
     }
 
-    public static void doubleTap(TestObject to, FailureHandling fh) {
+    public static void doubleTap(Object to, FailureHandling fh) {
         runVoid(() -> doubleTap(to, DEFAULT_TIMEOUT), fh);
     }
 
-    public static void doubleTap(TestObject to, int timeout) {
-        Mobile.doubleTap(to, timeout);
+    public static void doubleTap(Object to, int timeout) {
+        Mobile.doubleTap(TestObject.from(to), timeout);
     }
 
-    public static void doubleTap(TestObject to, int timeout, FailureHandling fh) {
+    public static void doubleTap(Object to, int timeout, FailureHandling fh) {
         runVoid(() -> doubleTap(to, timeout), fh);
     }
 
-    public static void longPress(TestObject to, int durationSeconds) {
+    public static void longPress(Object to, int durationSeconds) {
         longPress(to, durationSeconds, DEFAULT_TIMEOUT);
     }
 
-    public static void longPress(TestObject to, int durationSeconds, FailureHandling fh) {
+    public static void longPress(Object to, int durationSeconds, FailureHandling fh) {
         runVoid(() -> longPress(to, durationSeconds, DEFAULT_TIMEOUT), fh);
     }
 
-    public static void longPress(TestObject to, int durationSeconds, int timeout) {
-        Mobile.longPress(to, durationSeconds, timeout);
+    public static void longPress(Object to, int durationSeconds, int timeout) {
+        Mobile.longPress(TestObject.from(to), durationSeconds, timeout);
     }
 
-    public static void longPress(TestObject to, int durationSeconds, int timeout, FailureHandling fh) {
+    public static void longPress(Object to, int durationSeconds, int timeout, FailureHandling fh) {
         runVoid(() -> longPress(to, durationSeconds, timeout), fh);
     }
 
@@ -293,147 +316,147 @@ public class MobileBuiltInKeywords {
         runVoid(() -> tapAtPosition(x, y), fh);
     }
 
-    public static void setText(TestObject to, String text) {
+    public static void setText(Object to, String text) {
         setText(to, text, DEFAULT_TIMEOUT);
     }
 
-    public static void setText(TestObject to, String text, FailureHandling fh) {
+    public static void setText(Object to, String text, FailureHandling fh) {
         runVoid(() -> setText(to, text, DEFAULT_TIMEOUT), fh);
     }
 
-    public static void setText(TestObject to, String text, int timeout) {
-        Mobile.setText(to, text, timeout);
+    public static void setText(Object to, String text, int timeout) {
+        Mobile.setText(TestObject.from(to), text, timeout);
     }
 
-    public static void setText(TestObject to, String text, int timeout, FailureHandling fh) {
+    public static void setText(Object to, String text, int timeout, FailureHandling fh) {
         runVoid(() -> setText(to, text, timeout), fh);
     }
 
-    public static void setEncryptedText(TestObject to, String encryptedText) {
+    public static void setEncryptedText(Object to, String encryptedText) {
         setEncryptedText(to, encryptedText, DEFAULT_TIMEOUT);
     }
 
-    public static void setEncryptedText(TestObject to, String encryptedText, FailureHandling fh) {
+    public static void setEncryptedText(Object to, String encryptedText, FailureHandling fh) {
         runVoid(() -> setEncryptedText(to, encryptedText, DEFAULT_TIMEOUT), fh);
     }
 
-    public static void setEncryptedText(TestObject to, String encryptedText, int timeout) {
-        Mobile.setEncryptedText(to, encryptedText, timeout);
+    public static void setEncryptedText(Object to, String encryptedText, int timeout) {
+        Mobile.setEncryptedText(TestObject.from(to), encryptedText, timeout);
     }
 
-    public static void setEncryptedText(TestObject to, String encryptedText, int timeout, FailureHandling fh) {
+    public static void setEncryptedText(Object to, String encryptedText, int timeout, FailureHandling fh) {
         runVoid(() -> setEncryptedText(to, encryptedText, timeout), fh);
     }
 
-    public static void clearText(TestObject to) {
+    public static void clearText(Object to) {
         clearText(to, DEFAULT_TIMEOUT);
     }
 
-    public static void clearText(TestObject to, FailureHandling fh) {
+    public static void clearText(Object to, FailureHandling fh) {
         runVoid(() -> clearText(to, DEFAULT_TIMEOUT), fh);
     }
 
-    public static void clearText(TestObject to, int timeout) {
-        Mobile.clearText(to, timeout);
+    public static void clearText(Object to, int timeout) {
+        Mobile.clearText(TestObject.from(to), timeout);
     }
 
-    public static void clearText(TestObject to, int timeout, FailureHandling fh) {
+    public static void clearText(Object to, int timeout, FailureHandling fh) {
         runVoid(() -> clearText(to, timeout), fh);
     }
 
-    public static String getText(TestObject to) {
+    public static String getText(Object to) {
         return getText(to, DEFAULT_TIMEOUT);
     }
 
-    public static String getText(TestObject to, FailureHandling fh) {
+    public static String getText(Object to, FailureHandling fh) {
         return runObj(() -> getText(to, DEFAULT_TIMEOUT), fh, null);
     }
 
-    public static String getText(TestObject to, int timeout) {
-        return Mobile.getText(to, timeout);
+    public static String getText(Object to, int timeout) {
+        return Mobile.getText(TestObject.from(to), timeout);
     }
 
-    public static String getText(TestObject to, int timeout, FailureHandling fh) {
+    public static String getText(Object to, int timeout, FailureHandling fh) {
         return runObj(() -> getText(to, timeout), fh, null);
     }
 
-    public static String getAttribute(TestObject to, String attribute) {
+    public static String getAttribute(Object to, String attribute) {
         return getAttribute(to, attribute, DEFAULT_TIMEOUT);
     }
 
-    public static String getAttribute(TestObject to, String attribute, FailureHandling fh) {
+    public static String getAttribute(Object to, String attribute, FailureHandling fh) {
         return runObj(() -> getAttribute(to, attribute, DEFAULT_TIMEOUT), fh, null);
     }
 
-    public static String getAttribute(TestObject to, String attribute, int timeout) {
-        return Mobile.getAttribute(to, attribute, timeout);
+    public static String getAttribute(Object to, String attribute, int timeout) {
+        return Mobile.getAttribute(TestObject.from(to), attribute, timeout);
     }
 
-    public static String getAttribute(TestObject to, String attribute, int timeout, FailureHandling fh) {
+    public static String getAttribute(Object to, String attribute, int timeout, FailureHandling fh) {
         return runObj(() -> getAttribute(to, attribute, timeout), fh, null);
     }
 
-    public static int getElementWidth(TestObject to) {
+    public static int getElementWidth(Object to) {
         return getElementWidth(to, DEFAULT_TIMEOUT);
     }
 
-    public static int getElementWidth(TestObject to, FailureHandling fh) {
+    public static int getElementWidth(Object to, FailureHandling fh) {
         return runObj(() -> getElementWidth(to, DEFAULT_TIMEOUT), fh, 0);
     }
 
-    public static int getElementWidth(TestObject to, int timeout) {
-        return Mobile.getElementWidth(to, timeout);
+    public static int getElementWidth(Object to, int timeout) {
+        return Mobile.getElementWidth(TestObject.from(to), timeout);
     }
 
-    public static int getElementWidth(TestObject to, int timeout, FailureHandling fh) {
+    public static int getElementWidth(Object to, int timeout, FailureHandling fh) {
         return runObj(() -> getElementWidth(to, timeout), fh, 0);
     }
 
-    public static int getElementHeight(TestObject to) {
+    public static int getElementHeight(Object to) {
         return getElementHeight(to, DEFAULT_TIMEOUT);
     }
 
-    public static int getElementHeight(TestObject to, FailureHandling fh) {
+    public static int getElementHeight(Object to, FailureHandling fh) {
         return runObj(() -> getElementHeight(to, DEFAULT_TIMEOUT), fh, 0);
     }
 
-    public static int getElementHeight(TestObject to, int timeout) {
-        return Mobile.getElementHeight(to, timeout);
+    public static int getElementHeight(Object to, int timeout) {
+        return Mobile.getElementHeight(TestObject.from(to), timeout);
     }
 
-    public static int getElementHeight(TestObject to, int timeout, FailureHandling fh) {
+    public static int getElementHeight(Object to, int timeout, FailureHandling fh) {
         return runObj(() -> getElementHeight(to, timeout), fh, 0);
     }
 
-    public static int getElementTopPosition(TestObject to) {
+    public static int getElementTopPosition(Object to) {
         return getElementTopPosition(to, DEFAULT_TIMEOUT);
     }
 
-    public static int getElementTopPosition(TestObject to, FailureHandling fh) {
+    public static int getElementTopPosition(Object to, FailureHandling fh) {
         return runObj(() -> getElementTopPosition(to, DEFAULT_TIMEOUT), fh, 0);
     }
 
-    public static int getElementTopPosition(TestObject to, int timeout) {
-        return Mobile.getElementTopPosition(to, timeout);
+    public static int getElementTopPosition(Object to, int timeout) {
+        return Mobile.getElementTopPosition(TestObject.from(to), timeout);
     }
 
-    public static int getElementTopPosition(TestObject to, int timeout, FailureHandling fh) {
+    public static int getElementTopPosition(Object to, int timeout, FailureHandling fh) {
         return runObj(() -> getElementTopPosition(to, timeout), fh, 0);
     }
 
-    public static int getElementLeftPosition(TestObject to) {
+    public static int getElementLeftPosition(Object to) {
         return getElementLeftPosition(to, DEFAULT_TIMEOUT);
     }
 
-    public static int getElementLeftPosition(TestObject to, FailureHandling fh) {
+    public static int getElementLeftPosition(Object to, FailureHandling fh) {
         return runObj(() -> getElementLeftPosition(to, DEFAULT_TIMEOUT), fh, 0);
     }
 
-    public static int getElementLeftPosition(TestObject to, int timeout) {
-        return Mobile.getElementLeftPosition(to, timeout);
+    public static int getElementLeftPosition(Object to, int timeout) {
+        return Mobile.getElementLeftPosition(TestObject.from(to), timeout);
     }
 
-    public static int getElementLeftPosition(TestObject to, int timeout, FailureHandling fh) {
+    public static int getElementLeftPosition(Object to, int timeout, FailureHandling fh) {
         return runObj(() -> getElementLeftPosition(to, timeout), fh, 0);
     }
 
@@ -461,117 +484,117 @@ public class MobileBuiltInKeywords {
         runVoid(() -> scrollToText(text), fh);
     }
 
-    public static void scrollToElement(TestObject to, int timeout) {
-        Mobile.scrollToElement(to, timeout);
+    public static void scrollToElement(Object to, int timeout) {
+        Mobile.scrollToElement(TestObject.from(to), timeout);
     }
 
-    public static void scrollToElement(TestObject to, int timeout, FailureHandling fh) {
+    public static void scrollToElement(Object to, int timeout, FailureHandling fh) {
         runVoid(() -> scrollToElement(to, timeout), fh);
     }
 
     // ==================== Verification ====================
 
-    public static boolean verifyElementExist(TestObject to, int timeout) {
-        return Mobile.verifyElementExist(to, timeout);
+    public static boolean verifyElementExist(Object to, int timeout) {
+        return Mobile.verifyElementExist(TestObject.from(to), timeout);
     }
 
-    public static boolean verifyElementExist(TestObject to, int timeout, FailureHandling fh) {
+    public static boolean verifyElementExist(Object to, int timeout, FailureHandling fh) {
         return runBool(() -> verifyElementExist(to, timeout), fh);
     }
 
-    public static boolean verifyElementNotExist(TestObject to, int timeout) {
-        return Mobile.verifyElementNotExist(to, timeout);
+    public static boolean verifyElementNotExist(Object to, int timeout) {
+        return Mobile.verifyElementNotExist(TestObject.from(to), timeout);
     }
 
-    public static boolean verifyElementNotExist(TestObject to, int timeout, FailureHandling fh) {
+    public static boolean verifyElementNotExist(Object to, int timeout, FailureHandling fh) {
         return runBool(() -> verifyElementNotExist(to, timeout), fh);
     }
 
-    public static boolean verifyElementVisible(TestObject to) {
+    public static boolean verifyElementVisible(Object to) {
         return verifyElementVisible(to, DEFAULT_TIMEOUT);
     }
 
-    public static boolean verifyElementVisible(TestObject to, FailureHandling fh) {
+    public static boolean verifyElementVisible(Object to, FailureHandling fh) {
         return runBool(() -> verifyElementVisible(to, DEFAULT_TIMEOUT), fh);
     }
 
-    public static boolean verifyElementVisible(TestObject to, int timeout) {
-        return Mobile.verifyElementVisible(to, timeout);
+    public static boolean verifyElementVisible(Object to, int timeout) {
+        return Mobile.verifyElementVisible(TestObject.from(to), timeout);
     }
 
-    public static boolean verifyElementVisible(TestObject to, int timeout, FailureHandling fh) {
+    public static boolean verifyElementVisible(Object to, int timeout, FailureHandling fh) {
         return runBool(() -> verifyElementVisible(to, timeout), fh);
     }
 
-    public static boolean verifyElementNotVisible(TestObject to) {
+    public static boolean verifyElementNotVisible(Object to) {
         return verifyElementNotVisible(to, DEFAULT_TIMEOUT);
     }
 
-    public static boolean verifyElementNotVisible(TestObject to, FailureHandling fh) {
+    public static boolean verifyElementNotVisible(Object to, FailureHandling fh) {
         return runBool(() -> verifyElementNotVisible(to, DEFAULT_TIMEOUT), fh);
     }
 
-    public static boolean verifyElementNotVisible(TestObject to, int timeout) {
-        return Mobile.verifyElementNotVisible(to, timeout);
+    public static boolean verifyElementNotVisible(Object to, int timeout) {
+        return Mobile.verifyElementNotVisible(TestObject.from(to), timeout);
     }
 
-    public static boolean verifyElementNotVisible(TestObject to, int timeout, FailureHandling fh) {
+    public static boolean verifyElementNotVisible(Object to, int timeout, FailureHandling fh) {
         return runBool(() -> verifyElementNotVisible(to, timeout), fh);
     }
 
-    public static boolean verifyElementText(TestObject to, String expectedText) {
+    public static boolean verifyElementText(Object to, String expectedText) {
         return verifyElementText(to, expectedText, DEFAULT_TIMEOUT);
     }
 
-    public static boolean verifyElementText(TestObject to, String expectedText, FailureHandling fh) {
+    public static boolean verifyElementText(Object to, String expectedText, FailureHandling fh) {
         return runBool(() -> verifyElementText(to, expectedText, DEFAULT_TIMEOUT), fh);
     }
 
-    public static boolean verifyElementText(TestObject to, String expectedText, int timeout) {
-        return Mobile.verifyElementText(to, expectedText, timeout);
+    public static boolean verifyElementText(Object to, String expectedText, int timeout) {
+        return Mobile.verifyElementText(TestObject.from(to), expectedText, timeout);
     }
 
-    public static boolean verifyElementText(TestObject to, String expectedText, int timeout, FailureHandling fh) {
+    public static boolean verifyElementText(Object to, String expectedText, int timeout, FailureHandling fh) {
         return runBool(() -> verifyElementText(to, expectedText, timeout), fh);
     }
 
-    public static boolean verifyElementContainsText(TestObject to, String expectedText) {
+    public static boolean verifyElementContainsText(Object to, String expectedText) {
         return verifyElementContainsText(to, expectedText, DEFAULT_TIMEOUT);
     }
 
-    public static boolean verifyElementContainsText(TestObject to, String expectedText, FailureHandling fh) {
+    public static boolean verifyElementContainsText(Object to, String expectedText, FailureHandling fh) {
         return runBool(() -> verifyElementContainsText(to, expectedText, DEFAULT_TIMEOUT), fh);
     }
 
-    public static boolean verifyElementContainsText(TestObject to, String expectedText, int timeout) {
-        return Mobile.verifyElementContainsText(to, expectedText, timeout);
+    public static boolean verifyElementContainsText(Object to, String expectedText, int timeout) {
+        return Mobile.verifyElementContainsText(TestObject.from(to), expectedText, timeout);
     }
 
-    public static boolean verifyElementContainsText(TestObject to, String expectedText, int timeout, FailureHandling fh) {
+    public static boolean verifyElementContainsText(Object to, String expectedText, int timeout, FailureHandling fh) {
         return runBool(() -> verifyElementContainsText(to, expectedText, timeout), fh);
     }
 
-    public static boolean verifyElementAttributeValue(TestObject to, String attribute, String value, int timeout) {
-        return Mobile.verifyElementAttributeValue(to, attribute, value, timeout);
+    public static boolean verifyElementAttributeValue(Object to, String attribute, String value, int timeout) {
+        return Mobile.verifyElementAttributeValue(TestObject.from(to), attribute, value, timeout);
     }
 
-    public static boolean verifyElementAttributeValue(TestObject to, String attribute, String value, int timeout, FailureHandling fh) {
+    public static boolean verifyElementAttributeValue(Object to, String attribute, String value, int timeout, FailureHandling fh) {
         return runBool(() -> verifyElementAttributeValue(to, attribute, value, timeout), fh);
     }
 
-    public static boolean verifyElementChecked(TestObject to, int timeout) {
-        return Mobile.verifyElementChecked(to, timeout);
+    public static boolean verifyElementChecked(Object to, int timeout) {
+        return Mobile.verifyElementChecked(TestObject.from(to), timeout);
     }
 
-    public static boolean verifyElementChecked(TestObject to, int timeout, FailureHandling fh) {
+    public static boolean verifyElementChecked(Object to, int timeout, FailureHandling fh) {
         return runBool(() -> verifyElementChecked(to, timeout), fh);
     }
 
-    public static boolean verifyElementNotChecked(TestObject to, int timeout) {
-        return Mobile.verifyElementNotChecked(to, timeout);
+    public static boolean verifyElementNotChecked(Object to, int timeout) {
+        return Mobile.verifyElementNotChecked(TestObject.from(to), timeout);
     }
 
-    public static boolean verifyElementNotChecked(TestObject to, int timeout, FailureHandling fh) {
+    public static boolean verifyElementNotChecked(Object to, int timeout, FailureHandling fh) {
         return runBool(() -> verifyElementNotChecked(to, timeout), fh);
     }
 
@@ -596,36 +619,36 @@ public class MobileBuiltInKeywords {
     // keywords are commonly used as conditionals (if (Mobile.waitForElementPresent(...)))
     // rather than hard assertions.
 
-    public static boolean waitForElementPresent(TestObject to, int timeout) {
-        return runBool(() -> Mobile.waitForElementPresent(to, timeout), null, FailureHandling.CONTINUE_ON_FAILURE);
+    public static boolean waitForElementPresent(Object to, int timeout) {
+        return runBool(() -> Mobile.waitForElementPresent(TestObject.from(to), timeout), null, FailureHandling.CONTINUE_ON_FAILURE);
     }
 
-    public static boolean waitForElementPresent(TestObject to, int timeout, FailureHandling fh) {
-        return runBool(() -> Mobile.waitForElementPresent(to, timeout), fh, FailureHandling.CONTINUE_ON_FAILURE);
+    public static boolean waitForElementPresent(Object to, int timeout, FailureHandling fh) {
+        return runBool(() -> Mobile.waitForElementPresent(TestObject.from(to), timeout), fh, FailureHandling.CONTINUE_ON_FAILURE);
     }
 
-    public static boolean waitForElementNotPresent(TestObject to, int timeout) {
-        return runBool(() -> Mobile.waitForElementNotPresent(to, timeout), null, FailureHandling.CONTINUE_ON_FAILURE);
+    public static boolean waitForElementNotPresent(Object to, int timeout) {
+        return runBool(() -> Mobile.waitForElementNotPresent(TestObject.from(to), timeout), null, FailureHandling.CONTINUE_ON_FAILURE);
     }
 
-    public static boolean waitForElementNotPresent(TestObject to, int timeout, FailureHandling fh) {
-        return runBool(() -> Mobile.waitForElementNotPresent(to, timeout), fh, FailureHandling.CONTINUE_ON_FAILURE);
+    public static boolean waitForElementNotPresent(Object to, int timeout, FailureHandling fh) {
+        return runBool(() -> Mobile.waitForElementNotPresent(TestObject.from(to), timeout), fh, FailureHandling.CONTINUE_ON_FAILURE);
     }
 
-    public static boolean waitForElementVisible(TestObject to, int timeout) {
-        return runBool(() -> Mobile.waitForElementVisible(to, timeout), null, FailureHandling.CONTINUE_ON_FAILURE);
+    public static boolean waitForElementVisible(Object to, int timeout) {
+        return runBool(() -> Mobile.waitForElementVisible(TestObject.from(to), timeout), null, FailureHandling.CONTINUE_ON_FAILURE);
     }
 
-    public static boolean waitForElementVisible(TestObject to, int timeout, FailureHandling fh) {
-        return runBool(() -> Mobile.waitForElementVisible(to, timeout), fh, FailureHandling.CONTINUE_ON_FAILURE);
+    public static boolean waitForElementVisible(Object to, int timeout, FailureHandling fh) {
+        return runBool(() -> Mobile.waitForElementVisible(TestObject.from(to), timeout), fh, FailureHandling.CONTINUE_ON_FAILURE);
     }
 
-    public static boolean waitForElementNotVisible(TestObject to, int timeout) {
-        return runBool(() -> Mobile.waitForElementNotVisible(to, timeout), null, FailureHandling.CONTINUE_ON_FAILURE);
+    public static boolean waitForElementNotVisible(Object to, int timeout) {
+        return runBool(() -> Mobile.waitForElementNotVisible(TestObject.from(to), timeout), null, FailureHandling.CONTINUE_ON_FAILURE);
     }
 
-    public static boolean waitForElementNotVisible(TestObject to, int timeout, FailureHandling fh) {
-        return runBool(() -> Mobile.waitForElementNotVisible(to, timeout), fh, FailureHandling.CONTINUE_ON_FAILURE);
+    public static boolean waitForElementNotVisible(Object to, int timeout, FailureHandling fh) {
+        return runBool(() -> Mobile.waitForElementNotVisible(TestObject.from(to), timeout), fh, FailureHandling.CONTINUE_ON_FAILURE);
     }
 
     public static void delay(double seconds) {

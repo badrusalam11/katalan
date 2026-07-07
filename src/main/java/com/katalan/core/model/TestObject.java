@@ -64,6 +64,29 @@ public class TestObject {
     public static TestObject id(String name, String id) {
         return new TestObject(name, SelectorMethod.ID, id);
     }
+
+    /**
+     * Accept either this native TestObject or the Katalon-compat
+     * {@code com.kms.katalon.core.testobject.TestObject}.
+     *
+     * findTestObject() resolves to the real com.kms.katalon...ObjectRepository
+     * static method (not the script-binding closure) whenever it's called from
+     * a Groovy class - e.g. Cucumber glue code - since classes have no script
+     * Binding to shadow the static import. That method returns the compat
+     * wrapper type, which every keyword here otherwise rejects outright.
+     */
+    public static TestObject from(Object obj) {
+        if (obj == null) {
+            throw new IllegalArgumentException("TestObject cannot be null");
+        }
+        if (obj instanceof TestObject) {
+            return (TestObject) obj;
+        }
+        if (obj instanceof com.kms.katalon.core.testobject.TestObject) {
+            return ((com.kms.katalon.core.testobject.TestObject) obj).toKatalanTestObject();
+        }
+        throw new IllegalArgumentException("Unsupported TestObject type: " + obj.getClass().getName());
+    }
     
     /**
      * Convert to Selenium By locator
