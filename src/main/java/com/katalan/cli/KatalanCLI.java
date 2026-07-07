@@ -262,16 +262,15 @@ public class KatalanCLI implements Callable<Integer> {
                 
                 RunConfiguration config = configBuilder.build();
                 
-                // Create engine
+                // Create engine. Its constructor already creates the ExecutionContext
+                // (with the project path from config) and registers it via
+                // ExecutionContext.setCurrent() - do NOT create/set a second one here.
+                // A previous version of this code did exactly that, which silently
+                // replaced the engine's context with an empty, orphaned one: every
+                // subsequent ExecutionContext.getCurrent() call (object repository
+                // lookups, global variables, mobile driver, ...) then saw a blank
+                // context instead of the one engine.initialize() actually populates.
                 KatalanEngine engine = new KatalanEngine(config);
-
-                // IMPORTANT: Ensure ExecutionContext contains the project path so
-                // RunConfiguration.getProjectDir() returns the target project.
-                // Some scripts use relative paths (new File("MyActmo.txt")) and
-                // also call RunConfiguration.getProjectDir(), so initialize
-                // the ExecutionContext before engine.initialize().
-                com.katalan.core.context.ExecutionContext ctx = new com.katalan.core.context.ExecutionContext(config);
-                com.katalan.core.context.ExecutionContext.setCurrent(ctx);
 
                 // CRITICAL: Change working directory to project path BEFORE engine.initialize()
                 // This ensures automation scripts that use relative file paths (new File("MyActmo.txt"))
@@ -518,12 +517,21 @@ public class KatalanCLI implements Callable<Integer> {
             int successCount = 0;
             for (Map.Entry<String, Object> entry : overrides.entrySet()) {
                 String variableName = entry.getKey();
-                Object value = entry.getValue();
-                
+                Object rawValue = entry.getValue();
+
                 try {
+                    // CLI overrides always arrive as raw strings. Auto-detect the type
+                    // (number/boolean/string) the same way profile .glbl values are parsed,
+                    // so e.g. "-g_statusLogin=0" overwrites the profile's numeric 0 with an
+                    // Integer 0 instead of a String "0" (which would break scripts comparing
+                    // GlobalVariable.statusLogin == 0).
+                    Object value = rawValue instanceof String
+                            ? com.katalan.core.engine.GlobalVariableLoader.parseValue((String) rawValue)
+                            : rawValue;
+
                     // Use GlobalVariable.set() which stores in dynamic map AND tries to set static field
                     com.katalan.core.compat.GlobalVariable.set(variableName, value);
-                    
+
                     System.out.println("  ✓ GlobalVariable." + variableName + " = \"" + value + "\"");
                     successCount++;
                 } catch (Exception e) {

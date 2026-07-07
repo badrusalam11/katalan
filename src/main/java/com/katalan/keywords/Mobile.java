@@ -85,25 +85,103 @@ public class Mobile {
     }
 
     /**
-     * Start (or bring to foreground) an already-installed application by its package /
-     * bundle id. If no session exists yet, a new one is created targeting that app;
-     * if one is already running, the app is simply activated.
+     * Start (or force back to foreground) an already-installed application by its
+     * package / bundle id, and VERIFY it actually got there instead of trusting
+     * activateApp()'s return value silently.
      */
     public static void startExistingApplication(String appId) {
         ExecutionContext context = ExecutionContext.getCurrent();
         AppiumDriver driver = context.getMobileDriver();
+
+        logger.info("🚀 startExistingApplication('{}') - existing session: {}", appId, driver != null);
+
         if (driver == null) {
-            context.getRunConfiguration().setMobileAppPackage(appId);
-            context.getRunConfiguration().setMobileAppFile(null);
-            driver = MobileDriverFactory.createDriver(context.getRunConfiguration());
-            context.setMobileDriver(driver);
-            logger.info("✅ Mobile session started for existing application: {}", appId);
+            driver = createSessionFor(appId, context);
+        }
+        logger.info("🔎 Foreground package BEFORE launch: {}", safeCurrentPackage(driver));
+
+        forceLaunch(driver, appId);
+
+        // terminateApp() cold-starts the app (fresh process, splash screen, JVM/app
+        // init) - window focus can take a few seconds to actually settle on it, so
+        // poll instead of checking once immediately after activateApp() returns.
+        String currentPkg = waitForForegroundPackage(driver, appId, 15);
+        logger.info("🔎 Foreground package AFTER launch: {}", currentPkg);
+
+        if (!appId.equals(currentPkg)) {
+            logger.warn("⚠️ '{}' is not in foreground (got '{}') - session may be stale, recreating and retrying", appId, currentPkg);
+            try {
+                driver.quit();
+            } catch (Exception ignored) {
+                // best-effort
+            }
+            context.setMobileDriver(null);
+            driver = createSessionFor(appId, context);
+            forceLaunch(driver, appId);
+            currentPkg = waitForForegroundPackage(driver, appId, 15);
+            logger.info("🔎 Foreground package AFTER retry: {}", currentPkg);
+        }
+
+        if (!appId.equals(currentPkg)) {
+            throw new RuntimeException("startExistingApplication('" + appId + "') failed - foreground package "
+                    + "is still '" + currentPkg + "' after launch + retry. Is the app installed and not blocked "
+                    + "by a system dialog?");
+        }
+        logger.info("✅ Application confirmed in foreground: {}", appId);
+    }
+
+    /** Poll the foreground package for up to {@code timeoutSeconds}, returning as soon as it matches {@code appId}. */
+    private static String waitForForegroundPackage(AppiumDriver driver, String appId, int timeoutSeconds) {
+        long deadline = System.currentTimeMillis() + timeoutSeconds * 1000L;
+        String currentPkg = safeCurrentPackage(driver);
+        while (!appId.equals(currentPkg) && System.currentTimeMillis() < deadline) {
+            sleep(300);
+            currentPkg = safeCurrentPackage(driver);
+        }
+        return currentPkg;
+    }
+
+    /** Unconditionally bring {@code appId} to the foreground: terminate (if running) then activate. */
+    private static void forceLaunch(AppiumDriver driver, String appId) {
+        if (!(driver instanceof InteractsWithApps)) {
+            logger.warn("Driver does not support InteractsWithApps - cannot launch {}", appId);
             return;
         }
-        if (driver instanceof InteractsWithApps) {
-            ((InteractsWithApps) driver).activateApp(appId);
-            logger.info("✅ Application activated: {}", appId);
+        InteractsWithApps apps = (InteractsWithApps) driver;
+        try {
+            logger.info("▶️ terminateApp('{}') (no-op if not running)", appId);
+            apps.terminateApp(appId);
+        } catch (Exception e) {
+            logger.debug("terminateApp('{}') threw (likely wasn't running): {}", appId, e.getMessage());
         }
+        try {
+            logger.info("▶️ activateApp('{}')", appId);
+            apps.activateApp(appId);
+            logger.info("✅ activateApp('{}') returned without throwing", appId);
+        } catch (Exception e) {
+            logger.warn("⚠️ activateApp('{}') threw: {}", appId, e.toString(), e);
+        }
+    }
+
+    /** Best-effort current foreground package, never throws. */
+    private static String safeCurrentPackage(AppiumDriver driver) {
+        try {
+            if (driver instanceof AndroidDriver) {
+                return ((AndroidDriver) driver).getCurrentPackage();
+            }
+        } catch (Exception e) {
+            logger.debug("Could not read current package: {}", e.getMessage());
+        }
+        return "<unknown>";
+    }
+
+    private static AppiumDriver createSessionFor(String appId, ExecutionContext context) {
+        context.getRunConfiguration().setMobileAppPackage(appId);
+        context.getRunConfiguration().setMobileAppFile(null);
+        AppiumDriver driver = MobileDriverFactory.createDriver(context.getRunConfiguration());
+        context.setMobileDriver(driver);
+        logger.info("✅ Mobile session started for existing application: {}", appId);
+        return driver;
     }
 
     public static void closeApplication() {
@@ -232,6 +310,16 @@ public class Mobile {
         } else {
             logger.warn("setDeviceOrientation is not supported on this driver - ignoring");
         }
+    }
+
+    public static int getDeviceWidth() {
+        AppiumDriver driver = getDriver();
+        return driver.manage().window().getSize().getWidth();
+    }
+
+    public static int getDeviceHeight() {
+        AppiumDriver driver = getDriver();
+        return driver.manage().window().getSize().getHeight();
     }
 
     private static String adbGetProp(String prop) {
