@@ -1481,7 +1481,7 @@ public class WebUI {
             props.put("attachment", filename + ".png");
             props.put("testops-method-name", methodName);
             props.put("testops-execution-stacktrace", "");
-            kwLogger.logMessage("PASSED", "Taking screenshot successfully", props);
+            kwLogger.logMessage("PASSED", "Screenshot is taken", props);
             
             return destination.toString();
         } catch (IOException e) {
@@ -1619,13 +1619,18 @@ public class WebUI {
      */
     public static void comment(String message) {
         logger.info("[COMMENT] {}", message);
+        com.katalan.core.logging.XmlKeywordLogger.getInstance()
+                .logMessage("INFO", message, java.util.Collections.emptyMap());
     }
-    
+
     /**
      * Add comment to the test log with variable
      */
     public static void comment(String message, Object... args) {
-        logger.info("[COMMENT] {}", String.format(message.replace("{}", "%s"), args));
+        String formatted = String.format(message.replace("{}", "%s"), args);
+        logger.info("[COMMENT] {}", formatted);
+        com.katalan.core.logging.XmlKeywordLogger.getInstance()
+                .logMessage("INFO", formatted, java.util.Collections.emptyMap());
     }
     
     /**
@@ -1644,12 +1649,22 @@ public class WebUI {
             throw new RuntimeException("Test case not found - findTestCase returned null");
         }
         
+        // Groovy classes (e.g. Cucumber glue code) can't use the script-binding
+        // findTestCase closure - their static import of
+        // com.kms.katalon.core.testcase.TestCaseFactory.findTestCase always wins,
+        // which returns the lightweight com.kms.katalon.core.testcase.TestCase
+        // shim (id/name only, no resolved script path). Resolve it here instead
+        // of requiring a pre-resolved com.katalan.core.compat.TestCase.
+        if (testCaseObj instanceof com.kms.katalon.core.testcase.TestCase) {
+            testCaseObj = resolveTestCase((com.kms.katalon.core.testcase.TestCase) testCaseObj);
+        }
+
         // Check if it's our TestCase class
         if (!(testCaseObj instanceof com.katalan.core.compat.TestCase)) {
             logger.warn("callTestCase: invalid testCase type: {}", testCaseObj.getClass().getName());
             throw new RuntimeException("Invalid test case object type");
         }
-        
+
         com.katalan.core.compat.TestCase testCase = (com.katalan.core.compat.TestCase) testCaseObj;
         logger.info("Calling test case: {}", testCase.getTestCaseName());
         
@@ -1702,8 +1717,45 @@ public class WebUI {
         }
     }
     
+    /**
+     * Resolve a lightweight com.kms.katalon.core.testcase.TestCase (id/name only,
+     * as returned by the statically-imported TestCaseFactory.findTestCase) into a
+     * fully resolved com.katalan.core.compat.TestCase with a real script path.
+     */
+    private static com.katalan.core.compat.TestCase resolveTestCase(com.kms.katalon.core.testcase.TestCase kmsTestCase) {
+        String testCaseId = kmsTestCase.getTestCaseId();
+        if (testCaseId == null) {
+            throw new RuntimeException("Test case not found - findTestCase returned an unresolved test case");
+        }
+
+        String normalizedPath = testCaseId.startsWith("Test Cases/")
+                ? testCaseId.substring("Test Cases/".length())
+                : testCaseId;
+
+        Path projectPath = ExecutionContext.getCurrent() != null ? ExecutionContext.getCurrent().getProjectPath() : null;
+        if (projectPath == null) {
+            throw new RuntimeException("Project path not set - cannot resolve test case: " + testCaseId);
+        }
+
+        Path scriptsDir = projectPath.resolve("Scripts").resolve(normalizedPath);
+        if (!Files.exists(scriptsDir) || !Files.isDirectory(scriptsDir)) {
+            throw new RuntimeException("Test case directory not found: " + scriptsDir);
+        }
+
+        try {
+            Path scriptFile = Files.list(scriptsDir)
+                    .filter(p -> p.toString().endsWith(".groovy"))
+                    .findFirst()
+                    .orElseThrow(() -> new RuntimeException("No .groovy script found in: " + scriptsDir));
+            String testCaseName = Path.of(normalizedPath).getFileName().toString();
+            return new com.katalan.core.compat.TestCase(normalizedPath, testCaseName, scriptFile);
+        } catch (IOException e) {
+            throw new RuntimeException("Error resolving test case: " + testCaseId, e);
+        }
+    }
+
     // ==================== Private Helper Methods ====================
-    
+
     /**
      * Convert Katalon TestObject to katalan TestObject if needed
      */

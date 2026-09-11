@@ -72,8 +72,9 @@ public class GroovyScriptExecutor {
         // Add GlobalVariable class (for static field access like GlobalVariable.varName)
         binding.setVariable("GlobalVariable", GlobalVariable.class);
         
-        // Add FailureHandling enum - use Katalan internal version for compatibility with custom JARs
-        binding.setVariable("FailureHandling", com.katalan.core.compat.FailureHandling.class);
+        // Use the kms FailureHandling: custom keyword libraries (CSMobile, CSWeb) are compiled
+        // against this type, so the binding must match to avoid MissingMethodException.
+        binding.setVariable("FailureHandling", com.kms.katalon.core.model.FailureHandling.class);
         
         // Add KeywordUtil
         binding.setVariable("KeywordUtil", KeywordUtil.class);
@@ -130,7 +131,7 @@ public class GroovyScriptExecutor {
         importCustomizer.addImports(
             "com.katalan.keywords.WebUI",
             "com.katalan.core.model.TestObject",
-            "com.katalan.core.compat.FailureHandling",
+            "com.kms.katalon.core.model.FailureHandling",
             "com.katalan.core.compat.GlobalVariable",
             "com.katalan.core.compat.TestCase",
             "com.katalan.core.compat.TestCaseContext"
@@ -360,18 +361,12 @@ public class GroovyScriptExecutor {
             "import com.katalan.keywords.WebUI"
         );
         
-        // Mobile keywords (comment out - not supported)
-        result = result.replaceAll(
-            "import com\\.kms\\.katalon\\.core\\.mobile\\.keyword\\.MobileBuiltInKeywords.*",
-            "// Mobile keywords not supported"
-        );
-        
-        // WebService keywords (comment out - not supported)
-        result = result.replaceAll(
-            "import com\\.kms\\.katalon\\.core\\.webservice\\.keyword\\.WSBuiltInKeywords.*",
-            "// WebService keywords not supported"
-        );
-        
+        // Mobile keywords are real (Appium-backed) - leave the import as-is, the
+        // com.kms.katalon.core.mobile.keyword.MobileBuiltInKeywords compat class exists.
+
+        // WSBuiltInKeywords is real (com.kms.katalon.core.webservice.keyword.WSBuiltInKeywords
+        // exists) - leave the import as-is.
+
         // Windows keywords (comment out - not supported)
         result = result.replaceAll(
             "import com\\.kms\\.katalon\\.core\\.windows\\.keyword\\.WindowsBuiltinKeywords.*",
@@ -388,16 +383,15 @@ public class GroovyScriptExecutor {
             "import com.katalan.core.compat.GlobalVariable"
         );
         
-        // FailureHandling - convert to Katalan internal for compatibility with custom JARs
-        result = result.replace(
-            "import com.kms.katalon.core.model.FailureHandling as FailureHandling",
-            "import com.katalan.core.compat.FailureHandling"
-        );
-        result = result.replace(
-            "import com.kms.katalon.core.model.FailureHandling",
-            "import com.katalan.core.compat.FailureHandling"
-        );
-        
+        // com.kms.katalon.core.model.FailureHandling is real and left as-is (not rewritten to
+        // katalan's own compat.FailureHandling): custom keyword library classes like CSWeb/
+        // CSMobile declare method parameters strongly-typed to the kms enum (e.g.
+        // `testcase(String, String, boolean, boolean, FailureHandling)`); rewriting the
+        // top-level script's import to a different enum class made such calls throw
+        // MissingMethodException at runtime even though the call shape was correct. WebUI's
+        // own FailureHandling-accepting overloads take a loosely-typed Object, so they accept
+        // either enum fine without this rewrite.
+
         // TestObject - all variations
         result = result.replaceAll(
             "import com\\.kms\\.katalon\\.core\\.testobject\\.TestObject.*",
@@ -417,18 +411,10 @@ public class GroovyScriptExecutor {
             "import static com\\.kms\\.katalon\\.core\\.testobject\\.ObjectRepository\\.findWindowsObject.*",
             "// findWindowsObject not supported (Windows testing)"
         );
-        result = result.replaceAll(
-            "import static com\\.kms\\.katalon\\.core\\.checkpoint\\.CheckpointFactory\\..*",
-            "// Checkpoint functions not supported"
-        );
-        result = result.replaceAll(
-            "import static com\\.kms\\.katalon\\.core\\.testcase\\.TestCaseFactory\\..*",
-            "// TestCaseFactory functions not supported"
-        );
-        result = result.replaceAll(
-            "import static com\\.kms\\.katalon\\.core\\.testdata\\.TestDataFactory\\..*",
-            "// TestDataFactory functions not supported"
-        );
+        // CheckpointFactory/TestCaseFactory/TestDataFactory static imports are real
+        // (com.kms.katalon.core.checkpoint/testcase/testdata all have compat classes) -
+        // leave them as-is so findCheckpoint/findTestCase/findTestData resolve to the
+        // real static methods instead of the script-binding stubs added below.
         
         // CucumberKW - replace with katalan Cucumber support
         result = result.replace(
@@ -446,42 +432,25 @@ public class GroovyScriptExecutor {
             "// TestNG keywords not supported by Katalan"
         );
         
-        // Comment out all unsupported com.kms.katalon imports that weren't handled above
-        result = result.replaceAll(
-            "import com\\.kms\\.katalon\\.core\\.checkpoint\\..*",
-            "// Checkpoint not supported"
-        );
-        result = result.replaceAll(
-            "import com\\.kms\\.katalon\\.core\\.testcase\\..*",
-            "// TestCase imports not supported"
-        );
-        result = result.replaceAll(
-            "import com\\.kms\\.katalon\\.core\\.testdata\\..*",
-            "// TestData imports not supported"
-        );
-        result = result.replaceAll(
-            "import com\\.kms\\.katalon\\.core\\.annotation\\..*",
-            "// Annotation kept (native Katalan support)"
-        );
-        result = result.replaceAll(
-            "import com\\.kms\\.katalon\\.core\\.util\\..*",
-            "// Katalon util not supported"
-        );
-        result = result.replaceAll(
-            "import com\\.kms\\.katalon\\.core\\.configuration\\..*",
-            "// Katalon configuration not supported"
-        );
-        result = result.replaceAll(
-            "import com\\.kms\\.katalon\\.core\\.context\\..*",
-            "// Katalon context not supported"
-        );
-        
-        // Add stub methods for unsupported functions at the top of the script 
-        // (after imports, before class/code)
-        String stubMethods = "\n// katalan stubs for unsupported Katalon methods\n" +
-            "def findCheckpoint(name) { /*stub*/ null }\n" +
-            "def findTestData(name) { /*stub*/ null }\n" +
-            "def findWindowsObject(name) { /*stub*/ null }\n" +
+        // checkpoint.*, testcase.*, testdata.*, util.*, context.* all have real compat
+        // classes (Checkpoint/CheckpointFactory, TestCase/TestCaseFactory, TestData/
+        // TestDataFactory/ExcelFactory, KeywordUtil, TestCaseContext/TestSuiteContext) -
+        // leave those imports as-is. annotation.* (@BeforeTestCase etc.) is also real.
+
+        // Add stub methods for unsupported functions at the top of the script
+        // (after imports, before class/code).
+        // findCheckpoint/findTestData are only stubbed when the script DIDN'T statically
+        // import the real CheckpointFactory/TestDataFactory methods above - otherwise this
+        // script-local def would shadow the real static import and silently return null.
+        StringBuilder stubMethodsBuilder = new StringBuilder("\n// katalan stubs for unsupported Katalon methods\n");
+        if (!result.contains("CheckpointFactory.findCheckpoint")) {
+            stubMethodsBuilder.append("def findCheckpoint(name) { /*stub*/ null }\n");
+        }
+        if (!result.contains("TestDataFactory.findTestData")) {
+            stubMethodsBuilder.append("def findTestData(name) { /*stub*/ null }\n");
+        }
+        stubMethodsBuilder.append("def findWindowsObject(name) { /*stub*/ null }\n");
+        String stubMethods = stubMethodsBuilder.toString() +
             "// TestNGKW stub class for unsupported TestNG keywords\n" +
             "class TestNGKW {\n" +
             "    static def runFeatureFile(String featureFile) { println \"[WARN] TestNGKW.runFeatureFile not supported: ${featureFile}\"; return null }\n" +
@@ -870,7 +839,7 @@ public class GroovyScriptExecutor {
             importCustomizer.addImports(
                 "com.katalan.keywords.WebUI",
                 "com.katalan.core.model.TestObject",
-                "com.katalan.core.compat.FailureHandling",
+                "com.kms.katalon.core.model.FailureHandling",
                 "com.katalan.core.compat.GlobalVariable"
             );
             
@@ -880,7 +849,7 @@ public class GroovyScriptExecutor {
             Binding keywordBinding = new Binding();
             keywordBinding.setVariable("WebUI", com.katalan.keywords.WebUI.class);
             keywordBinding.setVariable("GlobalVariable", com.katalan.core.compat.GlobalVariable.class);
-            keywordBinding.setVariable("FailureHandling", com.katalan.core.compat.FailureHandling.class);
+            keywordBinding.setVariable("FailureHandling", com.kms.katalon.core.model.FailureHandling.class);
             keywordBinding.setVariable("findTestObject", new FindTestObjectClosure(context));
             
             GroovyClassLoader classLoader = new GroovyClassLoader(getClass().getClassLoader(), config);
@@ -913,14 +882,9 @@ public class GroovyScriptExecutor {
                 "import internal.GlobalVariable",
                 "import com.katalan.core.compat.GlobalVariable"
             );
-            result = result.replace(
-                "import com.kms.katalon.core.model.FailureHandling as FailureHandling",
-                "import com.katalan.core.compat.FailureHandling"
-            );
-            result = result.replace(
-                "import com.kms.katalon.core.model.FailureHandling",
-                "import com.katalan.core.compat.FailureHandling"
-            );
+            // com.kms.katalon.core.model.FailureHandling is real — do not rewrite.
+            // Keeping the kms type ensures CSMobile/CSWeb method signatures match
+            // FailureHandling values passed from test case scripts.
             
             // Replace WebUiCommonHelper and DriverFactory
             result = result.replace(

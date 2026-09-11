@@ -17,6 +17,7 @@
         <maven.compiler.target>11</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <selenium.version>4.18.1</selenium.version>
+        <appium.version>9.2.0</appium.version>
         <groovy.version>4.0.18</groovy.version>
         <webdrivermanager.version>5.7.0</webdrivermanager.version>
         <slf4j.version>2.0.12</slf4j.version>
@@ -39,6 +40,16 @@
             <groupId>io.github.bonigarcia</groupId>
             <artifactId>webdrivermanager</artifactId>
             <version>${webdrivermanager.version}</version>
+        </dependency>
+
+        <!-- Appium Java client - Mobile (Android/iOS) automation via Appium server.
+             Pinned to 9.2.0 because its selenium-api range [4.17.0,5.0) is the
+             newest line that still accepts our existing selenium.version (4.18.1)
+             without forcing a bump to the Web automation stack. -->
+        <dependency>
+            <groupId>io.appium</groupId>
+            <artifactId>java-client</artifactId>
+            <version>${appium.version}</version>
         </dependency>
 
         <!-- Groovy for script execution -->
@@ -179,6 +190,16 @@
                     <artifactId>*</artifactId>
                 </exclusion>
             </exclusions>
+        </dependency>
+
+        <!-- Force Guava JRE variant — browsermob-core pulls in guava:23.0-android via littleproxy,
+             which strips all Java 8 stream APIs. appium java-client 9.x uses
+             ImmutableMap.toImmutableMap() returning java.util.stream.Collector, which doesn't
+             exist in the -android variant. This direct declaration wins Maven's nearest-def rule. -->
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+            <version>33.3.1-jre</version>
         </dependency>
 
         <!-- Groovy SQL support (used by some Katalon scripts) -->

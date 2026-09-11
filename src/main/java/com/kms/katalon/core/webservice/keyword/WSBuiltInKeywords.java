@@ -5,6 +5,7 @@ import com.kms.katalon.core.testobject.RequestObject;
 import com.kms.katalon.core.testobject.ResponseObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import java.util.Collections;
 
 /**
  * Katalon compatibility stub for WSBuiltInKeywords
@@ -54,9 +55,14 @@ public class WSBuiltInKeywords {
     /** Katalon-style comment logging */
     public static void comment(String message) {
         logger.info("[COMMENT] {}", message);
+        com.katalan.core.logging.XmlKeywordLogger.getInstance()
+                .logMessage("INFO", message, Collections.emptyMap());
     }
 
     public static void comment(Object message) {
-        logger.info("[COMMENT] {}", message);
+        String msg = message != null ? message.toString() : "null";
+        logger.info("[COMMENT] {}", msg);
+        com.katalan.core.logging.XmlKeywordLogger.getInstance()
+                .logMessage("INFO", msg, Collections.emptyMap());
     }
 }

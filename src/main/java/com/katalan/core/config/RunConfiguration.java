@@ -40,15 +40,36 @@ public class RunConfiguration {
     // Remote WebDriver
     private boolean useRemoteWebDriver = false;
     private String remoteWebDriverUrl;
-    
+
     // Logging
     private LogLevel logLevel = LogLevel.INFO;
-    
+
+    // Mobile / Appium Configuration
+    private MobilePlatform mobilePlatform = MobilePlatform.ANDROID;
+    private String mobileDeviceId;
+    private String mobilePlatformVersion;
+    private String mobileAppFile;
+    private String mobileAppPackage;
+    private String mobileAppActivity;
+    private String mobileAutomationName;
+    private String appiumServerUrl;
+    private int appiumServerPort = 0; // 0 = auto-pick a free port when auto-starting
+    private boolean mobileNoReset = true;
+    private boolean mobileFullReset = false;
+    private boolean mobileAutoGrantPermissions = true;
+    private int mobileNewCommandTimeout = 300;
+    private Map<String, Object> mobileCapabilities;
+
     public enum BrowserType {
         CHROME,
         FIREFOX,
         EDGE,
         SAFARI
+    }
+
+    public enum MobilePlatform {
+        ANDROID,
+        IOS
     }
     
     public enum LogLevel {
@@ -61,6 +82,7 @@ public class RunConfiguration {
     public RunConfiguration() {
         this.browserCapabilities = new HashMap<>();
         this.browserArguments = new HashMap<>();
+        this.mobileCapabilities = new HashMap<>();
     }
     
     // Builder pattern
@@ -180,7 +202,77 @@ public class RunConfiguration {
             config.executionProfile = profile;
             return this;
         }
-        
+
+        public Builder mobilePlatform(MobilePlatform platform) {
+            config.mobilePlatform = platform;
+            return this;
+        }
+
+        public Builder mobileDeviceId(String deviceId) {
+            config.mobileDeviceId = deviceId;
+            return this;
+        }
+
+        public Builder mobilePlatformVersion(String version) {
+            config.mobilePlatformVersion = version;
+            return this;
+        }
+
+        public Builder mobileAppFile(String appFile) {
+            config.mobileAppFile = appFile;
+            return this;
+        }
+
+        public Builder mobileAppPackage(String appPackage) {
+            config.mobileAppPackage = appPackage;
+            return this;
+        }
+
+        public Builder mobileAppActivity(String appActivity) {
+            config.mobileAppActivity = appActivity;
+            return this;
+        }
+
+        public Builder mobileAutomationName(String automationName) {
+            config.mobileAutomationName = automationName;
+            return this;
+        }
+
+        public Builder appiumServerUrl(String url) {
+            config.appiumServerUrl = url;
+            return this;
+        }
+
+        public Builder appiumServerPort(int port) {
+            config.appiumServerPort = port;
+            return this;
+        }
+
+        public Builder mobileNoReset(boolean noReset) {
+            config.mobileNoReset = noReset;
+            return this;
+        }
+
+        public Builder mobileFullReset(boolean fullReset) {
+            config.mobileFullReset = fullReset;
+            return this;
+        }
+
+        public Builder mobileAutoGrantPermissions(boolean autoGrant) {
+            config.mobileAutoGrantPermissions = autoGrant;
+            return this;
+        }
+
+        public Builder mobileNewCommandTimeout(int seconds) {
+            config.mobileNewCommandTimeout = seconds;
+            return this;
+        }
+
+        public Builder addMobileCapability(String key, Object value) {
+            config.mobileCapabilities.put(key, value);
+            return this;
+        }
+
         public RunConfiguration build() {
             return config;
         }
@@ -358,8 +450,122 @@ public class RunConfiguration {
     public String getExecutionProfile() {
         return executionProfile;
     }
-    
+
     public void setExecutionProfile(String executionProfile) {
         this.executionProfile = executionProfile;
+    }
+
+    // ==================== Mobile / Appium Getters and Setters ====================
+
+    public MobilePlatform getMobilePlatform() {
+        return mobilePlatform;
+    }
+
+    public void setMobilePlatform(MobilePlatform mobilePlatform) {
+        this.mobilePlatform = mobilePlatform;
+    }
+
+    public String getMobileDeviceId() {
+        return mobileDeviceId;
+    }
+
+    public void setMobileDeviceId(String mobileDeviceId) {
+        this.mobileDeviceId = mobileDeviceId;
+    }
+
+    public String getMobilePlatformVersion() {
+        return mobilePlatformVersion;
+    }
+
+    public void setMobilePlatformVersion(String mobilePlatformVersion) {
+        this.mobilePlatformVersion = mobilePlatformVersion;
+    }
+
+    public String getMobileAppFile() {
+        return mobileAppFile;
+    }
+
+    public void setMobileAppFile(String mobileAppFile) {
+        this.mobileAppFile = mobileAppFile;
+    }
+
+    public String getMobileAppPackage() {
+        return mobileAppPackage;
+    }
+
+    public void setMobileAppPackage(String mobileAppPackage) {
+        this.mobileAppPackage = mobileAppPackage;
+    }
+
+    public String getMobileAppActivity() {
+        return mobileAppActivity;
+    }
+
+    public void setMobileAppActivity(String mobileAppActivity) {
+        this.mobileAppActivity = mobileAppActivity;
+    }
+
+    public String getMobileAutomationName() {
+        return mobileAutomationName;
+    }
+
+    public void setMobileAutomationName(String mobileAutomationName) {
+        this.mobileAutomationName = mobileAutomationName;
+    }
+
+    public String getAppiumServerUrl() {
+        return appiumServerUrl;
+    }
+
+    public void setAppiumServerUrl(String appiumServerUrl) {
+        this.appiumServerUrl = appiumServerUrl;
+    }
+
+    public int getAppiumServerPort() {
+        return appiumServerPort;
+    }
+
+    public void setAppiumServerPort(int appiumServerPort) {
+        this.appiumServerPort = appiumServerPort;
+    }
+
+    public boolean isMobileNoReset() {
+        return mobileNoReset;
+    }
+
+    public void setMobileNoReset(boolean mobileNoReset) {
+        this.mobileNoReset = mobileNoReset;
+    }
+
+    public boolean isMobileFullReset() {
+        return mobileFullReset;
+    }
+
+    public void setMobileFullReset(boolean mobileFullReset) {
+        this.mobileFullReset = mobileFullReset;
+    }
+
+    public boolean isMobileAutoGrantPermissions() {
+        return mobileAutoGrantPermissions;
+    }
+
+    public void setMobileAutoGrantPermissions(boolean mobileAutoGrantPermissions) {
+        this.mobileAutoGrantPermissions = mobileAutoGrantPermissions;
+    }
+
+    public int getMobileNewCommandTimeout() {
+        return mobileNewCommandTimeout;
+    }
+
+    public void setMobileNewCommandTimeout(int mobileNewCommandTimeout) {
+        this.mobileNewCommandTimeout = mobileNewCommandTimeout;
+    }
+
+    public Map<String, Object> getMobileCapabilities() {
+        return mobileCapabilities;
+    }
+
+    public void setMobileCapabilities(Map<String, Object> mobileCapabilities) {
+        this.mobileCapabilities = mobileCapabilities;
     }
 }

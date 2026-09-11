@@ -933,6 +933,38 @@ public class KatalonReportGenerator {
         webUiDriver.put("chromeDriverPath", "/Applications/Katalon Studio.app/Contents/Eclipse/configuration/resources/drivers/chromedriver_mac/chromedriver");
         webUiDriver.put("browserType", "CHROME_DRIVER");
         driversSystem.put("WebUI", webUiDriver);
+
+        // Mobile driver entry — populated from the live Appium session when one is active,
+        // or from the katalan RunConfiguration (CLI --udid / --platform) when called early
+        // (i.e. prepareReportDirectory() before the Appium session starts).
+        // CSMobile.groovy reads execution.drivers.system.Mobile.deviceId at class-init time
+        // via MyComputer.executionProperties, so the value must be present in the early write.
+        Map<String, Object> mobileDriver = new LinkedHashMap<>();
+        if (com.kms.katalon.core.configuration.RunConfiguration.isMobileMode()) {
+            mobileDriver.put("deviceId", com.katalan.keywords.Mobile.getDeviceId());
+            mobileDriver.put("deviceName", com.katalan.keywords.Mobile.getDeviceName());
+            mobileDriver.put("deviceModel", com.katalan.keywords.Mobile.getDeviceModel());
+            mobileDriver.put("deviceOS", com.katalan.keywords.Mobile.getDeviceOS());
+            mobileDriver.put("deviceOSVersion", com.katalan.keywords.Mobile.getDeviceOSVersion());
+        } else {
+            // No live session yet — seed from CLI config so static initializers in keyword
+            // classes (e.g. CSMobile.deviceId) get the right value on first class load.
+            com.katalan.core.context.ExecutionContext ctx =
+                    com.katalan.core.context.ExecutionContext.getCurrent();
+            if (ctx != null && ctx.getRunConfiguration() != null) {
+                com.katalan.core.config.RunConfiguration cfg = ctx.getRunConfiguration();
+                String udid = cfg.getMobileDeviceId();
+                if (udid != null && !udid.isEmpty()) {
+                    mobileDriver.put("deviceId", udid);
+                    mobileDriver.put("deviceName", udid);
+                    mobileDriver.put("deviceModel", "");
+                    mobileDriver.put("deviceOS",
+                            cfg.getMobilePlatform() != null ? cfg.getMobilePlatform().name() : "Android");
+                    mobileDriver.put("deviceOSVersion", "");
+                }
+            }
+        }
+        driversSystem.put("Mobile", mobileDriver);
         drivers.put("system", driversSystem);
         
         Map<String, Object> driversPrefs = new LinkedHashMap<>();
@@ -1140,21 +1172,27 @@ public class KatalonReportGenerator {
                                     String className = lastDot > 0 ? classAndMethod.substring(0, lastDot) : classAndMethod;
                                     String methodName = lastDot > 0 ? classAndMethod.substring(lastDot + 1) : "";
                                     
-                                    // Extract line number from (File.java:123)
+                                    // Extract source file name and line from (CSMobile.groovy:228)
                                     String lineInfo = frameInfo.substring(methodEnd);
                                     int colonIndex = lineInfo.lastIndexOf(':');
                                     String lineNumber = "";
+                                    String sourceFile = "";
                                     if (colonIndex > 0) {
                                         String lineNumPart = lineInfo.substring(colonIndex + 1);
                                         int parenIndex = lineNumPart.indexOf(')');
                                         if (parenIndex > 0) {
                                             lineNumber = lineNumPart.substring(0, parenIndex);
                                         }
+                                        // source file is between '(' and ':'
+                                        sourceFile = lineInfo.substring(1, colonIndex);
                                     }
-                                    
+
                                     log.append("    <frame>\n");
                                     log.append("      <class>").append(escapeXml(className)).append("</class>\n");
                                     log.append("      <method>").append(escapeXml(methodName)).append("</method>\n");
+                                    if (!sourceFile.isEmpty()) {
+                                        log.append("      <file>").append(escapeXml(sourceFile)).append("</file>\n");
+                                    }
                                     if (!lineNumber.isEmpty() && !lineNumber.equals("Native Method")) {
                                         try {
                                             log.append("      <line>").append(lineNumber).append("</line>\n");
