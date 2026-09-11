@@ -28,6 +28,11 @@ public class GroovySourcePreprocessor {
 
     // Matches: (( identifier ) as Type)  - captures the identifier and the type
     // Only simple identifiers (no dots/method calls) to be safe
+    // Matches a Katalon builtin keyword import: group 2 is the FQCN, group 3 the simple name.
+    private static final Pattern BUILTIN_KEYWORD_IMPORT = Pattern.compile(
+            "(?m)^([ \\t]*)import\\s+(com\\.kms\\.katalon\\.core\\.[A-Za-z0-9_.]*keyword\\.builtin"
+                    + "\\.([A-Za-z_][A-Za-z0-9_]*))[ \\t]*;?[ \\t]*$");
+
     private static final Pattern DOUBLE_PAREN_CAST =
             Pattern.compile("\\(\\(\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*\\)\\s+as\\s+([A-Za-z_][A-Za-z0-9_.]*)\\s*\\)");
 
@@ -58,11 +63,17 @@ public class GroovySourcePreprocessor {
         // Comment out unsupported Katalon imports so Groovy compiler doesn't fail.
         // We only comment out packages not stubbed in our compat layer.
         //
-        // NOTE: com.kms.katalon.core.mobile.keyword.builtin.* and io.appium.* used to be
-        // stripped here because Mobile/Appium support didn't exist yet. Both are now real
-        // (io.appium.java_client is bundled; builtin.* keyword classes are stubbed/implemented
-        // as needed) - stripping them would silently break Mobile scripts instead of giving a
-        // clear "unable to resolve class" error for anything genuinely still missing.
+        // NOTE: io.appium.* used to be stripped here because Mobile/Appium support didn't
+        // exist yet. It is now real (io.appium.java_client is bundled), so stripping it would
+        // silently break Mobile scripts instead of giving a clear "unable to resolve class"
+        // error for anything genuinely still missing.
+
+        // Katalon Studio auto-generates `import com.kms.katalon.core.<area>.keyword.builtin.XxxKeyword`
+        // lines into scripts and step definitions that never reference the class. katalan only
+        // stubs the few builtin keyword classes it implements, so those unused imports fail
+        // compilation. Drop an import only when its simple name appears nowhere else in the
+        // file - a script that really uses the class still gets the clear resolution error.
+        result = stripUnusedBuiltinKeywordImports(result);
 
         // javax.servlet.* - not bundled, rarely needed
         result = result.replaceAll(
@@ -126,6 +137,36 @@ public class GroovySourcePreprocessor {
         }
 
         return result;
+    }
+
+    /**
+     * Comment out {@code keyword.builtin.*} imports whose simple name is never used in the
+     * file. These are Katalon Studio boilerplate: the IDE adds them to every generated
+     * script regardless of whether the class is referenced.
+     */
+    private static String stripUnusedBuiltinKeywordImports(String source) {
+        Matcher matcher = BUILTIN_KEYWORD_IMPORT.matcher(source);
+        StringBuilder out = new StringBuilder();
+        while (matcher.find()) {
+            String replacement = isSimpleNameUsedOutside(source, matcher.group(3), matcher.start(), matcher.end())
+                    ? matcher.group(0)
+                    : matcher.group(1) + "// import " + matcher.group(2) + " - unused Katalon builtin keyword";
+            matcher.appendReplacement(out, Matcher.quoteReplacement(replacement));
+        }
+        matcher.appendTail(out);
+        return out.toString();
+    }
+
+    /** True when {@code simpleName} occurs anywhere outside the import statement itself. */
+    private static boolean isSimpleNameUsedOutside(String source, String simpleName, int importStart, int importEnd) {
+        Matcher usage = Pattern.compile("\\b" + Pattern.quote(simpleName) + "\\b").matcher(source);
+        while (usage.find()) {
+            if (usage.start() >= importStart && usage.end() <= importEnd) {
+                continue; // the import line we are considering
+            }
+            return true;
+        }
+        return false;
     }
 
     /**
