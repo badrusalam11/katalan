@@ -29,24 +29,6 @@ public class GroovySourceParser {
     private int nestedLevel = 1; // Start at 1 for test case statements
     private XmlKeywordLogger logger;
     
-    // Storage for listener method statements
-    private static final Map<String, Map<String, List<StatementInfo>>> listenerStatements = new HashMap<>();
-    
-    /**
-     * Represents a statement with its metadata for logging.
-     */
-    public static class StatementInfo {
-        public final String actionText;
-        public final int lineNumber;
-        public final String type; // "expression", "if", "while", "return", etc.
-        
-        public StatementInfo(String actionText, int lineNumber, String type) {
-            this.actionText = actionText;
-            this.lineNumber = lineNumber;
-            this.type = type;
-        }
-    }
-    
     /**
      * Parse test case source file and populate keyword logs.
      */
@@ -115,150 +97,19 @@ public class GroovySourceParser {
     }
     
     /**
-     * Parse listener source file and extract statement structure for each method.
-     * This stores the statements so they can be logged when the listener methods are invoked.
+     * Human-readable one-line label for an expression, as shown in the report.
+     * Shared with {@link ListenerStepTracingCustomizer}, which builds the same
+     * labels at compile time for instrumented listener statements.
      */
-    public static void parseListenerSource(String sourceFilePath, String className) {
-        try {
-            Path sourcePath = Path.of(sourceFilePath);
-            if (!Files.exists(sourcePath)) {
-                log.warn("Listener source file not found: {}", sourceFilePath);
-                return;
-            }
-            
-            String source = Files.readString(sourcePath);
-            source = stripProblematicImportsStatic(source);
-            
-            // Parse with AST
-            CompilerConfiguration config = new CompilerConfiguration();
-            config.setTolerance(10);
-            org.codehaus.groovy.control.CompilationUnit unit = 
-                new org.codehaus.groovy.control.CompilationUnit(config);
-            
-            SourceUnit sourceUnit = unit.addSource(sourcePath.getFileName().toString(), source);
-            unit.compile(org.codehaus.groovy.control.Phases.CONVERSION);
-            
-            ModuleNode moduleNode = sourceUnit.getAST();
-            if (moduleNode == null) return;
-            
-            // Process all classes in the source
-            Map<String, List<StatementInfo>> methodStatements = new HashMap<>();
-            for (ClassNode classNode : moduleNode.getClasses()) {
-                // Process all methods
-                for (MethodNode method : classNode.getMethods()) {
-                    String methodName = method.getName();
-                    
-                    // Skip synthetic and internal methods
-                    if (methodName.startsWith("$") || methodName.equals("<init>") || 
-                        methodName.equals("<clinit>")) {
-                        continue;
-                    }
-                    
-                    List<StatementInfo> statements = new ArrayList<>();
-                    Statement code = method.getCode();
-                    if (code != null) {
-                        extractStatements(code, statements);
-                    }
-                    
-                    if (!statements.isEmpty()) {
-                        methodStatements.put(methodName, statements);
-                        log.debug("Extracted {} statements from listener method: {}.{}", 
-                                statements.size(), className, methodName);
-                    }
-                }
-            }
-            
-            if (!methodStatements.isEmpty()) {
-                listenerStatements.put(className, methodStatements);
-                log.info("Parsed listener source {} with {} method(s)", 
-                        className, methodStatements.size());
-            }
-            
-        } catch (Exception e) {
-            log.warn("Could not parse listener source {}: {}", sourceFilePath, e.getMessage());
-        }
+    public static String describeExpression(Expression expr) {
+        return buildActionTextStatic(expr);
     }
-    
-    /**
-     * Extract statement information from AST recursively.
-     */
-    private static void extractStatements(Statement stmt, List<StatementInfo> statements) {
-        if (stmt == null) return;
-        
-        if (stmt instanceof BlockStatement) {
-            for (Statement s : ((BlockStatement) stmt).getStatements()) {
-                extractStatements(s, statements);
-            }
-        } else if (stmt instanceof ExpressionStatement) {
-            Expression expr = ((ExpressionStatement) stmt).getExpression();
-            int lineNumber = stmt.getLineNumber();
-            if (lineNumber > 0) {
-                String actionText = buildActionTextStatic(expr);
-                if (!shouldSkipActionStatic(actionText)) {
-                    statements.add(new StatementInfo(actionText, lineNumber, "expression"));
-                }
-            }
-        } else if (stmt instanceof IfStatement) {
-            IfStatement ifStmt = (IfStatement) stmt;
-            int lineNumber = ifStmt.getLineNumber();
-            String condition = ifStmt.getBooleanExpression().getText();
-            statements.add(new StatementInfo("if (" + condition + ")", lineNumber, "if"));
-            extractStatements(ifStmt.getIfBlock(), statements);
-            Statement elseBlock = ifStmt.getElseBlock();
-            if (elseBlock != null && !(elseBlock instanceof EmptyStatement)) {
-                statements.add(new StatementInfo("else", lineNumber, "else"));
-                extractStatements(elseBlock, statements);
-            }
-        } else if (stmt instanceof WhileStatement) {
-            WhileStatement whileStmt = (WhileStatement) stmt;
-            String condition = whileStmt.getBooleanExpression().getText();
-            statements.add(new StatementInfo("while (" + condition + ")", 
-                    whileStmt.getLineNumber(), "while"));
-            extractStatements(whileStmt.getLoopBlock(), statements);
-        } else if (stmt instanceof ForStatement) {
-            ForStatement forStmt = (ForStatement) stmt;
-            String variable = forStmt.getVariable().getName();
-            String collection = forStmt.getCollectionExpression().getText();
-            statements.add(new StatementInfo(variable + " in " + collection, 
-                    forStmt.getLineNumber(), "for"));
-            extractStatements(forStmt.getLoopBlock(), statements);
-        } else if (stmt instanceof TryCatchStatement) {
-            TryCatchStatement tryStmt = (TryCatchStatement) stmt;
-            statements.add(new StatementInfo("try", tryStmt.getLineNumber(), "try"));
-            extractStatements(tryStmt.getTryStatement(), statements);
-            for (CatchStatement catchStmt : tryStmt.getCatchStatements()) {
-                String exceptionType = catchStmt.getVariable().getType().getName();
-                statements.add(new StatementInfo("catch (" + exceptionType + ")", 
-                        catchStmt.getLineNumber(), "catch"));
-                extractStatements(catchStmt.getCode(), statements);
-            }
-            Statement finallyStmt = tryStmt.getFinallyStatement();
-            if (finallyStmt != null && !(finallyStmt instanceof EmptyStatement)) {
-                statements.add(new StatementInfo("finally", 
-                        finallyStmt.getLineNumber(), "finally"));
-                extractStatements(finallyStmt, statements);
-            }
-        } else if (stmt instanceof ReturnStatement) {
-            ReturnStatement ret = (ReturnStatement) stmt;
-            int lineNumber = ret.getLineNumber();
-            if (lineNumber > 0) {
-                String returnValue = ret.getExpression().getText();
-                String actionText = "return " + (returnValue.equals("null") ? "" : returnValue);
-                statements.add(new StatementInfo(actionText, lineNumber, "return"));
-            }
-        }
+
+    /** True when an action label carries nothing worth putting in the report. */
+    public static boolean isNoiseAction(String actionText) {
+        return shouldSkipActionStatic(actionText);
     }
-    
-    /**
-     * Get stored statements for a listener method.
-     * Returns null if not found.
-     */
-    public static List<StatementInfo> getListenerMethodStatements(String className, String methodName) {
-        Map<String, List<StatementInfo>> methods = listenerStatements.get(className);
-        if (methods == null) return null;
-        return methods.get(methodName);
-    }
-    
+
     private static String buildActionTextStatic(Expression expr) {
         if (expr instanceof BinaryExpression) {
             BinaryExpression bin = (BinaryExpression) expr;

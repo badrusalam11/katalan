@@ -1,7 +1,8 @@
 package com.katalan.core.engine;
 
 import com.katalan.core.compat.GroovySourcePreprocessor;
-import com.katalan.core.logging.GroovySourceParser;
+import com.katalan.core.logging.ListenerStepTracer;
+import com.katalan.core.logging.ListenerStepTracingCustomizer;
 import com.kms.katalon.core.annotation.AfterTestCase;
 import com.kms.katalon.core.annotation.AfterTestSuite;
 import com.kms.katalon.core.annotation.BeforeTestCase;
@@ -118,6 +119,8 @@ public class TestListenerRegistry {
                 "groovy.xml"
         );
         cc.addCompilationCustomizers(imports);
+        // Log listener statements as they actually execute (see ListenerStepTracer).
+        cc.addCompilationCustomizers(new ListenerStepTracingCustomizer());
 
         // Preprocess Keywords/ so that when the listener transitively resolves
         // keyword classes, the Groovy 4-compatible sources are used instead of
@@ -211,20 +214,6 @@ public class TestListenerRegistry {
                 Object instance = clazz.getDeclaredConstructor().newInstance();
                 long td = System.currentTimeMillis() - t0;
 
-                // Parse listener source to extract statement structure for detailed logging
-                try {
-                    Path originalFile = listenersDir.resolve(listenersWorkDir.relativize(file));
-                    if (Files.exists(originalFile)) {
-                        GroovySourceParser.parseListenerSource(
-                                originalFile.toString(),
-                                clazz.getName()
-                        );
-                    }
-                } catch (Exception parseEx) {
-                    logger.debug("Could not parse listener source for {}: {}",
-                            clazz.getName(), parseEx.getMessage());
-                }
-
                 listenerInstances.add(new Entry(instance, listenerLoader, false));
                 logger.info("Loaded Test Listener: {} ({} ms)", clazz.getName(), td);
                 logger.debug("[startup] listener '{}' loaded in {} ms", clazz.getName(), td);
@@ -273,6 +262,7 @@ public class TestListenerRegistry {
                 "groovy.xml"
         );
         cc.addCompilationCustomizers(imports);
+        cc.addCompilationCustomizers(new ListenerStepTracingCustomizer());
 
         ClassLoader isolatedParent = TestListenerRegistry.class.getClassLoader();
         GroovyClassLoader loader = new GroovyClassLoader(isolatedParent, cc);
@@ -513,27 +503,15 @@ public class TestListenerRegistry {
                 try {
                     currentThread.setContextClassLoader(entry.loader);
                     
-                    // Get stored statements for this listener method
-                    String className = listener.getClass().getName();
                     String methodName = method.getName();
-                    java.util.List<com.katalan.core.logging.GroovySourceParser.StatementInfo> statements =
-                        com.katalan.core.logging.GroovySourceParser.getListenerMethodStatements(className, methodName);
-                    
+
                     com.katalan.core.logging.XmlKeywordLogger kwLogger = 
                         com.katalan.core.logging.XmlKeywordLogger.getInstance();
                     
                     // Log listener method start
                     String listenerAction = methodName;
                     kwLogger.startListener(listenerAction);
-                    
-                    // If we have statement-level details, log them BEFORE invoke
-                    if (statements != null && !statements.isEmpty()) {
-                        int stepIndex = 1;
-                        for (com.katalan.core.logging.GroovySourceParser.StatementInfo stmt : statements) {
-                            kwLogger.startKeyword(stmt.actionText, stmt.lineNumber, stepIndex++);
-                            kwLogger.endKeyword(stmt.actionText);
-                        }
-                    }
+
 
                     // Inject reportFolder into ALL classloaders RIGHT BEFORE invocation
                     // This is critical because some listeners (like CSReport) create nested GroovyShells
@@ -590,6 +568,13 @@ public class TestListenerRegistry {
                             annotationType.getSimpleName(), methodName, listener.getClass().getSimpleName());
 
                     int paramCount = method.getParameterCount();
+
+                    // Arm the step tracer. The listener body was instrumented at
+                    // compile time by ListenerStepTracingCustomizer, so each
+                    // statement logs itself as it runs - a branch that is not
+                    // taken, and anything after an early `return`, stays out of
+                    // the report.
+                    ListenerStepTracer.begin();
                     try {
                         if (paramCount == 0) {
                             method.invoke(listener);
@@ -619,8 +604,10 @@ public class TestListenerRegistry {
                                 annotationType.getSimpleName(), methodName,
                                 t.getClass().getName(), t.getMessage());
                         logger.error("Full stacktrace:", t);
+                    } finally {
+                        ListenerStepTracer.end();
                     }
-                    
+
                     // Log listener method end
                     kwLogger.endListener(listenerAction);
                     
