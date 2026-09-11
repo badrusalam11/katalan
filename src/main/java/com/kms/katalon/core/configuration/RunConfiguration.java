@@ -128,23 +128,31 @@ public class RunConfiguration {
     }
 
     /**
-     * Get execution source id (Katalon parity).
-     * In Katalon this returns the unique id of the test case/suite being run.
-     * We resolve it from the engine context: prefer current test case name,
-     * fall back to current test suite name, then to the source string.
+     * Get execution source id (Katalon parity): the full id ("Test Cases/..." or
+     * "Test Suites/...") of whatever is currently running. Prefers the active test
+     * case id (set while a test case is executing), falling back to the test suite
+     * id (e.g. during @BeforeTestSuite/@AfterTestSuite, where no test case id is set).
      */
-    // public static String getExecutionSourceId() {
-    //     try {
-    //         ExecutionContext ctx = ExecutionContext.getCurrent();
-    //         if (ctx != null) {
-    //             String tcName = ctx.getCurrentTestCaseName();
-    //             if (tcName != null && !tcName.isEmpty()) return tcName;
-    //             String tsName = ctx.getCurrentTestSuiteName();
-    //             if (tsName != null && !tsName.isEmpty()) return tsName;
-    //         }
-    //     } catch (Exception ignored) { /* fall through */ }
-    //     return getExecutionSource();
-    // }
+    public static String getExecutionSourceId() {
+        // Primary: System properties survive ClassLoader isolation (katalan uses multiple
+        // GroovyClassLoaders, each loading their own copy of ExecutionContext with separate
+        // ThreadLocal instances). System is always the bootstrap ClassLoader.
+        String tcId = System.getProperty("katalan.currentTestCaseId");
+        if (tcId != null && !tcId.isEmpty()) return tcId;
+        String tsId = System.getProperty("katalan.currentTestSuiteId");
+        if (tsId != null && !tsId.isEmpty()) return tsId;
+        // Fallback: ThreadLocal path (works in single-ClassLoader environments)
+        try {
+            ExecutionContext ctx = ExecutionContext.getCurrent();
+            if (ctx != null) {
+                tcId = ctx.getCurrentTestCaseId();
+                if (tcId != null && !tcId.isEmpty()) return tcId;
+                tsId = ctx.getCurrentTestSuiteId();
+                if (tsId != null && !tsId.isEmpty()) return tsId;
+            }
+        } catch (Exception ignored) { /* fall through */ }
+        return getExecutionSource();
+    }
     
     /**
      * Get the default timeout for wait operations
@@ -315,26 +323,66 @@ public class RunConfiguration {
      */
     public static Map<String, Object> getExecutionProperties() {
         Map<String, Object> props = new HashMap<>();
-        
+
         // Create the drivers.system structure
         Map<String, Object> drivers = new HashMap<>();
         Map<String, Object> system = new HashMap<>();
         Map<String, Object> webUI = new HashMap<>();
         Map<String, Object> mobile = new HashMap<>();
-        
+
         // Set browser type for WebUI
         String browserType = getBrowserType();
         webUI.put("browserType", browserType);
-        
-        // Set device platform for Mobile (if applicable)
-        mobile.put("devicePlatform", ""); // Empty for non-mobile tests
-        
+
+        // Populate Mobile driver details from the live session, if one is active.
+        // Scripts like brimerchant's report generator read
+        // execution.drivers.system.Mobile.{deviceId,deviceName,deviceModel,deviceOS,deviceOSVersion}.
+        if (isMobileMode()) {
+            mobile.put("deviceId", com.katalan.keywords.Mobile.getDeviceId());
+            mobile.put("deviceName", com.katalan.keywords.Mobile.getDeviceName());
+            mobile.put("deviceModel", com.katalan.keywords.Mobile.getDeviceModel());
+            mobile.put("deviceOS", com.katalan.keywords.Mobile.getDeviceOS());
+            mobile.put("deviceOSVersion", com.katalan.keywords.Mobile.getDeviceOSVersion());
+            mobile.put("devicePlatform", com.katalan.keywords.Mobile.getDeviceOS());
+        } else {
+            mobile.put("devicePlatform", ""); // Empty for non-mobile tests
+        }
+
         system.put("WebUI", webUI);
         system.put("Mobile", mobile);
         drivers.put("system", system);
         props.put("drivers", drivers);
-        
+
         return props;
+    }
+
+    // ============================================================
+    // Mobile driver preferences (Katalon compat)
+    // Scripts call RunConfiguration.setMobileDriverPreferencesProperty(...) to inject
+    // Appium capabilities at runtime (e.g. appWaitActivity, unicodeKeyboard). Mirrors
+    // the WebDriver preferences mechanism above; MobileDriverFactory reads these back
+    // when building capabilities for a new session.
+    // ============================================================
+
+    private static final String MD_PREFS_PREFIX = "mobiledriver.preferences.";
+
+    public static void setMobileDriverPreferencesProperty(String key, Object value) {
+        executionProperties.put(MD_PREFS_PREFIX + key, value);
+        logger.debug("setMobileDriverPreferencesProperty({}, {})", key, value);
+    }
+
+    public static Object getMobileDriverPreferencesProperty(String key) {
+        return executionProperties.get(MD_PREFS_PREFIX + key);
+    }
+
+    public static Map<String, Object> getMobileDriverPreferencesProperties() {
+        Map<String, Object> out = new HashMap<>();
+        for (Map.Entry<String, Object> e : executionProperties.entrySet()) {
+            if (e.getKey().startsWith(MD_PREFS_PREFIX)) {
+                out.put(e.getKey().substring(MD_PREFS_PREFIX.length()), e.getValue());
+            }
+        }
+        return out;
     }
     
     /**
@@ -427,10 +475,11 @@ public class RunConfiguration {
     }
     
     /**
-     * Check if running in mobile test mode
+     * Check if running in mobile test mode (a Mobile driver session is currently active)
      */
     public static boolean isMobileMode() {
-        return false;
+        ExecutionContext ctx = ExecutionContext.getCurrent();
+        return ctx != null && ctx.getMobileDriver() != null;
     }
     
     /**

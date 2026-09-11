@@ -1,7 +1,8 @@
 package com.katalan.core.engine;
 
 import com.katalan.core.compat.GroovySourcePreprocessor;
-import com.katalan.core.logging.GroovySourceParser;
+import com.katalan.core.logging.ListenerStepTracer;
+import com.katalan.core.logging.ListenerStepTracingCustomizer;
 import com.kms.katalon.core.annotation.AfterTestCase;
 import com.kms.katalon.core.annotation.AfterTestSuite;
 import com.kms.katalon.core.annotation.BeforeTestCase;
@@ -51,13 +52,18 @@ public class TestListenerRegistry {
     private static final class Entry {
         final Object instance;
         final ClassLoader loader;
-        Entry(Object instance, ClassLoader loader) {
+        final boolean suiteScript;
+        Entry(Object instance, ClassLoader loader, boolean suiteScript) {
             this.instance = instance;
             this.loader = loader;
+            this.suiteScript = suiteScript;
         }
     }
 
     private final List<Entry> listenerInstances = new ArrayList<>();
+    private Path cachedProjectPath;
+    private String cachedKeywordsClasspath;
+    private String cachedIncludeClasspath;
     
     /** Last injected reportFolder path, used for per-invocation re-injection */
     private String lastInjectedReportFolder = null;
@@ -77,6 +83,7 @@ public class TestListenerRegistry {
      */
     public void loadListeners(Path projectPath, GroovyClassLoader parentLoader) {
         listenerInstances.clear();
+        this.cachedProjectPath = projectPath;
 
         if (projectPath == null) {
             return;
@@ -112,6 +119,8 @@ public class TestListenerRegistry {
                 "groovy.xml"
         );
         cc.addCompilationCustomizers(imports);
+        // Log listener statements as they actually execute (see ListenerStepTracer).
+        cc.addCompilationCustomizers(new ListenerStepTracingCustomizer());
 
         // Preprocess Keywords/ so that when the listener transitively resolves
         // keyword classes, the Groovy 4-compatible sources are used instead of
@@ -128,6 +137,7 @@ public class TestListenerRegistry {
                 keywordsClasspath = keywordsDir.toString();
             }
         }
+        this.cachedKeywordsClasspath = keywordsClasspath;
 
         // Preprocess Include/scripts/groovy (if present) - some listeners import from here
         String includeClasspath = null;
@@ -140,6 +150,7 @@ public class TestListenerRegistry {
                 logger.warn("Could not preprocess Include/scripts/groovy for listeners: {}", e.getMessage());
             }
         }
+        this.cachedIncludeClasspath = includeClasspath;
 
         // Preprocess the listener sources themselves
         Path listenersWorkDir;
@@ -203,21 +214,7 @@ public class TestListenerRegistry {
                 Object instance = clazz.getDeclaredConstructor().newInstance();
                 long td = System.currentTimeMillis() - t0;
 
-                // Parse listener source to extract statement structure for detailed logging
-                try {
-                    Path originalFile = listenersDir.resolve(listenersWorkDir.relativize(file));
-                    if (Files.exists(originalFile)) {
-                        GroovySourceParser.parseListenerSource(
-                                originalFile.toString(),
-                                clazz.getName()
-                        );
-                    }
-                } catch (Exception parseEx) {
-                    logger.debug("Could not parse listener source for {}: {}",
-                            clazz.getName(), parseEx.getMessage());
-                }
-
-                listenerInstances.add(new Entry(instance, listenerLoader));
+                listenerInstances.add(new Entry(instance, listenerLoader, false));
                 logger.info("Loaded Test Listener: {} ({} ms)", clazz.getName(), td);
                 logger.debug("[startup] listener '{}' loaded in {} ms", clazz.getName(), td);
 
@@ -245,6 +242,65 @@ public class TestListenerRegistry {
             logger.info("[startup] Slowest listener: {} ({} ms)", slowestName, slowestMs);
         }
         logger.info("Test Listener registry initialised with {} listener(s)", listenerInstances.size());
+    }
+
+    /**
+     * Load the test suite's companion script (e.g. {@code Test Suites/Android.groovy})
+     * as a temporary listener so its {@code @SetUp} / {@code @TearDown} methods run
+     * around the suite. Call {@link #clearSuiteScriptListeners()} when done.
+     */
+    public void loadSuiteScript(Path suiteScriptPath) {
+        if (suiteScriptPath == null || !Files.exists(suiteScriptPath)) return;
+        if (cachedProjectPath == null) return;
+
+        CompilerConfiguration cc = new CompilerConfiguration();
+        ImportCustomizer imports = new ImportCustomizer();
+        imports.addStarImports(
+                "com.kms.katalon.core.annotation",
+                "com.kms.katalon.core.context",
+                "com.kms.katalon.core.logging",
+                "groovy.xml"
+        );
+        cc.addCompilationCustomizers(imports);
+        cc.addCompilationCustomizers(new ListenerStepTracingCustomizer());
+
+        ClassLoader isolatedParent = TestListenerRegistry.class.getClassLoader();
+        GroovyClassLoader loader = new GroovyClassLoader(isolatedParent, cc);
+        if (cachedKeywordsClasspath != null) loader.addClasspath(cachedKeywordsClasspath);
+        if (cachedIncludeClasspath != null) loader.addClasspath(cachedIncludeClasspath);
+
+        List<URL> jarUrls = collectProjectJarUrls(cachedProjectPath);
+        for (URL url : jarUrls) loader.addURL(url);
+
+        Path suiteScriptWorkDir = suiteScriptPath.getParent();
+
+        // Preprocess the suite script to handle Katalon-era Groovy constructs
+        Path workFile = suiteScriptPath;
+        try {
+            Path workDir = GroovySourcePreprocessor.createPreprocessedCopy(suiteScriptPath.getParent(), "suite-script");
+            workFile = workDir.resolve(suiteScriptPath.getFileName());
+            if (!Files.exists(workFile)) workFile = suiteScriptPath;
+        } catch (Exception e) {
+            logger.debug("Could not preprocess suite script {}: {}", suiteScriptPath.getFileName(), e.getMessage());
+        }
+        loader.addClasspath(suiteScriptWorkDir.toString());
+
+        try {
+            Class<?> clazz = loader.parseClass(workFile.toFile());
+            Object instance = clazz.getDeclaredConstructor().newInstance();
+            listenerInstances.add(new Entry(instance, loader, true));
+            logger.info("Loaded suite script listener: {}", suiteScriptPath.getFileName());
+        } catch (Throwable t) {
+            Throwable root = t;
+            while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+            logger.warn("Could not load suite script {}: {} - {}", suiteScriptPath.getFileName(),
+                    root.getClass().getSimpleName(), summarise(root.getMessage()));
+        }
+    }
+
+    /** Remove all suite-script listeners loaded by {@link #loadSuiteScript}. */
+    public void clearSuiteScriptListeners() {
+        listenerInstances.removeIf(e -> e.suiteScript);
     }
 
     /**
@@ -415,6 +471,20 @@ public class TestListenerRegistry {
                 if (!method.isAnnotationPresent(annotationType)) {
                     continue;
                 }
+                // Respect @SetUp(skipped=true) / @TearDown(skipped=true) etc.
+                try {
+                    Annotation ann = method.getAnnotation(annotationType);
+                    Method skippedAttr = annotationType.getDeclaredMethod("skipped");
+                    boolean skipped = (Boolean) skippedAttr.invoke(ann);
+                    if (skipped) {
+                        logger.debug("Skipping @{}#{} (skipped=true)", annotationType.getSimpleName(), method.getName());
+                        continue;
+                    }
+                } catch (NoSuchMethodException ignored) {
+                    // annotation has no skipped() attribute — proceed
+                } catch (Exception e) {
+                    logger.debug("Could not read skipped() from @{}: {}", annotationType.getSimpleName(), e.getMessage());
+                }
                 try {
                     if (!method.canAccess(listener)) {
                         method.setAccessible(true);
@@ -433,27 +503,15 @@ public class TestListenerRegistry {
                 try {
                     currentThread.setContextClassLoader(entry.loader);
                     
-                    // Get stored statements for this listener method
-                    String className = listener.getClass().getName();
                     String methodName = method.getName();
-                    java.util.List<com.katalan.core.logging.GroovySourceParser.StatementInfo> statements =
-                        com.katalan.core.logging.GroovySourceParser.getListenerMethodStatements(className, methodName);
-                    
+
                     com.katalan.core.logging.XmlKeywordLogger kwLogger = 
                         com.katalan.core.logging.XmlKeywordLogger.getInstance();
                     
                     // Log listener method start
                     String listenerAction = methodName;
                     kwLogger.startListener(listenerAction);
-                    
-                    // If we have statement-level details, log them BEFORE invoke
-                    if (statements != null && !statements.isEmpty()) {
-                        int stepIndex = 1;
-                        for (com.katalan.core.logging.GroovySourceParser.StatementInfo stmt : statements) {
-                            kwLogger.startKeyword(stmt.actionText, stmt.lineNumber, stepIndex++);
-                            kwLogger.endKeyword(stmt.actionText);
-                        }
-                    }
+
 
                     // Inject reportFolder into ALL classloaders RIGHT BEFORE invocation
                     // This is critical because some listeners (like CSReport) create nested GroovyShells
@@ -510,6 +568,13 @@ public class TestListenerRegistry {
                             annotationType.getSimpleName(), methodName, listener.getClass().getSimpleName());
 
                     int paramCount = method.getParameterCount();
+
+                    // Arm the step tracer. The listener body was instrumented at
+                    // compile time by ListenerStepTracingCustomizer, so each
+                    // statement logs itself as it runs - a branch that is not
+                    // taken, and anything after an early `return`, stays out of
+                    // the report.
+                    ListenerStepTracer.begin();
                     try {
                         if (paramCount == 0) {
                             method.invoke(listener);
@@ -539,8 +604,10 @@ public class TestListenerRegistry {
                                 annotationType.getSimpleName(), methodName,
                                 t.getClass().getName(), t.getMessage());
                         logger.error("Full stacktrace:", t);
+                    } finally {
+                        ListenerStepTracer.end();
                     }
-                    
+
                     // Log listener method end
                     kwLogger.endListener(listenerAction);
                     

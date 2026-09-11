@@ -28,7 +28,10 @@ public class DriverCleanupManager {
     
     // Track Chrome browser PIDs created by tracked drivers
     private static final Set<Long> trackedChromePids = ConcurrentHashMap.newKeySet();
-    
+
+    // Track Appium server process PIDs started by this JVM session
+    private static final Set<Long> trackedAppiumPids = ConcurrentHashMap.newKeySet();
+
     private static volatile boolean shutdownHookRegistered = false;
     
     /**
@@ -61,6 +64,21 @@ public class DriverCleanupManager {
         trackedChromePids.add(pid);
         logger.debug("📌 Tracking Chrome browser PID: {}", pid);
     }
+
+    /**
+     * Track a locally-spawned Appium server process ID
+     */
+    public static void trackAppiumServerPid(long pid) {
+        trackedAppiumPids.add(pid);
+        logger.debug("📌 Tracking Appium server PID: {}", pid);
+    }
+
+    /**
+     * Stop tracking an Appium server PID (e.g. it was already stopped gracefully)
+     */
+    public static void untrackAppiumServerPid(long pid) {
+        trackedAppiumPids.remove(pid);
+    }
     
     /**
      * Cleanup all tracked processes - FAST version (no orphan scan)
@@ -84,14 +102,24 @@ public class DriverCleanupManager {
                 killedChrome++;
             }
         }
-        
-        if (killedDrivers > 0 || killedChrome > 0) {
-            logger.info("✅ Cleanup complete - Killed {} ChromeDriver(s), {} Chrome browser(s)", 
-                killedDrivers, killedChrome);
+
+        // Kill tracked Appium server processes (force kill for speed)
+        int killedAppium = 0;
+        for (Long pid : trackedAppiumPids) {
+            logger.debug("🔫 Killing tracked Appium server PID: {}", pid);
+            if (killProcess(pid, true)) { // forceful = true for speed
+                killedAppium++;
+            }
         }
-        
+
+        if (killedDrivers > 0 || killedChrome > 0 || killedAppium > 0) {
+            logger.info("✅ Cleanup complete - Killed {} ChromeDriver(s), {} Chrome browser(s), {} Appium server(s)",
+                killedDrivers, killedChrome, killedAppium);
+        }
+
         trackedDriverPids.clear();
         trackedChromePids.clear();
+        trackedAppiumPids.clear();
     }
     
     /**
@@ -140,7 +168,7 @@ public class DriverCleanupManager {
      * Get count of tracked processes (for monitoring in CI/CD)
      */
     public static int getTrackedProcessCount() {
-        return trackedDriverPids.size() + trackedChromePids.size();
+        return trackedDriverPids.size() + trackedChromePids.size() + trackedAppiumPids.size();
     }
     
     /**

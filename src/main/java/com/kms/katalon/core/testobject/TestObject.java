@@ -37,58 +37,45 @@ public class TestObject {
     // Convert to Katalan TestObject
     public com.katalan.core.model.TestObject toKatalanTestObject() {
         com.katalan.core.model.TestObject katalanObj = new com.katalan.core.model.TestObject(this.objectId);
-        
-        // Copy selector if available
+
+        // Copy selector if available - this is the fast path for a single,
+        // already-complete XPath/CSS/ID locator.
         if (selectorMethod != null && selectorCollection.containsKey(selectorMethod)) {
             String selectorValue = selectorCollection.get(selectorMethod);
             switch (selectorMethod) {
                 case XPATH:
                     katalanObj.setSelectorMethod(com.katalan.core.model.TestObject.SelectorMethod.XPATH);
+                    katalanObj.setSelectorValue(selectorValue);
                     break;
                 case CSS:
                     katalanObj.setSelectorMethod(com.katalan.core.model.TestObject.SelectorMethod.CSS);
+                    katalanObj.setSelectorValue(selectorValue);
                     break;
-                case BASIC:
                 default:
-                    // Try to find xpath or css from properties
-                    for (TestObjectProperty prop : properties) {
-                        if ("xpath".equalsIgnoreCase(prop.getName())) {
-                            katalanObj.setSelectorMethod(com.katalan.core.model.TestObject.SelectorMethod.XPATH);
-                            katalanObj.setSelectorValue(prop.getValue());
-                            return katalanObj;
-                        }
-                    }
                     break;
-            }
-            katalanObj.setSelectorValue(selectorValue);
-        } else {
-            // Fallback: try to build selector from properties
-            for (TestObjectProperty prop : properties) {
-                if ("xpath".equalsIgnoreCase(prop.getName()) && prop.isActive()) {
-                    katalanObj.setSelectorMethod(com.katalan.core.model.TestObject.SelectorMethod.XPATH);
-                    katalanObj.setSelectorValue(prop.getValue());
-                    break;
-                } else if ("css".equalsIgnoreCase(prop.getName()) && prop.isActive()) {
-                    katalanObj.setSelectorMethod(com.katalan.core.model.TestObject.SelectorMethod.CSS);
-                    katalanObj.setSelectorValue(prop.getValue());
-                    break;
-                } else if ("id".equalsIgnoreCase(prop.getName()) && prop.isActive()) {
-                    katalanObj.setSelectorMethod(com.katalan.core.model.TestObject.SelectorMethod.ID);
-                    katalanObj.setSelectorValue(prop.getValue());
-                    break;
-                }
             }
         }
-        
+
+        // Most mobile objects (Object Spy exports) carry a generic property map
+        // (resource-id, content-desc, text, class, ...) rather than a single
+        // selectorMethod - Mobile.resolveLocator() AND-combines whatever's here.
+        // Always copy these across regardless of whether a selector was also
+        // found above, so callers relying on either representation work.
+        for (TestObjectProperty prop : properties) {
+            if (prop.isActive() && prop.getName() != null && prop.getValue() != null) {
+                katalanObj.addProperty(prop.getName(), prop.getValue());
+            }
+        }
+
         return katalanObj;
     }
     
     // Static factory to create from Katalan TestObject
     public static TestObject fromKatalanTestObject(com.katalan.core.model.TestObject katalanObj) {
         if (katalanObj == null) return null;
-        
+
         TestObject to = new TestObject(katalanObj.getObjectId());
-        
+
         if (katalanObj.getSelectorMethod() != null && katalanObj.getSelectorValue() != null) {
             switch (katalanObj.getSelectorMethod()) {
                 case XPATH:
@@ -109,7 +96,18 @@ public class TestObject {
                     break;
             }
         }
-        
+
+        // Most Android/iOS objects (Object Spy exports) don't use a single
+        // selectorMethod/selectorValue at all - they carry a generic property
+        // map (resource-id, content-desc, text, class, xpath, ...) that
+        // Mobile.resolveLocator() AND-combines. Without copying these too,
+        // round-tripping through this wrapper (e.g. findTestObject() called
+        // from Cucumber glue code, see TestObject.from() in katalan) silently
+        // produces an object with zero properties.
+        for (java.util.Map.Entry<String, String> entry : katalanObj.getProperties().entrySet()) {
+            to.addProperty(new TestObjectProperty(entry.getKey(), ConditionType.EQUALS, entry.getValue()));
+        }
+
         return to;
     }
     

@@ -7,6 +7,7 @@
 - ✅ Execute Katalon Test Cases (Groovy scripts)
 - ✅ Execute Katalon Test Suites
 - ✅ WebUI Keywords compatible with Katalon
+- ✅ Mobile Keywords compatible with Katalon (Android/iOS via Appium)
 - ✅ Object Repository support
 - ✅ GlobalVariable support
 - ✅ Beautiful HTML reports
@@ -40,7 +41,7 @@ This creates `katalan-runner-1.0.0.jar` in the `target` folder.
 java -jar katalan-runner-1.0.0.jar run \
   -p /path/to/katalon/project \
   -ts "Test Suites/MySuite" \
-  -b chrome \
+  --platform chrome \
   --headless
 ```
 
@@ -49,7 +50,7 @@ java -jar katalan-runner-1.0.0.jar run \
 ```bash
 java -jar katalan-runner-1.0.0.jar run \
   -tc /path/to/TestCase.groovy \
-  -b chrome
+  --platform chrome
 ```
 
 ### Run Multiple Test Cases
@@ -68,7 +69,7 @@ java -jar katalan-runner-1.0.0.jar run \
 | `-p, --project` | Katalon project folder path | - |
 | `-ts, --test-suite` | Test suite to run | - |
 | `-tc, --test-case` | Test case file(s) to run | - |
-| `-b, --browser` | Browser: chrome, firefox, edge, safari | chrome |
+| `--platform` | What to run against: chrome, firefox, edge, safari, android, ios | chrome |
 | `--headless` | Run in headless mode | false |
 | `-r, --report` | Report output folder | reports |
 | `--screenshot-on-failure` | Capture on failure | true |
@@ -80,6 +81,15 @@ java -jar katalan-runner-1.0.0.jar run \
 | `--driver` | Custom WebDriver executable path | - |
 | `--remote-url` | Remote WebDriver URL | - |
 | `--browser-path` | Custom browser binary path | - |
+| `--device-id, --udid` | Mobile device UDID/serial (auto-detected via `adb devices` if omitted and exactly one is connected) | - |
+| `--platform-version` | Mobile OS version | - |
+| `--app` | Path to `.apk`/`.ipa` to install and launch | - |
+| `--app-package` | Package/bundle id of an already-installed app | - |
+| `--app-activity` | Android activity to launch (with `--app-package`) | - |
+| `--automation-name` | Appium engine (default `UiAutomator2`/`XCUITest`) | - |
+| `--appium-url` | Use an already-running Appium server instead of auto-starting one | - |
+| `--appium-port` | Port for the auto-started local Appium server (0 = any free port) | 0 |
+| `--reset` / `--full-reset` | Reset app state between Mobile sessions | false |
 | `-v, --verbose` | Verbose logging | false |
 
 ## 📝 Writing Test Scripts
@@ -230,6 +240,83 @@ KeywordUtil.markFailed("Element not found") // Throws StepFailedException
 - `scrollToPosition(x, y)` - Scroll to position
 - `scrollToTop()` / `scrollToBottom()` - Scroll page
 
+## 📱 Mobile Keywords (Appium)
+
+katalan drives mobile apps through a local or remote [Appium](https://appium.io/) server using
+the official `io.appium:java-client`. By default it auto-starts/stops a local Appium server for
+you (just like it auto-manages chromedriver) - install Appium once (`npm i -g appium` plus the
+driver for your platform, e.g. `appium driver install uiautomator2`) and katalan handles the rest.
+
+> Pass `--platform android` (or `ios`) to select a mobile run - `--platform` is the single switch
+> for what this run targets (chrome/firefox/edge/safari for Web, android/ios for Mobile). It only
+> matters once your script actually calls into the matching keyword namespace (`WebUI.*` vs
+> `Mobile.*`); katalan doesn't inspect the script upfront, so a script that never calls `Mobile.*`
+> simply won't start an Appium session even if `--platform android` was passed, and vice versa.
+
+```bash
+# Auto-detects the single attached ADB device, installs and launches the app
+java -jar katalan-runner.jar run \
+  -p /path/to/project \
+  -ts "Test Suites/Android" \
+  --platform android \
+  --app Documents/apk/myapp.apk
+
+# Target an already-installed app on a specific device, against an Appium server you run yourself
+java -jar katalan-runner.jar run \
+  -p /path/to/project \
+  -tc "Test Cases/Login/TC01.groovy" \
+  --platform android \
+  --device-id RR8W106N32M \
+  --app-package com.example.app \
+  --appium-url http://127.0.0.1:4723
+```
+
+### Application Management
+- `startApplication(appFile, isRestartApp)` - Install and launch an app
+- `startExistingApplication(appId)` - Launch/activate an already-installed app
+- `closeApplication()` - End the app/Appium session
+- `installApp(appFile)` / `removeApp(appId)` / `isAppInstalled(appId)` - App lifecycle
+- `resetApp()` / `backgroundApp(seconds)` - Reset or background the app under test
+- `getCurrentActivity()` / `getCurrentPackage()` - Android app introspection
+
+### Device Info
+- `getDeviceId()` / `getDeviceName()` / `getDeviceManufacturer()` / `getDeviceModel()`
+- `getDeviceOS()` / `getDeviceOSVersion()`
+- `getDeviceOrientation()` / `setDeviceOrientation(orientation)`
+
+### Element Interaction
+- `tap(testObject, timeout)` / `doubleTap(...)` / `longPress(testObject, duration, timeout)`
+- `tapAtPosition(x, y)` - Tap raw screen coordinates
+- `setText(testObject, text, timeout)` / `clearText(...)` / `getText(...)` / `getAttribute(...)`
+- `swipe(startX, startY, endX, endY[, durationMs])`
+- `scrollToText(text)` / `scrollToElement(testObject, timeout)`
+- `getElementWidth/Height/TopPosition/LeftPosition(testObject, timeout)`
+
+### Verification
+- `verifyElementExist/NotExist(testObject, timeout)`
+- `verifyElementVisible/NotVisible(testObject[, timeout])`
+- `verifyElementText/ContainsText(testObject, text[, timeout])`
+- `verifyElementAttributeValue(testObject, attribute, value, timeout)`
+- `verifyElementChecked/NotChecked(testObject, timeout)`
+- `verifyEqual(actual, expected)` / `verifyMatch(actual, expected, isRegex)`
+
+### Navigation, Notifications & Network
+- `pressBack()` / `pressHome()` / `hideKeyboard()` / `sendKeyEvent(keyCode)`
+- `openNotifications()` / `closeNotifications()`
+- `toggleWifi(state)` / `toggleData(state)` - accepts `"on"/"off"` or boolean
+- `lockDevice()` / `unlockDevice()` / `isDeviceLocked()`
+
+### Screenshot & Wait
+- `takeScreenshot()` / `takeScreenshot(fileName)`
+- `waitForElementPresent/NotPresent/Visible/NotVisible(testObject, timeout)`
+- `delay(seconds)`
+
+All keywords support the usual Katalon `FailureHandling` overload
+(`STOP_ON_FAILURE` / `CONTINUE_ON_FAILURE` / `OPTIONAL`).
+
+> **iOS note:** the iOS/XCUITest path is implemented for parity but has not been exercised against
+> a real device/simulator in this environment - Android via UiAutomator2 is the validated path.
+
 ## 🗂️ Project Structure
 
 ### Katalon Project Structure (Supported)
@@ -276,7 +363,7 @@ reports/
 java -jar katalan-runner.jar run \
   -tc MyTest.groovy \
   --browser-path /path/to/chrome \
-  -b chrome
+  --platform chrome
 ```
 
 ### Using with Selenium Grid
@@ -285,7 +372,7 @@ java -jar katalan-runner.jar run \
 java -jar katalan-runner.jar run \
   -tc MyTest.groovy \
   --remote-url http://localhost:4444/wd/hub \
-  -b chrome
+  --platform chrome
 ```
 
 ### Headless Mode with Retry

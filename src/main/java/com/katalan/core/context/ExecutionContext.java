@@ -24,6 +24,7 @@ public class ExecutionContext {
     private static final ThreadLocal<ExecutionContext> contextHolder = new ThreadLocal<>();
     
     private WebDriver webDriver;
+    private io.appium.java_client.AppiumDriver mobileDriver;
     private RunConfiguration runConfiguration;
     private ExecutionResult executionResult;
     private Map<String, Object> globalVariables;
@@ -33,7 +34,9 @@ public class ExecutionContext {
     private Path projectPath;
     private Path currentTestCasePath;
     private String currentTestCaseName;
+    private String currentTestCaseId;
     private String currentTestSuiteName;
+    private String currentTestSuiteId;
     private Map<String, Object> properties;
     private boolean shouldStop;
     
@@ -192,16 +195,32 @@ public class ExecutionContext {
             }
             webDriver = null;
         }
+        if (mobileDriver != null) {
+            try {
+                mobileDriver.quit();
+            } catch (Exception e) {
+                logger.warn("Error closing AppiumDriver: {}", e.getMessage());
+            }
+            mobileDriver = null;
+        }
         clearCurrent();
     }
-    
+
     // Getters and Setters
     public WebDriver getWebDriver() {
         return webDriver;
     }
-    
+
     public void setWebDriver(WebDriver webDriver) {
         this.webDriver = webDriver;
+    }
+
+    public io.appium.java_client.AppiumDriver getMobileDriver() {
+        return mobileDriver;
+    }
+
+    public void setMobileDriver(io.appium.java_client.AppiumDriver mobileDriver) {
+        this.mobileDriver = mobileDriver;
     }
     
     public RunConfiguration getRunConfiguration() {
@@ -263,17 +282,35 @@ public class ExecutionContext {
     public String getCurrentTestCaseName() {
         return currentTestCaseName;
     }
-    
+
     public void setCurrentTestCaseName(String currentTestCaseName) {
         this.currentTestCaseName = currentTestCaseName;
     }
-    
+
+    /** Full id with "Test Cases/" prefix, e.g. "Test Cases/Android/Instalasi/Install via APK". */
+    public String getCurrentTestCaseId() {
+        return currentTestCaseId;
+    }
+
+    public void setCurrentTestCaseId(String currentTestCaseId) {
+        this.currentTestCaseId = currentTestCaseId;
+    }
+
     public String getCurrentTestSuiteName() {
         return currentTestSuiteName;
     }
-    
+
     public void setCurrentTestSuiteName(String currentTestSuiteName) {
         this.currentTestSuiteName = currentTestSuiteName;
+    }
+
+    /** Full id with "Test Suites/" prefix, e.g. "Test Suites/Android". */
+    public String getCurrentTestSuiteId() {
+        return currentTestSuiteId;
+    }
+
+    public void setCurrentTestSuiteId(String currentTestSuiteId) {
+        this.currentTestSuiteId = currentTestSuiteId;
     }
     
     /**
