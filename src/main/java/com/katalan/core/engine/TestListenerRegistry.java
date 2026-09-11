@@ -121,6 +121,8 @@ public class TestListenerRegistry {
         cc.addCompilationCustomizers(imports);
         // Log listener statements as they actually execute (see ListenerStepTracer).
         cc.addCompilationCustomizers(new ListenerStepTracingCustomizer());
+        // Optionally drop third-party report exporters so only katalan's report is produced.
+        cc.addCompilationCustomizers(new CustomReportSkippingCustomizer());
 
         // Preprocess Keywords/ so that when the listener transitively resolves
         // keyword classes, the Groovy 4-compatible sources are used instead of
@@ -263,6 +265,7 @@ public class TestListenerRegistry {
         );
         cc.addCompilationCustomizers(imports);
         cc.addCompilationCustomizers(new ListenerStepTracingCustomizer());
+        cc.addCompilationCustomizers(new CustomReportSkippingCustomizer());
 
         ClassLoader isolatedParent = TestListenerRegistry.class.getClassLoader();
         GroovyClassLoader loader = new GroovyClassLoader(isolatedParent, cc);

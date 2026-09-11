@@ -118,6 +118,12 @@ public class KatalanCLI implements Callable<Integer> {
         @Option(names = {"--browser-path"}, description = "Custom browser binary path (e.g., Chrome/Chromium executable)")
         private String browserPath;
 
+        @Option(names = {"--skip-custom-report"},
+                description = "Skip third-party custom report exporters wired into Test Listeners "
+                        + "(e.g. CSReport.exportKatalonReports) so only katalan's own report is produced. "
+                        + "Can also be set with skipCustomReport=true in katalan.properties")
+        private boolean skipCustomReport;
+
         @Option(names = {"--device-id", "--udid"}, description = "Mobile device UDID/serial to attach to (auto-detected from 'adb devices' if omitted and exactly one is connected)")
         private String deviceId;
 
@@ -308,6 +314,16 @@ public class KatalanCLI implements Callable<Integer> {
                     System.err.println("   Scripts using relative paths may write to katalan directory!");
                 }
                 
+                // Decide whether project Test Listeners may run their own report exporter.
+                // katalan.properties first, then let an explicit CLI flag win over it.
+                com.katalan.core.config.CustomReportConfig.loadFrom(projectPath);
+                if (skipCustomReport) {
+                    com.katalan.core.config.CustomReportConfig.setSkipCustomReport(true);
+                }
+                if (com.katalan.core.config.CustomReportConfig.isSkipCustomReport()) {
+                    System.out.println("📄 Custom report exporters disabled - katalan report only");
+                }
+
                 try {
                     // Initialize
                     System.out.println("🚀 Initializing katalan Engine...");
