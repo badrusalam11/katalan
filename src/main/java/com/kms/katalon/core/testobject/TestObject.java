@@ -56,6 +56,17 @@ public class TestObject {
             }
         }
 
+        // Objects built in script code carry no selectorMethod at all - they just
+        // add an "xpath"/"css"/"id" property (e.g. CSWeb.cari(), which every web
+        // script uses). Derive the selector from those so WebUI keywords, which
+        // read selectorMethod/selectorValue and cannot see the property map, still
+        // resolve them. Mobile is unaffected: Mobile.resolveLocator() already
+        // prefers an explicit selector and already gives "xpath" top priority in
+        // its own property fallback, so both paths produce the same locator.
+        if (katalanObj.getSelectorValue() == null) {
+            deriveSelectorFromProperties(katalanObj);
+        }
+
         // Most mobile objects (Object Spy exports) carry a generic property map
         // (resource-id, content-desc, text, class, ...) rather than a single
         // selectorMethod - Mobile.resolveLocator() AND-combines whatever's here.
@@ -70,6 +81,41 @@ public class TestObject {
         return katalanObj;
     }
     
+    /**
+     * Set {@code katalanObj}'s selector from the first active {@code xpath}, {@code css} or
+     * {@code id} property, in that order of preference. No-op when none is present.
+     */
+    private void deriveSelectorFromProperties(com.katalan.core.model.TestObject katalanObj) {
+        String xpath = findActivePropertyValue("xpath");
+        if (xpath != null) {
+            katalanObj.setSelectorMethod(com.katalan.core.model.TestObject.SelectorMethod.XPATH);
+            katalanObj.setSelectorValue(xpath);
+            return;
+        }
+        String css = findActivePropertyValue("css");
+        if (css != null) {
+            katalanObj.setSelectorMethod(com.katalan.core.model.TestObject.SelectorMethod.CSS);
+            katalanObj.setSelectorValue(css);
+            return;
+        }
+        String id = findActivePropertyValue("id");
+        if (id != null) {
+            katalanObj.setSelectorMethod(com.katalan.core.model.TestObject.SelectorMethod.ID);
+            katalanObj.setSelectorValue(id);
+        }
+    }
+
+    /** Value of the first active property with this name (case-insensitive), or null. */
+    private String findActivePropertyValue(String name) {
+        for (TestObjectProperty prop : properties) {
+            if (prop.isActive() && name.equalsIgnoreCase(prop.getName())
+                    && prop.getValue() != null && !prop.getValue().isEmpty()) {
+                return prop.getValue();
+            }
+        }
+        return null;
+    }
+
     // Static factory to create from Katalan TestObject
     public static TestObject fromKatalanTestObject(com.katalan.core.model.TestObject katalanObj) {
         if (katalanObj == null) return null;
