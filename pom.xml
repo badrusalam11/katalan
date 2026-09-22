@@ -229,6 +229,18 @@
             <artifactId>itext</artifactId>
             <version>2.1.7</version>
         </dependency>
+
+        <!-- Eclipse Equinox OSGi framework (Katalon compat). Katalon Studio runs on
+             Eclipse RCP, so classes like org.eclipse.osgi.framework.util.FilePath
+             resolve there even when a script imports them without using them.
+             Katalan has no Eclipse runtime of its own, so scripts carrying such
+             stray imports (e.g. mass_transfer.groovy) fail to compile unless this
+             jar is on the classpath too. -->
+        <dependency>
+            <groupId>org.eclipse.platform</groupId>
+            <artifactId>org.eclipse.osgi</artifactId>
+            <version>3.24.300</version>
+        </dependency>
     </dependencies>
 
     <build>

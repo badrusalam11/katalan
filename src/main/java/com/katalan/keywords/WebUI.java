@@ -1465,6 +1465,13 @@ public class WebUI {
      */
     private static String takeScreenshotInternal(String filename, String methodName) {
         logger.info("Taking screenshot: {}", filename);
+        if (ExecutionContext.getCurrent().getWebDriver() == null) {
+            // No browser was ever opened (e.g. test failed during setup). Katalon's own
+            // failure-screenshot listener idiom relies on this being a soft no-op rather
+            // than an uncaught exception that aborts the rest of the listener chain.
+            logger.warn("Skipping screenshot '{}': WebDriver is not initialized", filename);
+            return null;
+        }
         try {
             TakesScreenshot ts = (TakesScreenshot) getDriver();
             File source = ts.getScreenshotAs(OutputType.FILE);
