@@ -508,7 +508,8 @@ public class KatalanEngine {
         
         while (attempts < maxAttempts) {
             attempts++;
-            
+            context.drainContinuedFailures();
+
             try {
                 // Add test case variables to script (resolve GlobalVariableReferences)
                 if (testCase.getVariables() != null) {
@@ -552,7 +553,12 @@ public class KatalanEngine {
                     String capturedOutput = consoleCapturer.stopCapture();
                     result.setConsoleOutput(capturedOutput);
                 }
-                
+
+                List<String> continuedFailures = context.drainContinuedFailures();
+                if (!continuedFailures.isEmpty()) {
+                    throw new StepFailedException(String.join("\n", continuedFailures));
+                }
+
                 // Test passed
                 result.markPassed();
                 testCase.markPassed();
@@ -564,12 +570,16 @@ public class KatalanEngine {
                 logger.info("Test case PASSED: {}", testCase.getName());
                 break;
                 
-            } catch (StepFailedException e) {
+            } catch (StepFailedException | AssertionError e) {
+                // AssertionError: Groovy `assert`, and keywords that signal a failed check with it.
+                // Like a failed step in Katalon, it fails this test case - never the whole suite.
                 handleTestFailure(testCase, result, e, attempts, maxAttempts);
                 if (result.getStatus() == TestCase.TestCaseStatus.PASSED) {
                     break; // Retry succeeded
                 }
-            } catch (Exception e) {
+            } catch (Exception | LinkageError | StackOverflowError e) {
+                // Errors a single script can raise (bad class, runaway recursion) must not escape
+                // to main() and kill the run; anything else, e.g. OutOfMemoryError, still propagates.
                 handleTestError(testCase, result, e, attempts, maxAttempts);
                 if (result.getStatus() == TestCase.TestCaseStatus.PASSED) {
                     break; // Retry succeeded
@@ -728,7 +738,7 @@ public class KatalanEngine {
      * Handle test case failure
      */
     private void handleTestFailure(TestCase testCase, TestCaseResult result, 
-                                    StepFailedException e, int attempt, int maxAttempts) {
+                                    Throwable e, int attempt, int maxAttempts) {
         String errorMessage = e.getMessage();
         String stackTrace = getStackTraceString(e);
         
@@ -754,7 +764,7 @@ public class KatalanEngine {
      * Handle test case error
      */
     private void handleTestError(TestCase testCase, TestCaseResult result, 
-                                  Exception e, int attempt, int maxAttempts) {
+                                  Throwable e, int attempt, int maxAttempts) {
         String errorMessage = e.getMessage();
         String stackTrace = getStackTraceString(e);
         
@@ -813,7 +823,7 @@ public class KatalanEngine {
     /**
      * Log test case failure to execution0.log in Katalon format
      */
-    private void logTestCaseFailure(TestCase testCase, Exception e, String errorMessage, String stackTrace) {
+    private void logTestCaseFailure(TestCase testCase, Throwable e, String errorMessage, String stackTrace) {
         XmlKeywordLogger xmlLogger = XmlKeywordLogger.getInstance();
         
         // Build failure message (Katalon format: "Test Cases/XXX FAILED.\nReason:\n{exception}")
@@ -860,7 +870,7 @@ public class KatalanEngine {
     /**
      * Get stack trace as string
      */
-    private String getStackTraceString(Exception e) {
+    private String getStackTraceString(Throwable e) {
         StringWriter sw = new StringWriter();
         PrintWriter pw = new PrintWriter(sw);
         e.printStackTrace(pw);

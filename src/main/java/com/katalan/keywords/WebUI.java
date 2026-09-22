@@ -954,7 +954,7 @@ public class WebUI {
         try {
             boolean result = waitForElementPresent(testObject, timeout, failureHandling);
             if (!result) {
-                throw new AssertionError("Element not present: " + describe(testObject));
+                throw new StepFailedException("Element not present: " + describe(testObject));
             }
             return true;
         } catch (Exception e) {
@@ -985,7 +985,7 @@ public class WebUI {
         try {
             boolean result = waitForElementVisible(testObject, timeout, failureHandling);
             if (!result) {
-                throw new AssertionError("Element not visible: " + describe(testObject));
+                throw new StepFailedException("Element not visible: " + describe(testObject));
             }
             return true;
         } catch (Exception e) {
@@ -1017,7 +1017,7 @@ public class WebUI {
         try {
             boolean result = waitForElementNotPresent(testObject, timeout, failureHandling);
             if (!result) {
-                throw new AssertionError("Element is still present: " + describe(testObject));
+                throw new StepFailedException("Element is still present: " + describe(testObject));
             }
             return true;
         } catch (Exception e) {
@@ -1047,7 +1047,7 @@ public class WebUI {
                 result = pageSource.contains(text);
             }
             if (!result) {
-                throw new AssertionError("Text '" + text + "' not found in page source");
+                throw new StepFailedException("Text '" + text + "' not found in page source");
             }
             return true;
         } catch (Exception e) {
@@ -1115,7 +1115,7 @@ public class WebUI {
                 result = actualText.equals(expectedText);
             }
             if (!result) {
-                throw new AssertionError("Expected text '" + expectedText + "' but got '" + actualText + "'");
+                throw new StepFailedException("Expected text '" + expectedText + "' but got '" + actualText + "'");
             }
             return true;
         } catch (Exception e) {
@@ -1140,7 +1140,7 @@ public class WebUI {
         try {
             String actualValue = getAttribute(testObject, attributeName, timeout);
             if (!expectedValue.equals(actualValue)) {
-                throw new AssertionError("Expected attribute '" + attributeName + "' value '" + expectedValue + 
+                throw new StepFailedException("Expected attribute '" + attributeName + "' value '" + expectedValue + 
                                        "' but got '" + actualValue + "'");
             }
             return true;
@@ -1164,7 +1164,7 @@ public class WebUI {
         try {
             WebElement element = waitForElement(testObject, timeout);
             if (!element.isSelected()) {
-                throw new AssertionError("Element is not checked: " + describe(testObject));
+                throw new StepFailedException("Element is not checked: " + describe(testObject));
             }
             return true;
         } catch (Exception e) {

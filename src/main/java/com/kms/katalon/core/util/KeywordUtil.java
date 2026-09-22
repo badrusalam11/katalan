@@ -18,14 +18,16 @@ public class KeywordUtil {
         logger.info("[PASSED] " + message);
     }
     
+    /** As in Katalon: the step fails but the test case keeps running, then ends FAILED. */
     public static void markFailed(String message) {
         logger.error("[FAILED] " + message);
-        throw new AssertionError(message);
+        com.katalan.core.context.ExecutionContext.getCurrent().recordContinuedFailure(message);
     }
-    
+
+    /** As in Katalon: fails and stops the current test case only - the suite continues. */
     public static void markFailedAndStop(String message) {
         logger.error("[FAILED & STOP] " + message);
-        throw new RuntimeException(message);
+        throw new com.kms.katalon.core.exception.StepFailedException(message);
     }
     
     public static void markWarning(String message) {

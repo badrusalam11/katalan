@@ -39,7 +39,8 @@ public class ExecutionContext {
     private String currentTestSuiteId;
     private Map<String, Object> properties;
     private boolean shouldStop;
-    
+    private final java.util.List<String> continuedFailures = new java.util.ArrayList<>();
+
     public ExecutionContext() {
         this.globalVariables = new HashMap<>();
         this.executionVariables = new HashMap<>();
@@ -181,6 +182,21 @@ public class ExecutionContext {
      */
     public boolean shouldStop() {
         return shouldStop;
+    }
+
+    /**
+     * Katalon's "mark failed and continue" (e.g. KeywordUtil.markFailed): the test case keeps
+     * running, but must end FAILED. The engine drains these when the script finishes.
+     */
+    public void recordContinuedFailure(String message) {
+        continuedFailures.add(message);
+    }
+
+    /** Returns the failures recorded since the last call, and clears them. */
+    public java.util.List<String> drainContinuedFailures() {
+        java.util.List<String> drained = new java.util.ArrayList<>(continuedFailures);
+        continuedFailures.clear();
+        return drained;
     }
     
     /**
