@@ -128,10 +128,16 @@ public class GroovyScriptExecutor {
             "com.katalan.keywords.KeywordUtil"
         );
         
-        // Katalon compatibility imports - core katalan classes
+        // Katalon compatibility imports - core katalan classes.
+        //
+        // WebUI and TestObject are deliberately NOT listed here. An explicit import in an
+        // ImportCustomizer outranks the script's own import, so listing them silently
+        // rebound `import ...WebUiBuiltInKeywords as WebUI` / `import ...testobject.TestObject`
+        // to the katalan-native classes - which changed a script's declared superclass
+        // (`class CSWeb extends WebUI`) and dropped every FailureHandling overload that only
+        // the kms stub defines. The star imports above still supply both types by default,
+        // and star imports correctly lose to a script's explicit import.
         importCustomizer.addImports(
-            "com.katalan.keywords.WebUI",
-            "com.katalan.core.model.TestObject",
             "com.kms.katalon.core.model.FailureHandling",
             "com.katalan.core.compat.GlobalVariable",
             "com.katalan.core.compat.TestCase",
@@ -194,6 +200,8 @@ public class GroovyScriptExecutor {
                 }
             }
             
+            addOrphanCompiledClasses(classLoader, projectPath);
+
             // Add JAR files from Drivers folder (custom libraries)
             Path driversPath = projectPath.resolve("Drivers");
             if (Files.exists(driversPath)) {
@@ -217,6 +225,64 @@ public class GroovyScriptExecutor {
         return new GroovyShell(classLoader, binding, config);
     }
     
+    /**
+     * Expose classes in the project's {@code bin/groovy} that no longer have a Groovy source,
+     * e.g. a keyword whose .groovy was deleted but whose compiled class Katalon Studio kept.
+     * Scripts still import those, and Katalon resolves them because it puts {@code bin/groovy}
+     * on the classpath wholesale.
+     *
+     * <p>We cannot do the same: GroovyClassLoader prefers a compiled class over a source file,
+     * so adding the whole directory would let stale classes shadow the preprocessed sources and
+     * silently undo preprocessing. Copying only the sourceless classes reproduces Katalon's net
+     * behaviour - it recompiles every live source into bin/groovy anyway, so there only the
+     * orphans are ever reached.
+     */
+    private void addOrphanCompiledClasses(GroovyClassLoader classLoader, Path projectPath) {
+        Path binGroovy = projectPath.resolve("bin").resolve("groovy");
+        if (!Files.isDirectory(binGroovy)) return;
+
+        try {
+            Path staging = Files.createTempDirectory("katalan-bin-groovy-");
+            staging.toFile().deleteOnExit();
+
+            int copied = 0;
+            try (java.util.stream.Stream<Path> stream = Files.walk(binGroovy)) {
+                for (Path cls : (Iterable<Path>) stream.filter(p -> p.toString().endsWith(".class"))::iterator) {
+                    Path relative = binGroovy.relativize(cls);
+                    if (hasGroovySource(projectPath, relative)) continue;
+
+                    Path dest = staging.resolve(relative.toString());
+                    Files.createDirectories(dest.getParent());
+                    Files.copy(cls, dest, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    dest.toFile().deleteOnExit();
+                    copied++;
+                }
+            }
+
+            if (copied > 0) {
+                classLoader.addClasspath(staging.toString());
+                logger.info("[startup] bin/groovy: exposed {} compiled class(es) with no Groovy source", copied);
+            }
+        } catch (Exception e) {
+            logger.warn("Could not expose bin/groovy compiled classes: {}", e.getMessage());
+        }
+    }
+
+    /** True when a .groovy source exists for this compiled class under Keywords/ or Include/scripts/groovy. */
+    private boolean hasGroovySource(Path projectPath, Path relativeClassFile) {
+        String name = relativeClassFile.toString().replace(java.io.File.separatorChar, '/');
+        name = name.substring(0, name.length() - ".class".length());
+
+        // Inner/closure classes (Foo$_bar_closure1) belong to their outer class's source.
+        int inner = name.indexOf('$');
+        if (inner >= 0) name = name.substring(0, inner);
+
+        String sourcePath = name + ".groovy";
+        return Files.exists(projectPath.resolve("Keywords").resolve(sourcePath))
+                || Files.exists(projectPath.resolve("Include").resolve("scripts")
+                        .resolve("groovy").resolve(sourcePath));
+    }
+
     /**
      * Load all JAR files from a directory into the classloader.
      * Duplicate JARs (same canonical path) are silently skipped and reported
