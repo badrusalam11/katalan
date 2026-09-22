@@ -45,19 +45,18 @@ public class KeywordUtil {
     }
     
     /**
-     * Mark current step as failed
+     * Mark current step as failed. As in Katalon, the test case keeps running and ends FAILED.
      */
     public static void markFailed(String message) {
         logger.error("[FAILED] {}", message);
-        throw new StepFailedException(message);
+        ExecutionContext.getCurrent().recordContinuedFailure(message);
     }
-    
+
     /**
-     * Mark current step as failed with exception
+     * Mark current step as failed and stop the current test case (the suite continues, as in Katalon).
      */
     public static void markFailedAndStop(String message) {
         logger.error("[FAILED AND STOP] {}", message);
-        ExecutionContext.getCurrent().requestStop();
         throw new StepFailedException(message);
     }
     
@@ -81,7 +80,6 @@ public class KeywordUtil {
      */
     public static void markErrorAndStop(String message) {
         logger.error("[ERROR AND STOP] {}", message);
-        ExecutionContext.getCurrent().requestStop();
         throw new StepFailedException(message);
     }
     
