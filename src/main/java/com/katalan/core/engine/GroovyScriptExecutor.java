@@ -5,6 +5,7 @@ import com.katalan.core.cache.CompiledScriptCache;
 import com.katalan.core.model.TestObject;
 import com.katalan.core.compat.FailureHandling;
 import com.katalan.core.compat.GlobalVariable;
+import com.katalan.core.compat.GroovySourcePreprocessor;
 import com.katalan.core.compat.TestCase;
 import com.katalan.keywords.KeywordUtil;
 import com.katalan.keywords.WebUI;
@@ -155,22 +156,39 @@ public class GroovyScriptExecutor {
         
         // Add custom keywords path if exists
         if (projectPath != null) {
+            // Preprocess Keywords/ so that when a test case transitively resolves keyword
+            // classes, the Groovy 4-compatible sources are used instead of the raw
+            // Katalon-era ones (which break on things like XmlSlurper or
+            // `((driver) as JavascriptExecutor)`). Mirrors TestListenerRegistry /
+            // KatalanBDDExecutor, which already do this - this path was missed.
             Path keywordsPath = projectPath.resolve("Keywords");
             if (Files.exists(keywordsPath)) {
+                Path keywordsClasspath = keywordsPath;
                 try {
-                    classLoader.addClasspath(keywordsPath.toString());
-                    logger.debug("Added Keywords path to classpath: {}", keywordsPath);
+                    keywordsClasspath = GroovySourcePreprocessor.createPreprocessedCopy(keywordsPath, "keywords");
+                } catch (Exception e) {
+                    logger.warn("Could not preprocess Keywords, using raw sources: {}", e.getMessage());
+                }
+                try {
+                    classLoader.addClasspath(keywordsClasspath.toString());
+                    logger.debug("Added Keywords path to classpath: {}", keywordsClasspath);
                 } catch (Exception e) {
                     logger.warn("Could not add Keywords path to classpath: {}", e.getMessage());
                 }
             }
-            
+
             // Add Include/scripts/groovy folder (shared groovy step-def/helper classes)
             Path includeGroovyPath = projectPath.resolve("Include").resolve("scripts").resolve("groovy");
             if (Files.exists(includeGroovyPath)) {
+                Path includeClasspath = includeGroovyPath;
                 try {
-                    classLoader.addClasspath(includeGroovyPath.toString());
-                    logger.debug("Added Include/scripts/groovy path to classpath: {}", includeGroovyPath);
+                    includeClasspath = GroovySourcePreprocessor.createPreprocessedCopy(includeGroovyPath, "include");
+                } catch (Exception e) {
+                    logger.warn("Could not preprocess Include/scripts/groovy, using raw sources: {}", e.getMessage());
+                }
+                try {
+                    classLoader.addClasspath(includeClasspath.toString());
+                    logger.debug("Added Include/scripts/groovy path to classpath: {}", includeClasspath);
                 } catch (Exception e) {
                     logger.warn("Could not add Include/scripts/groovy path to classpath: {}", e.getMessage());
                 }
