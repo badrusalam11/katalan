@@ -154,18 +154,65 @@ public class TestObject {
         this.properties = properties;
     }
     
-    public void addProperty(String key, String value) {
+    /**
+     * Katalon's TestObject.addProperty is a fluent builder - scripts rely on it returning
+     * the object itself (e.g. {@code new TestObject().addProperty('xpath', EQUALS, x)}).
+     * Returning void here would make that expression evaluate to null in Groovy.
+     */
+    public TestObject addProperty(String key, String value) {
         this.properties.put(key, value);
+        deriveSelectorFromProperties();
+        return this;
     }
 
-    public void addProperty(String name, com.kms.katalon.core.testobject.ConditionType conditionType, String value) {
-        this.properties.put(name, value);
+    public TestObject addProperty(String name, com.kms.katalon.core.testobject.ConditionType conditionType, String value) {
+        return addProperty(name, value);
     }
 
-    public void addProperty(String name, com.kms.katalon.core.testobject.ConditionType conditionType, String value, boolean isActive) {
+    public TestObject addProperty(String name, com.kms.katalon.core.testobject.ConditionType conditionType, String value, boolean isActive) {
         if (isActive) {
-            this.properties.put(name, value);
+            addProperty(name, value);
         }
+        return this;
+    }
+
+    /**
+     * Objects built in script code carry no selector - they only add an "xpath"/"css"/"id"
+     * property. Keywords read selectorMethod/selectorValue and cannot see the property map,
+     * so derive one. Mirrors the compat TestObject's precedence (xpath, then css, then id)
+     * and never overwrites a selector that was already set explicitly.
+     */
+    private void deriveSelectorFromProperties() {
+        if (selectorValue != null) return;
+
+        String xpath = findProperty("xpath");
+        if (xpath != null) {
+            setSelectorMethod(SelectorMethod.XPATH);
+            setSelectorValue(xpath);
+            return;
+        }
+        String css = findProperty("css");
+        if (css != null) {
+            setSelectorMethod(SelectorMethod.CSS);
+            setSelectorValue(css);
+            return;
+        }
+        String id = findProperty("id");
+        if (id != null) {
+            setSelectorMethod(SelectorMethod.ID);
+            setSelectorValue(id);
+        }
+    }
+
+    /** Value of the property with this name (case-insensitive), or null when absent/empty. */
+    private String findProperty(String name) {
+        for (Map.Entry<String, String> entry : properties.entrySet()) {
+            if (name.equalsIgnoreCase(entry.getKey())
+                    && entry.getValue() != null && !entry.getValue().isEmpty()) {
+                return entry.getValue();
+            }
+        }
+        return null;
     }
     
     public SelectorMethod getSelectorMethod() {
