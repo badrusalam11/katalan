@@ -94,6 +94,105 @@ public class WebUiBuiltInKeywords {
         }
     }
 
+    // ==================== Fallback to katalan's native WebUI ====================
+
+    /**
+     * Groovy invokes this for any static call that no overload on this class accepts - including
+     * calls made through a subclass such as a project's {@code class CSWeb extends WebUI}.
+     *
+     * <p>Scripts reach this class through {@code import ...WebUiBuiltInKeywords as WebUI}, which
+     * nearly every Katalon script carries. This stub declares fewer keywords than
+     * {@link WebUI} (e.g. verifyMatch, scrollToTop, cookies) and fewer overloads of shared ones
+     * (e.g. click(TestObject, int)), so forward anything it lacks instead of failing: the stub
+     * then never exposes less than the native implementation it wraps.
+     */
+    public static Object $static_methodMissing(String name, Object args) {
+        Object[] original = args instanceof Object[] ? (Object[]) args : new Object[]{args};
+        Object[] converted = new Object[original.length];
+        for (int i = 0; i < original.length; i++) {
+            converted[i] = original[i] instanceof TestObject ? toKatalan((TestObject) original[i]) : original[i];
+        }
+
+        try {
+            return org.codehaus.groovy.runtime.InvokerHelper.invokeStaticMethod(WebUI.class, name, converted);
+        } catch (groovy.lang.MissingMethodException e) {
+            if (!isMissingOnNativeWebUI(e, name)) throw e;
+        }
+
+        // Katalon allows a trailing FailureHandling on every keyword; the native overload set
+        // doesn't always have it. Call without it and apply its semantics here instead.
+        int last = converted.length - 1;
+        if (last >= 0 && converted[last] instanceof FailureHandling) {
+            FailureHandling fh = (FailureHandling) converted[last];
+            Object[] withoutFh = java.util.Arrays.copyOf(converted, last);
+            try {
+                return runObj(() -> org.codehaus.groovy.runtime.InvokerHelper
+                        .invokeStaticMethod(WebUI.class, name, withoutFh), fh, null);
+            } catch (groovy.lang.MissingMethodException e) {
+                if (!isMissingOnNativeWebUI(e, name)) throw e;
+            }
+        }
+
+        throw new groovy.lang.MissingMethodException(name, WebUiBuiltInKeywords.class, original, true);
+    }
+
+    /** Distinguishes "native WebUI has no such overload" from an MME raised inside the keyword. */
+    private static boolean isMissingOnNativeWebUI(groovy.lang.MissingMethodException e, String name) {
+        return name.equals(e.getMethod()) && e.getType() == WebUI.class;
+    }
+
+    private static boolean subclassForwardingInstalled;
+
+    static {
+        installSubclassForwarding();
+    }
+
+    /**
+     * Make {@link #$static_methodMissing} apply to project subclasses too
+     * ({@code class CSWeb extends WebUI}). Groovy does not inherit that hook for static calls, so
+     * {@code CSWeb.verifyMatch(..)} would still fail. Groovy resolves static calls through a class's
+     * metaclass, so subclasses get one that falls back to the hook; every other class keeps
+     * whatever metaclass the previous factory would have built.
+     *
+     * <p>Idempotent. Called from this class's initializer and at engine start-up, because a
+     * subclass's metaclass can be built before this class is initialized.
+     */
+    public static synchronized void installSubclassForwarding() {
+        if (subclassForwardingInstalled) return;
+        groovy.lang.MetaClassRegistry registry = groovy.lang.GroovySystem.getMetaClassRegistry();
+        final groovy.lang.MetaClassRegistry.MetaClassCreationHandle previous = registry.getMetaClassCreationHandler();
+
+        groovy.lang.MetaClassRegistry.MetaClassCreationHandle handle = new groovy.lang.MetaClassRegistry.MetaClassCreationHandle() {
+            @Override
+            protected groovy.lang.MetaClass createNormalMetaClass(Class theClass, groovy.lang.MetaClassRegistry reg) {
+                if (theClass != WebUiBuiltInKeywords.class && WebUiBuiltInKeywords.class.isAssignableFrom(theClass)) {
+                    return new SubclassMetaClass(reg, theClass);
+                }
+                return previous.create(theClass, reg);
+            }
+        };
+        // previous.create() already performs the custom-metaclass lookup; don't do it twice.
+        handle.setDisableCustomMetaClassLookup(true);
+        registry.setMetaClassCreationHandle(handle);
+        subclassForwardingInstalled = true;
+    }
+
+    private static final class SubclassMetaClass extends groovy.lang.MetaClassImpl {
+        SubclassMetaClass(groovy.lang.MetaClassRegistry registry, Class<?> theClass) {
+            super(registry, theClass);
+        }
+
+        @Override
+        public Object invokeStaticMethod(Object object, String methodName, Object[] arguments) {
+            try {
+                return super.invokeStaticMethod(object, methodName, arguments);
+            } catch (groovy.lang.MissingMethodException e) {
+                if (!methodName.equals(e.getMethod()) || e.getType() != getTheClass()) throw e;
+                return $static_methodMissing(methodName, arguments);
+            }
+        }
+    }
+
     // ==================== Browser Keywords ====================
     
     public static void openBrowser(String url) {

@@ -75,6 +75,11 @@ public class KatalanEngine {
         // Set context for ObjectRepository static methods
         com.katalan.core.compat.ObjectRepository.setContext(context);
 
+        // Before any project class is compiled: keywords missing from the WebUI stub must also
+        // resolve through project subclasses (CSWeb extends WebUI), whose metaclass is built on
+        // first use.
+        com.kms.katalon.core.webui.keyword.WebUiBuiltInKeywords.installSubclassForwarding();
+
         startupProfiler.begin("GroovyScriptExecutor.init");
         this.scriptExecutor = new GroovyScriptExecutor(context);
         startupProfiler.end("GroovyScriptExecutor.init");
