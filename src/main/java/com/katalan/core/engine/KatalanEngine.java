@@ -500,8 +500,16 @@ public class KatalanEngine {
         // This ensures each test case gets a fresh browser session:
         // TC1: openBrowser -> test steps -> @AfterTestCase -> close browser
         // TC2: openBrowser -> test steps -> @AfterTestCase -> close browser
-        logger.info("🔄 Clearing driver from context (ready for fresh browser in this test case)");
-        context.setWebDriver(null);
+        // Skipped when the project turns off "Terminate drivers after each Test Case":
+        // Katalon then keeps the browser so a test case can continue the previous one's
+        // session (openBrowser() still replaces it).
+        boolean quitDriverAfterTestCase = isQuitDriversAfterTestCase();
+        if (quitDriverAfterTestCase) {
+            logger.info("🔄 Clearing driver from context (ready for fresh browser in this test case)");
+            context.setWebDriver(null);
+        } else {
+            logger.info("🔄 Keeping browser from previous test case (quitDriversAfterExecutingTestCase=false)");
+        }
         
         int attempts = 0;
         int maxAttempts = config.getRetryFailedTests() + 1;
@@ -646,7 +654,7 @@ public class KatalanEngine {
         // TC1: openBrowser -> click -> close (GUARANTEED)
         // TC2: openBrowser -> click -> close (GUARANTEED)
         try {
-            WebDriver driver = context.getWebDriver();
+            WebDriver driver = quitDriverAfterTestCase ? context.getWebDriver() : null;
             if (driver != null) {
                 try {
                     logger.info("🔒 Closing browser after test case: {}", testCase.getName());
@@ -737,7 +745,37 @@ public class KatalanEngine {
     /**
      * Handle test case failure
      */
-    private void handleTestFailure(TestCase testCase, TestCaseResult result, 
+    private Boolean quitDriversAfterTestCase;
+
+    /**
+     * Katalon's "Terminate drivers after each Test Case" project setting
+     * ({@code execution.default.quitDriversAfterExecutingTestCase}). Defaults to true
+     * (katalan's per-test-case browser) when the project does not set it.
+     */
+    private boolean isQuitDriversAfterTestCase() {
+        if (quitDriversAfterTestCase == null) {
+            quitDriversAfterTestCase = true;
+            Path projectPath = config.getProjectPath();
+            Path settings = projectPath == null ? null
+                    : projectPath.resolve("settings/internal/com.kms.katalon.execution.properties");
+            if (settings != null && Files.exists(settings)) {
+                java.util.Properties props = new java.util.Properties();
+                try (java.io.Reader reader = Files.newBufferedReader(settings)) {
+                    props.load(reader);
+                    String value = props.getProperty("execution.default.quitDriversAfterExecutingTestCase");
+                    if (value != null) {
+                        quitDriversAfterTestCase = Boolean.parseBoolean(value.trim().replace("\"", ""));
+                    }
+                } catch (IOException e) {
+                    logger.warn("Could not read {}: {}", settings, e.getMessage());
+                }
+            }
+            logger.info("quitDriversAfterExecutingTestCase = {}", quitDriversAfterTestCase);
+        }
+        return quitDriversAfterTestCase;
+    }
+
+    private void handleTestFailure(TestCase testCase, TestCaseResult result,
                                     Throwable e, int attempt, int maxAttempts) {
         String errorMessage = e.getMessage();
         String stackTrace = getStackTraceString(e);

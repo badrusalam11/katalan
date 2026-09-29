@@ -81,18 +81,21 @@ public class ObjectRepositoryParser {
             String bestSelector = null;
             TestObject.SelectorMethod bestMethod = null;
             int priority = Integer.MAX_VALUE;
-            
+            BasicXPathBuilder basicXPath = new BasicXPathBuilder();
+            boolean basicSupported = true;
+
             for (int i = 0; i < webElementProps.getLength(); i++) {
                 Element prop = (Element) webElementProps.item(i);
                 String propName = getElementText(prop, "name");
                 String propValue = getElementText(prop, "value");
                 String isSelected = getElementText(prop, "isSelected");
-                
+
                 if (propName != null && propValue != null) {
                     testObject.addProperty(propName, propValue);
-                    
+
                     // Only use selected properties for locators
                     if ("true".equalsIgnoreCase(isSelected)) {
+                        basicSupported &= basicXPath.add(propName, getElementText(prop, "matchCondition"), propValue);
                         // Priority: id > name > xpath > css > others
                         int currentPriority = getPropertyPriority(propName);
                         if (currentPriority < priority) {
@@ -104,6 +107,13 @@ public class ObjectRepositoryParser {
                 }
             }
             
+            // BASIC mode: Katalon locates by the selected properties, not by the
+            // selectorCollection entries (which often hold a stale generated id)
+            if ("BASIC".equalsIgnoreCase(selectionMethod) && basicSupported && !basicXPath.isEmpty()) {
+                testObject.setSelectorMethod(TestObject.SelectorMethod.XPATH);
+                testObject.setSelectorValue(basicXPath.build());
+            }
+
             // Set the best selector if found and not already set
             if (testObject.getSelectorValue() == null && bestSelector != null) {
                 testObject.setSelectorMethod(bestMethod);
