@@ -1932,7 +1932,8 @@ public class WebUI {
         
         // Element not immediately available, use WebDriverWait with fast polling
         // Use 50ms polling for faster detection (was 100ms)
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(50));
+        // timeout=0 means "default timeout" in Katalon (e.g. scrollToElement(obj, 0))
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(normalizeTimeout(timeout)), Duration.ofMillis(50));
         
         // Wait for presence with auto-retry on stale elements
         return wait.until(driver1 -> {
