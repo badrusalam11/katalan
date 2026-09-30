@@ -354,6 +354,8 @@ public class TestSuiteParser {
         for (Path path : testCasePaths) {
             TestCase testCase = new TestCase();
             testCase.setName(path.getFileName().toString().replace(".groovy", ""));
+            // Standalone -tc scripts have no .tc file; the engine still needs an ID
+            testCase.setId("Test Cases/" + testCase.getName());
             testCase.setScriptPath(path);
             testCase.setScriptContent(Files.readString(path));
             suite.addTestCase(testCase);
