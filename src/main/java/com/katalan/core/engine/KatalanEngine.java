@@ -173,8 +173,19 @@ public class KatalanEngine {
                 profilePath = profilesPath.resolve(profileName);
             }
             
+            // Katalon's generated internal.GlobalVariable loads the default profile first
+            // and overlays the selected one, so variables defined only in default.glbl
+            // (e.g. sheetId, keyPath) still exist when running with another profile
+            Map<String, Object> variables = new LinkedHashMap<>();
+            Path defaultProfilePath = profilesPath.resolve("default.glbl");
+            if (!"default".equals(profileName) && Files.exists(defaultProfilePath)) {
+                variables.putAll(GlobalVariableLoader.loadFromProfile(defaultProfilePath));
+            }
             if (Files.exists(profilePath)) {
-                Map<String, Object> variables = GlobalVariableLoader.loadFromProfile(profilePath);
+                variables.putAll(GlobalVariableLoader.loadFromProfile(profilePath));
+            }
+
+            if (!variables.isEmpty()) {
                 GlobalVariable.loadAll(variables);
                 
                 // Also add to script executor binding

@@ -162,6 +162,8 @@ public class KatalanCLI implements Callable<Integer> {
         
         // Capture all unmatched options starting with -g_ for GlobalVariable overrides
         // Example: -g_nama_tester=John will set GlobalVariable.nama_tester = "John"
+        // Options starting with -D become JVM system properties (like katalonc -Denv=UAT)
+        // Example: -Dnama_tester=John makes System.getProperty('nama_tester') return "John"
         @CommandLine.Unmatched
         private List<String> unmatchedOptions;
         
@@ -179,6 +181,9 @@ public class KatalanCLI implements Callable<Integer> {
             printBanner();
             
             try {
+                // Apply -D* parameters as System properties before any script is compiled/run
+                applySystemPropertyOverrides();
+
                 // Process GlobalVariable overrides from -g_* parameters
                 // Save them to re-apply after engine initialization
                 Map<String, Object> globalVarOverrides = processGlobalVariableOverrides();
@@ -479,6 +484,33 @@ public class KatalanCLI implements Callable<Integer> {
             System.out.println();
         }
         
+        /**
+         * Apply System property overrides from CLI parameters, like katalonc -Dkey=value.
+         * Supports format: -Dkey=value (and -Dkey, which sets an empty string like the JVM does)
+         * Example: -Denv=UAT makes System.getProperty('env') return "UAT" in test scripts
+         */
+        private void applySystemPropertyOverrides() {
+            if (unmatchedOptions == null || unmatchedOptions.isEmpty()) {
+                return;
+            }
+
+            for (String option : unmatchedOptions) {
+                if (!option.startsWith("-D") || option.length() <= 2) {
+                    continue;
+                }
+                String[] parts = option.substring(2).split("=", 2);
+                String key = parts[0];
+                String value = parts.length == 2 ? parts[1] : "";
+                if (key.isEmpty()) {
+                    System.err.println("⚠️  Warning: Invalid format for -D parameter: " + option);
+                    System.err.println("    Expected format: -Dkey=value");
+                    continue;
+                }
+                System.setProperty(key, value);
+                System.out.println("📝 System.getProperty('" + key + "') = \"" + value + "\"");
+            }
+        }
+
         /**
          * Process GlobalVariable overrides from CLI parameters
          * Supports format: -g_variableName=value
