@@ -972,7 +972,7 @@ public class KatalonReportGenerator {
         drivers.put("preferences", driversPrefs);
         execution.put("drivers", drivers);
         
-        execution.put("globalSmartWaitEnabled", false);
+        execution.put("globalSmartWaitEnabled", com.katalan.core.driver.SmartWait.isGloballyEnabled());
         execution.put("smartLocatorEnabled", false);
         execution.put("smartLocatorSettingDefaultEnabled", true);
         execution.put("logTestSteps", true);

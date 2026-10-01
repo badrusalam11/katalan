@@ -489,7 +489,10 @@ public class KatalanBDDExecutor {
         int stepIndex = 0;
         Exception failedException = null;
         boolean scenarioFailed = false;
-        
+
+        // Fresh step-definition instances per scenario (Cucumber semantics)
+        stepInstances.clear();
+
         for (Step step : scenario.steps) {
             Map<String, Object> stepData;
             
@@ -605,7 +608,7 @@ public class KatalanBDDExecutor {
         
         try {
             // Invoke the step definition method
-            match.invoke();
+            match.invoke(stepInstances);
             
             kwLogger.endBddStep(step.keyword, stepName);
             
@@ -1303,14 +1306,23 @@ public class KatalanBDDExecutor {
             this.parameters = parameters;
         }
         
-        void invoke() throws Exception {
+        /**
+         * @param scenarioInstances glue instances of the running scenario, keyed by class name.
+         *        As in Cucumber, every step of one class within a scenario runs on the same
+         *        instance (a @Given storing a field is read back by the @When), and the next
+         *        scenario starts with fresh instances.
+         */
+        void invoke(Map<String, Object> scenarioInstances) throws Exception {
             Object target = definition.instance;
+            if (target == null && definition.ownerClass != null) {
+                target = scenarioInstances.get(definition.ownerClass.getName());
+            }
             if (target == null && definition.ownerClass != null) {
                 // Lazy instantiation: only create when the step is actually executed,
                 // so that GlobalVariables/profiles are already initialized.
                 try {
                     target = definition.ownerClass.getDeclaredConstructor().newInstance();
-                    definition.instance = target; // cache for next invocations
+                    scenarioInstances.put(definition.ownerClass.getName(), target);
                 } catch (Throwable t) {
                     Throwable root = t;
                     while (root.getCause() != null) root = root.getCause();

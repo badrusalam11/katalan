@@ -203,22 +203,22 @@ public class WebUiBuiltInKeywords {
         runVoid(() -> WebUI.openBrowser(url), flowControl);
     }
 
-    // ==================== Smart Wait (Katalon-specific, no-op in Katalan) ====================
+    // ==================== Smart Wait ====================
 
     public static void enableSmartWait() {
-        logger.debug("enableSmartWait() called - no-op in Katalan compatibility layer");
+        WebUI.enableSmartWait();
     }
 
     public static void enableSmartWait(FailureHandling flowControl) {
-        logger.debug("enableSmartWait(flowControl) called - no-op in Katalan compatibility layer");
+        runVoid(() -> WebUI.enableSmartWait(), flowControl);
     }
 
     public static void disableSmartWait() {
-        logger.debug("disableSmartWait() called - no-op in Katalan compatibility layer");
+        WebUI.disableSmartWait();
     }
 
     public static void disableSmartWait(FailureHandling flowControl) {
-        logger.debug("disableSmartWait(flowControl) called - no-op in Katalan compatibility layer");
+        runVoid(() -> WebUI.disableSmartWait(), flowControl);
     }
     
     public static void closeBrowser() {
@@ -357,8 +357,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void setEncryptedText(TestObject to, String encryptedText) {
-        logNotSupported("setEncryptedText");
-        WebUI.setText(toKatalan(to), encryptedText);
+        WebUI.setEncryptedText(toKatalan(to), encryptedText);
     }
     
     public static void setEncryptedText(TestObject to, String encryptedText, FailureHandling flowControl) {
