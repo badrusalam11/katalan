@@ -291,7 +291,8 @@ public class KatalanEngine {
         
         // ----- Test Listener: @BeforeTestSuite / @SetUp -----
         com.kms.katalon.core.context.TestSuiteContext suiteCtx =
-                new com.kms.katalon.core.context.TestSuiteContext("Test Suites/" + suite.getName());
+                new com.kms.katalon.core.context.TestSuiteContext("Test Suites/"
+                        + (suite.getId() != null ? suite.getId() : suite.getName()));
         suiteCtx.setTestSuiteStatus("RUNNING");
         if (absReportFolder != null) {
             suiteCtx.setReportLocation(absReportFolder);
@@ -652,7 +653,12 @@ public class KatalanEngine {
         
         // ----- Test Listener: @AfterTestCase / @TearDownTestCase -----
         tcCtx.setTestCaseStatus(String.valueOf(result.getStatus()));
-        tcCtx.setMessage(result.getErrorMessage());
+        // Katalon hands listeners the same "<id> FAILED.\nReason:\n<stack trace>" text it logs
+        boolean failed = result.getStatus() == TestCase.TestCaseStatus.FAILED
+                || result.getStatus() == TestCase.TestCaseStatus.ERROR;
+        tcCtx.setMessage(failed && result.getStackTrace() != null
+                ? KatalonStepFailure.testCaseFailedMessage(testCase.getId(), result.getStackTrace())
+                : result.getErrorMessage());
         try {
             listenerRegistry.invokeAfterTestCase(tcCtx);
         } catch (Exception e) {
@@ -788,6 +794,7 @@ public class KatalanEngine {
 
     private void handleTestFailure(TestCase testCase, TestCaseResult result,
                                     Throwable e, int attempt, int maxAttempts) {
+        e = KatalonStepFailure.unwrap(e);
         String errorMessage = e.getMessage();
         String stackTrace = getStackTraceString(e);
         
@@ -814,6 +821,7 @@ public class KatalanEngine {
      */
     private void handleTestError(TestCase testCase, TestCaseResult result, 
                                   Throwable e, int attempt, int maxAttempts) {
+        e = KatalonStepFailure.unwrap(e);
         String errorMessage = e.getMessage();
         String stackTrace = getStackTraceString(e);
         
@@ -875,14 +883,9 @@ public class KatalanEngine {
     private void logTestCaseFailure(TestCase testCase, Throwable e, String errorMessage, String stackTrace) {
         XmlKeywordLogger xmlLogger = XmlKeywordLogger.getInstance();
         
-        // Build failure message (Katalon format: "Test Cases/XXX FAILED.\nReason:\n{exception}")
-        StringBuilder failureMessage = new StringBuilder();
-        failureMessage.append(testCase.getId()).append(" FAILED.\n");
-        failureMessage.append("Reason:\n");
-        failureMessage.append(errorMessage);
-        if (stackTrace != null && !stackTrace.isEmpty()) {
-            failureMessage.append("\n").append(stackTrace);
-        }
+        // Katalon format: "Test Cases/XXX FAILED.\nReason:\n{stack trace}" (the trace starts with the exception)
+        String failureMessage = KatalonStepFailure.testCaseFailedMessage(testCase.getId(),
+                stackTrace != null && !stackTrace.isEmpty() ? stackTrace : String.valueOf(errorMessage));
         
         // Build properties for FAILED record
         Map<String, String> props = new LinkedHashMap<>();
@@ -891,7 +894,7 @@ public class KatalanEngine {
         props.put("failed.exception.stacktrace", stackTrace != null ? stackTrace : "");
         
         // Log FAILED record (nested level 0 for test case level)
-        xmlLogger.logMessage("FAILED", failureMessage.toString(), props);
+        xmlLogger.logMessage("FAILED", failureMessage, props);
     }
     
     /**

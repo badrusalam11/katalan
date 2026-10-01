@@ -198,6 +198,20 @@ public class RunConfiguration {
     }
     
     /**
+     * Name of the Katalon {@code WebUIDriverType} constant for the configured browser, e.g.
+     * {@code CHROME_DRIVER}, or {@code HEADLESS_DRIVER} for headless Chrome.
+     */
+    public static String getKatalonWebUIDriverType() {
+        boolean headless = isHeadless();
+        switch (getBrowserType()) {
+            case "FIREFOX": return headless ? "FIREFOX_HEADLESS_DRIVER" : "FIREFOX_DRIVER";
+            case "EDGE":    return "EDGE_CHROMIUM_DRIVER";
+            case "SAFARI":  return "SAFARI_DRIVER";
+            default:        return headless ? "HEADLESS_DRIVER" : "CHROME_DRIVER";
+        }
+    }
+
+    /**
      * Get the host operating system
      */
     public static String getHostOS() {
@@ -330,9 +344,12 @@ public class RunConfiguration {
         Map<String, Object> webUI = new HashMap<>();
         Map<String, Object> mobile = new HashMap<>();
 
-        // Set browser type for WebUI
-        String browserType = getBrowserType();
-        webUI.put("browserType", browserType);
+        // Katalon reports the WebUIDriverType constant name here (CHROME_DRIVER, HEADLESS_DRIVER, ...),
+        // not katalan's own enum name; listeners such as Actmov3 map these exact strings to a platform
+        // and only take a failure screenshot when it is a browser. A mobile run has no WebUI entry.
+        if (!isMobileMode()) {
+            webUI.put("browserType", getKatalonWebUIDriverType());
+        }
 
         // Populate Mobile driver details from the live session, if one is active.
         // Scripts like brimerchant's report generator read

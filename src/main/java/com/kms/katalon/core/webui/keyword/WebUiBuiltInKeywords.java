@@ -1,5 +1,6 @@
 package com.kms.katalon.core.webui.keyword;
 
+import com.katalan.core.engine.KatalonStepFailure;
 import com.katalan.keywords.WebUI;
 import com.kms.katalon.core.model.FailureHandling;
 import com.katalan.core.context.ExecutionContext;
@@ -154,6 +155,10 @@ public class WebUiBuiltInKeywords {
      * metaclass, so subclasses get one that falls back to the hook; every other class keeps
      * whatever metaclass the previous factory would have built.
      *
+     * <p>This class, katalan's native {@link WebUI} and their subclasses also get
+     * {@link KatalonFailureMetaClass}, so a keyword failing from a script reports Katalon's
+     * StepFailedException text (see {@link KatalonStepFailure}).
+     *
      * <p>Idempotent. Called from this class's initializer and at engine start-up, because a
      * subclass's metaclass can be built before this class is initialized.
      */
@@ -166,7 +171,11 @@ public class WebUiBuiltInKeywords {
             @Override
             protected groovy.lang.MetaClass createNormalMetaClass(Class theClass, groovy.lang.MetaClassRegistry reg) {
                 if (theClass != WebUiBuiltInKeywords.class && WebUiBuiltInKeywords.class.isAssignableFrom(theClass)) {
-                    return new SubclassMetaClass(reg, theClass);
+                    return new KatalonFailureMetaClass(new SubclassMetaClass(reg, theClass));
+                }
+                // Test case scripts reach katalan's native WebUI directly (their import is rewritten)
+                if (WebUiBuiltInKeywords.class.isAssignableFrom(theClass) || WebUI.class.isAssignableFrom(theClass)) {
+                    return new KatalonFailureMetaClass(previous.create(theClass, reg));
                 }
                 return previous.create(theClass, reg);
             }
@@ -174,7 +183,31 @@ public class WebUiBuiltInKeywords {
         // previous.create() already performs the custom-metaclass lookup; don't do it twice.
         handle.setDisableCustomMetaClassLookup(true);
         registry.setMetaClassCreationHandle(handle);
+        // Both metaclasses may already exist (this class's always does by its initializer); rebuild them.
+        registry.removeMetaClass(WebUiBuiltInKeywords.class);
+        registry.removeMetaClass(WebUI.class);
         subclassForwardingInstalled = true;
+    }
+
+    /**
+     * Not a MetaClassImpl, so Groovy dispatches every static call through
+     * {@link #invokeStaticMethod} instead of binding call sites straight to the Java method.
+     */
+    private static final class KatalonFailureMetaClass extends groovy.lang.DelegatingMetaClass {
+        KatalonFailureMetaClass(groovy.lang.MetaClass delegate) {
+            super(delegate);
+        }
+
+        @Override
+        public Object invokeStaticMethod(Object object, String methodName, Object[] arguments) {
+            try {
+                return super.invokeStaticMethod(object, methodName, arguments);
+            } catch (VirtualMachineError e) {
+                throw e;
+            } catch (Throwable t) {
+                throw KatalonStepFailure.forKeyword(methodName, arguments, t);
+            }
+        }
     }
 
     private static final class SubclassMetaClass extends groovy.lang.MetaClassImpl {

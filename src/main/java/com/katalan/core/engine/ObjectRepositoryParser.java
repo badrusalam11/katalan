@@ -24,6 +24,23 @@ public class ObjectRepositoryParser {
     private static final Logger logger = LoggerFactory.getLogger(ObjectRepositoryParser.class);
     
     /**
+     * Katalon's object id is the file's path under the project's Object Repository folder,
+     * e.g. {@code Object Repository/Page_Login/btn_Login}; keyword failure messages quote it.
+     */
+    static String objectIdOf(Path rsFile, String fallback) {
+        Path file = rsFile.toAbsolutePath().normalize();
+        Path repositoryRoot = null;
+        for (Path p = file.getParent(); p != null; p = p.getParent()) {
+            if (p.getFileName() != null && "Object Repository".equals(p.getFileName().toString())) {
+                repositoryRoot = p; // keep walking: the outermost one is the project's
+            }
+        }
+        if (repositoryRoot == null) return fallback;
+        String relative = repositoryRoot.relativize(file).toString().replace('\\', '/');
+        return "Object Repository/" + relative.substring(0, relative.length() - ".rs".length());
+    }
+
+    /**
      * Parse a Katalon test object file (.rs)
      */
     public static TestObject parseTestObject(Path path) throws IOException {
@@ -41,7 +58,7 @@ public class ObjectRepositoryParser {
             // Get name
             String name = getElementText(root, "name");
             testObject.setName(name);
-            testObject.setObjectId(name);
+            testObject.setObjectId(objectIdOf(path, name));
             
             // Parse selection method
             String selectionMethod = getElementText(root, "selectorMethod");
