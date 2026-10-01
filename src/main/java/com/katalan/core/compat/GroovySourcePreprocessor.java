@@ -93,11 +93,10 @@ public class GroovySourcePreprocessor {
             "$1// import groovy.inspect.swingui.$2 - not bundled"
         );
 
-        // Old apache commons lang (use lang3 instead) - often not available
-        result = result.replaceAll(
-            "(?m)^(\\s*)import\\s+org\\.apache\\.commons\\.lang\\.([A-Z][A-Za-z0-9_.]*)",
-            "$1// import org.apache.commons.lang.$2 - not available"
-        );
+        // NOTE: org.apache.commons.lang.* (commons-lang 2.x) used to be commented out here.
+        // Katalon Studio ships commons-lang 2.x and katalan now bundles it too, so stripping
+        // the import only turned `RandomStringUtils.randomNumeric(..)` into a runtime
+        // "No such property: RandomStringUtils" failure.
 
         // ----------------------------------------------------------------------
         // NOTE: We intentionally DO NOT rewrite com.kms.katalon.core.* imports

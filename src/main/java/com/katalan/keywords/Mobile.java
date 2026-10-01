@@ -401,6 +401,10 @@ public class Mobile {
 
     public static void setText(TestObject testObject, String text, int timeout) {
         logger.info("Setting text on: {} = '{}'", describe(testObject), text);
+        typeText(testObject, text, timeout);
+    }
+
+    private static void typeText(TestObject testObject, String text, int timeout) {
         WebElement element = waitForElement(testObject, timeout);
         try {
             element.clear();
@@ -411,8 +415,9 @@ public class Mobile {
     }
 
     public static void setEncryptedText(TestObject testObject, String encryptedText, int timeout) {
-        // No real encryption support in katalan - treat the same as plain setText.
-        setText(testObject, encryptedText, timeout);
+        // Same Katalon Studio encryption as WebUI.setEncryptedText; plain text is never logged.
+        logger.info("Setting encrypted text on: {} = '{}'", describe(testObject), encryptedText);
+        typeText(testObject, com.kms.katalon.util.CryptoUtil.decode(encryptedText), timeout);
     }
 
     public static void clearText(TestObject testObject, int timeout) {

@@ -241,6 +241,36 @@
             <artifactId>org.eclipse.osgi</artifactId>
             <version>3.24.300</version>
         </dependency>
+
+        <!-- Libraries Katalon Studio ships on its script classpath, so project scripts
+             import them freely (e.g. esb-msr's BDD step definitions):
+             - commons-lang 2.x: org.apache.commons.lang.RandomStringUtils / math.RandomUtils
+             - jaxb-api: javax.xml.bind.DatatypeConverter (removed from the JDK in 11)
+             - google-oauth-client: com.google.api.client.auth.openidconnect.IdToken -->
+        <dependency>
+            <groupId>commons-lang</groupId>
+            <artifactId>commons-lang</artifactId>
+            <version>2.6</version>
+        </dependency>
+        <dependency>
+            <groupId>javax.xml.bind</groupId>
+            <artifactId>jaxb-api</artifactId>
+            <version>2.3.1</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.oauth-client</groupId>
+            <artifactId>google-oauth-client</artifactId>
+            <version>1.34.1</version>
+        </dependency>
+
+        <!-- HTTP client behind WS.sendRequest (com.katalan.keywords.WebService). Already
+             pulled in transitively; declared so the web service engine doesn't depend on
+             another library's dependency choices. -->
+        <dependency>
+            <groupId>org.apache.httpcomponents.client5</groupId>
+            <artifactId>httpclient5</artifactId>
+            <version>5.2.1</version>
+        </dependency>
     </dependencies>
 
     <build>

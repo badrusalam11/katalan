@@ -1,6 +1,7 @@
 package com.katalan.keywords;
 
 import com.katalan.core.context.ExecutionContext;
+import com.katalan.core.driver.SmartWait;
 import com.katalan.core.model.TestObject;
 import com.katalan.core.exception.StepFailedException;
 import org.openqa.selenium.*;
@@ -135,18 +136,18 @@ public class WebUI {
         }
     }
 
-    // ==================== Smart Wait (no-op stubs) ====================
+    // ==================== Smart Wait ====================
     public static void enableSmartWait() {
-        logger.debug("enableSmartWait() called - no-op");
+        SmartWait.setLocalEnabled(true);
     }
     public static void enableSmartWait(Object flowControl) {
-        logger.debug("enableSmartWait(flowControl) called - no-op");
+        enableSmartWait();
     }
     public static void disableSmartWait() {
-        logger.debug("disableSmartWait() called - no-op");
+        SmartWait.setLocalEnabled(false);
     }
     public static void disableSmartWait(Object flowControl) {
-        logger.debug("disableSmartWait(flowControl) called - no-op");
+        disableSmartWait();
     }
     
     /**
@@ -255,7 +256,7 @@ public class WebUI {
     public static void click(TestObject testObject, int timeout) {
         logger.info("Clicking on: {}", describe(testObject));
         WebDriver driver = getDriver();
-        By by = testObject.toSeleniumBy();
+        By by = smartLocator(testObject);
         
         // Retry mechanism for stale element reference
         int maxRetries = 3;
@@ -372,6 +373,23 @@ public class WebUI {
      */
     public static void setText(TestObject testObject, String text, int timeout) {
     logger.info("Setting text '{}' to: {}", text, describe(testObject));
+        typeText(testObject, text, timeout);
+    }
+
+    /**
+     * Decrypt text encrypted by Katalon Studio (Tools > Encrypt Text) and set it like
+     * setText. The plain text is never logged.
+     */
+    public static void setEncryptedText(TestObject testObject, String encryptedText) {
+        setEncryptedText(testObject, encryptedText, 30);
+    }
+
+    public static void setEncryptedText(TestObject testObject, String encryptedText, int timeout) {
+        logger.info("Setting encrypted text '{}' to: {}", encryptedText, describe(testObject));
+        typeText(testObject, com.kms.katalon.util.CryptoUtil.decode(encryptedText), timeout);
+    }
+
+    private static void typeText(TestObject testObject, String text, int timeout) {
         WebElement element = waitForElement(testObject, timeout);
         try {
             element.clear();
@@ -714,7 +732,7 @@ public class WebUI {
         logger.info("Waiting for element present: {} (timeout={}s)", describe(testObject), timeout);
         try {
             WebDriver driver = getDriver();
-            By locator = testObject.toSeleniumBy();
+            By locator = smartLocator(testObject);
             
             // Use 50ms polling for fast detection (consistent with waitForElement)
             WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(50));
@@ -760,7 +778,7 @@ public class WebUI {
         logger.info("Waiting for element visible: {} (timeout={}s)", describe(testObject), timeout);
         try {
             WebDriver driver = getDriver();
-            By locator = testObject.toSeleniumBy();
+            By locator = smartLocator(testObject);
             
             // Use 50ms polling for fast detection (consistent with waitForElement)
             WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(50));
@@ -806,7 +824,7 @@ public class WebUI {
         logger.info("Waiting for element clickable: {} (timeout={}s)", describe(testObject), timeout);
         try {
             WebDriver driver = getDriver();
-            By locator = testObject.toSeleniumBy();
+            By locator = smartLocator(testObject);
             
             // Use 50ms polling for fast detection (consistent with waitForElement)
             WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(50));
@@ -852,7 +870,7 @@ public class WebUI {
         logger.info("Waiting for element not present: {} (timeout={}s)", testObject.getName(), timeout);
         try {
             WebDriver driver = getDriver();
-            By locator = testObject.toSeleniumBy();
+            By locator = smartLocator(testObject);
             
             // OPTIMIZATION: Quick check if element already not present
             try {
@@ -1918,7 +1936,7 @@ public class WebUI {
      */
     private static WebElement waitForElement(TestObject testObject, int timeout) {
         WebDriver driver = getDriver();
-        By locator = testObject.toSeleniumBy();
+        By locator = smartLocator(testObject);
         
         // OPTIMIZATION: Quick check if element already present
         // This avoids creating WebDriverWait when element is already there
@@ -1947,11 +1965,20 @@ public class WebUI {
     }
     
     private static WebElement findElement(TestObject testObject) {
-        return getDriver().findElement(testObject.toSeleniumBy());
+        return getDriver().findElement(smartLocator(testObject));
     }
     
     private static List<WebElement> findElements(TestObject testObject) {
-        return getDriver().findElements(testObject.toSeleniumBy());
+        return getDriver().findElements(smartLocator(testObject));
+    }
+
+    /**
+     * Locator for a keyword's element lookup, after Katalon's smart wait (pending AJAX done,
+     * DOM settled) - Katalon runs it before every element lookup a keyword makes.
+     */
+    private static By smartLocator(TestObject testObject) {
+        SmartWait.doSmartWait(getDriver());
+        return testObject.toSeleniumBy();
     }
     
     private static String getScreenshotPath() {
@@ -2022,7 +2049,7 @@ public class WebUI {
     public static void enhancedClick(TestObject testObject, int timeout) {
         logger.info("Enhanced clicking on: {}", describe(testObject));
         WebDriver driver = getDriver();
-        By by = testObject.toSeleniumBy();
+        By by = smartLocator(testObject);
         
         int maxRetries = 3;
         for (int i = 0; i < maxRetries; i++) {
@@ -2322,7 +2349,7 @@ public class WebUI {
         logger.info("Verifying element is NOT visible: {}", describe(testObject));
         try {
             WebDriver driver = getDriver();
-            By by = testObject.toSeleniumBy();
+            By by = smartLocator(testObject);
             
             try {
                 WebElement element = driver.findElement(by);
@@ -2435,7 +2462,7 @@ public class WebUI {
         logger.info("Waiting for element to be NOT clickable: {} (timeout={}s)", describe(testObject), timeout);
         try {
             WebDriver driver = getDriver();
-            By by = testObject.toSeleniumBy();
+            By by = smartLocator(testObject);
             WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(100));
             
             wait.until(webDriver -> {
@@ -2477,7 +2504,7 @@ public class WebUI {
         logger.info("Waiting for element to NOT have attribute '{}': {} (timeout={}s)", attributeName, describe(testObject), timeout);
         try {
             WebDriver driver = getDriver();
-            By by = testObject.toSeleniumBy();
+            By by = smartLocator(testObject);
             WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(100));
             
             wait.until(webDriver -> {
@@ -2523,7 +2550,7 @@ public class WebUI {
         logger.info("Waiting for element to be NOT visible: {} (timeout={}s)", describe(testObject), timeout);
         try {
             WebDriver driver = getDriver();
-            By by = testObject.toSeleniumBy();
+            By by = smartLocator(testObject);
             WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(100));
             
             wait.until(ExpectedConditions.invisibilityOfElementLocated(by));

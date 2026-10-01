@@ -45,7 +45,8 @@ public class WebDriverFactory {
                 configureDriver(driver, config);
             }
         }
-        
+
+        SmartWait.install(driver);
         return driver;
     }
     
