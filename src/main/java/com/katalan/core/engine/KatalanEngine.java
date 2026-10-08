@@ -82,6 +82,11 @@ public class KatalanEngine {
 
         startupProfiler.begin("GroovyScriptExecutor.init");
         this.scriptExecutor = new GroovyScriptExecutor(context);
+        // Default executor for WebUI.callTestCase. Without this, callTestCase from
+        // suite hooks/listeners/keywords (e.g. QIM suites: @BeforeTestSuite ->
+        // LoginKeywords.login -> '00 - Open Browser') fails with "no executor available"
+        // because findTestCase there is the static TestCaseFactory import.
+        context.setProperty("executor", scriptExecutor);
         startupProfiler.end("GroovyScriptExecutor.init");
 
         this.suiteParser = new TestSuiteParser(config.getProjectPath());
