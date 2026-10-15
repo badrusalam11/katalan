@@ -216,6 +216,13 @@
             <version>4.13.2</version>
         </dependency>
 
+        <!-- AssertJ (bundled by Katalon Studio, imported by some scripts) -->
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <version>3.24.2</version>
+        </dependency>
+
         <!-- JNA platform utilities (used by AS400Connection etc.) -->
         <dependency>
             <groupId>net.java.dev.jna</groupId>

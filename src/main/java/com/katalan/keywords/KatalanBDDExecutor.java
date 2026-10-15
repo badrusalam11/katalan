@@ -45,8 +45,12 @@ public class KatalanBDDExecutor {
     private final Path projectPath;
     private final Path stepsPath;
     private final List<StepDefinition> stepDefinitions;
+    private final List<HookDefinition> hooks;
     private final GroovyShell groovyShell;
     private final Map<String, Object> stepInstances;
+
+    // Root cause of the last failed step, handed to @After hooks via Scenario
+    private Throwable lastStepError;
     
     // Hierarchical step tracking for reports (Katalon-style structure)
     private final List<Map<String, Object>> scenarioDataList = new ArrayList<>();
@@ -89,11 +93,13 @@ public class KatalanBDDExecutor {
         
         // --- bootstrap phase 2: step-definition loading (with cache) ---
         long t1 = System.currentTimeMillis();
-        this.stepDefinitions = loadStepDefinitionsWithCache();
+        CachedStepDefinitions loaded = loadStepDefinitionsWithCache();
+        this.stepDefinitions = new ArrayList<>(loaded.definitions);
+        this.hooks = new ArrayList<>(loaded.hooks);
         long stepDefsMs = System.currentTimeMillis() - t1;
 
-        logger.info("[startup] cucumber-bootstrap: step-defs={} loaded in {} ms (GroovyShell init: {} ms)",
-                stepDefinitions.size(), stepDefsMs, shellMs);
+        logger.info("[startup] cucumber-bootstrap: step-defs={} hooks={} loaded in {} ms (GroovyShell init: {} ms)",
+                stepDefinitions.size(), hooks.size(), stepDefsMs, shellMs);
     }
     
     /**
@@ -492,6 +498,15 @@ public class KatalanBDDExecutor {
 
         // Fresh step-definition instances per scenario (Cucumber semantics)
         stepInstances.clear();
+        lastStepError = null;
+
+        HookScenario hookScenario = new HookScenario(scenario, currentFeatureName, currentFeatureFileRelative);
+        Throwable beforeError = runHooks("Before", scenario, hookScenario);
+        if (beforeError != null) {
+            failedException = new RuntimeException("@Before hook failed: " + describe(beforeError), beforeError);
+            hookScenario.errors.add(beforeError);
+            scenarioFailed = true;
+        }
 
         for (Step step : scenario.steps) {
             Map<String, Object> stepData;
@@ -520,20 +535,72 @@ public class KatalanBDDExecutor {
                         }
                     }
                     
-                    failedException = new RuntimeException(errorMsg);
+                    failedException = new RuntimeException(errorMsg, lastStepError);
+                    hookScenario.errors.add(lastStepError != null ? lastStepError : failedException);
                     scenarioFailed = true; // Mark to skip remaining steps
                 }
             }
-            
+
             stepDataList.add(stepData);
         }
-        
+
+        hookScenario.status = scenarioFailed ? "failed" : "passed";
+        Throwable afterError = runHooks("After", scenario, hookScenario);
+        if (afterError != null && failedException == null) {
+            failedException = new RuntimeException("@After hook failed: " + describe(afterError), afterError);
+        }
+
         // Log BDD scenario end
         kwLogger.endBddScenario(scenario.name);
         
         return new ScenarioExecutionResult(stepDataList, failedException);
     }
-    
+
+    /**
+     * Run the @Before (ascending order) or @After (descending order) hooks that apply to the
+     * scenario. All hooks run even if one fails, as in Cucumber; the first failure is returned.
+     */
+    private Throwable runHooks(String kind, Scenario scenario, HookScenario hookScenario) {
+        List<HookDefinition> selected = new ArrayList<>();
+        for (HookDefinition hook : hooks) {
+            if (hook.kind.equals(kind) && hookMatchesScenario(hook, scenario)) {
+                selected.add(hook);
+            }
+        }
+        Comparator<HookDefinition> byOrder = Comparator.comparingInt(h -> h.order);
+        selected.sort("After".equals(kind) ? byOrder.reversed() : byOrder);
+
+        Throwable firstError = null;
+        for (HookDefinition hook : selected) {
+            String hookName = hook.ownerClass.getSimpleName() + "." + hook.method.getName();
+            try {
+                Object target = glueInstance(hook.ownerClass, stepInstances);
+                Object[] args = hook.method.getParameterCount() == 0 ? new Object[0] : new Object[] { hookScenario };
+                hook.method.invoke(target, args);
+                logger.debug("  @{} hook passed: {}", kind, hookName);
+            } catch (Throwable t) {
+                Throwable root = t instanceof java.lang.reflect.InvocationTargetException && t.getCause() != null
+                        ? t.getCause() : t;
+                logger.error("  @{} hook failed: {} - {}", kind, hookName, describe(root));
+                if (firstError == null) firstError = root;
+            }
+        }
+        return firstError;
+    }
+
+    private boolean hookMatchesScenario(HookDefinition hook, Scenario scenario) {
+        for (String expr : hook.tagExpressions) {
+            if (expr != null && !expr.trim().isEmpty() && !scenarioMatchesTagFilter(scenario, expr)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static String describe(Throwable t) {
+        return t.getMessage() != null ? t.getClass().getName() + ": " + t.getMessage() : t.toString();
+    }
+
     /**
      * Create step data for skipped step
      */
@@ -653,6 +720,7 @@ public class KatalanBDDExecutor {
             if (rootMsg == null && root != null) rootMsg = root.toString();
             if (rootMsg == null) rootMsg = "Step failed (no message)";
             String exType = root != null ? root.getClass().getName() : e.getClass().getName();
+            lastStepError = root != null ? root : e;
 
             stepData.put("type", "TEST_STEP");
             stepData.put("name", stepName);
@@ -844,11 +912,13 @@ public class KatalanBDDExecutor {
      */
     private static class CachedStepDefinitions {
         final List<StepDefinition> definitions;
+        final List<HookDefinition> hooks;
         final long lastModified;
         final long loadTime;
-        
-        CachedStepDefinitions(List<StepDefinition> definitions, long lastModified) {
+
+        CachedStepDefinitions(List<StepDefinition> definitions, List<HookDefinition> hooks, long lastModified) {
             this.definitions = definitions;
+            this.hooks = hooks;
             this.lastModified = lastModified;
             this.loadTime = System.currentTimeMillis();
         }
@@ -890,48 +960,50 @@ public class KatalanBDDExecutor {
      * First call: scans and parses all step definition files (~200-500ms)
      * Subsequent calls: returns cached data (~1-2ms)
      */
-    private List<StepDefinition> loadStepDefinitionsWithCache() {
+    private CachedStepDefinitions loadStepDefinitionsWithCache() {
         String cacheKey = stepsPath.toString();
         long currentModTime = getStepsDirectoryLastModified();
-        
+
         // Check cache
         CachedStepDefinitions cached = STEP_DEFINITIONS_CACHE.get(cacheKey);
         if (cached != null && cached.isValid(currentModTime)) {
             long cacheAge = System.currentTimeMillis() - cached.loadTime;
-            logger.debug("Using cached step definitions ({} steps, cache age: {}ms)", 
-                cached.definitions.size(), cacheAge);
-            return new ArrayList<>(cached.definitions); // Return copy to avoid modification
+            logger.debug("Using cached step definitions ({} steps, {} hooks, cache age: {}ms)",
+                cached.definitions.size(), cached.hooks.size(), cacheAge);
+            return cached; // Caller copies the lists
         }
-        
+
         // Cache miss or invalidated - load from disk
         logger.info("Loading step definitions from: {}", stepsPath);
         long startTime = System.currentTimeMillis();
-        
+
         List<StepDefinition> definitions = new ArrayList<>();
-        loadStepDefinitionsInto(definitions);
-        
+        List<HookDefinition> hookDefinitions = new ArrayList<>();
+        loadStepDefinitionsInto(definitions, hookDefinitions);
+
         long loadTime = System.currentTimeMillis() - startTime;
-        logger.info("Loaded {} step definitions in {}ms", definitions.size(), loadTime);
-        
+        logger.info("Loaded {} step definitions and {} hooks in {}ms", definitions.size(), hookDefinitions.size(), loadTime);
+
         // Store in cache
-        STEP_DEFINITIONS_CACHE.put(cacheKey, new CachedStepDefinitions(definitions, currentModTime));
-        
-        return definitions;
+        CachedStepDefinitions loaded = new CachedStepDefinitions(definitions, hookDefinitions, currentModTime);
+        STEP_DEFINITIONS_CACHE.put(cacheKey, loaded);
+
+        return loaded;
     }
-    
+
     /**
-     * Load all step definitions from the steps path
+     * Load all step definitions and hooks from the steps path
      */
-    private void loadStepDefinitionsInto(List<StepDefinition> definitions) {
+    private void loadStepDefinitionsInto(List<StepDefinition> definitions, List<HookDefinition> hookDefinitions) {
         if (!Files.exists(stepsPath)) {
             logger.warn("Steps path does not exist: {}", stepsPath);
             return;
         }
-        
+
         try {
             Files.walk(stepsPath)
                 .filter(p -> p.toString().endsWith(".groovy"))
-                .forEach(p -> loadStepDefinitionFile(p, definitions));
+                .forEach(p -> loadStepDefinitionFile(p, definitions, hookDefinitions));
             
             logger.debug("Loaded {} step definitions into list", definitions.size());
         } catch (IOException e) {
@@ -942,7 +1014,8 @@ public class KatalanBDDExecutor {
     /**
      * Load step definitions from a single Groovy file
      */
-    private void loadStepDefinitionFile(Path groovyFile, List<StepDefinition> definitions) {
+    private void loadStepDefinitionFile(Path groovyFile, List<StepDefinition> definitions,
+                                        List<HookDefinition> hookDefinitions) {
         Class<?> clazz = null;
         try {
             String content = Files.readString(groovyFile);
@@ -974,6 +1047,13 @@ public class KatalanBDDExecutor {
                             logger.debug("Loaded step: {} {} -> {}.{}", annotationType, patternStr,
                                 clazz.getSimpleName(), method.getName());
                         }
+                    } else if (isHookAnnotation(annotation)) {
+                        HookDefinition hook = createHookDefinition(annotation, method, clazz);
+                        if (hook != null) {
+                            hookDefinitions.add(hook);
+                            logger.debug("Loaded @{} hook (order={}) -> {}.{}", hook.kind, hook.order,
+                                clazz.getSimpleName(), method.getName());
+                        }
                     }
                 }
             }
@@ -983,6 +1063,41 @@ public class KatalanBDDExecutor {
         }
     }
     
+    private boolean isHookAnnotation(Annotation annotation) {
+        String name = annotation.annotationType().getName();
+        return name.equals("cucumber.api.java.Before") || name.equals("cucumber.api.java.After")
+            || name.equals("io.cucumber.java.Before") || name.equals("io.cucumber.java.After");
+    }
+
+    /**
+     * Build a hook from a legacy (cucumber.api.java) or Cucumber 7 (io.cucumber.java) Before/After
+     * annotation. The hook may take no argument or a cucumber.api.Scenario.
+     */
+    private HookDefinition createHookDefinition(Annotation annotation, Method method, Class<?> clazz) {
+        Class<?>[] params = method.getParameterTypes();
+        if (params.length > 1 || (params.length == 1 && !params[0].isAssignableFrom(HookScenario.class))) {
+            logger.warn("Skipping hook {}.{}: unsupported parameter {} (use cucumber.api.Scenario)",
+                clazz.getSimpleName(), method.getName(), Arrays.toString(params));
+            return null;
+        }
+        String kind = annotation.annotationType().getSimpleName();
+        int order = 10000;
+        List<String> tagExpressions = new ArrayList<>();
+        try {
+            order = (Integer) annotation.annotationType().getMethod("order").invoke(annotation);
+        } catch (Exception ignored) { /* keep default */ }
+        try {
+            Object value = annotation.annotationType().getMethod("value").invoke(annotation);
+            if (value instanceof String[]) {
+                tagExpressions.addAll(Arrays.asList((String[]) value));
+            } else if (value instanceof String) {
+                tagExpressions.add((String) value);
+            }
+        } catch (Exception ignored) { /* no tag filter */ }
+        method.setAccessible(true);
+        return new HookDefinition(kind, order, tagExpressions, method, clazz);
+    }
+
     private boolean isStepAnnotation(String name) {
         return name.equals("Given") || name.equals("When") || name.equals("Then") || name.equals("And") || name.equals("But");
     }
@@ -1315,22 +1430,79 @@ public class KatalanBDDExecutor {
         void invoke(Map<String, Object> scenarioInstances) throws Exception {
             Object target = definition.instance;
             if (target == null && definition.ownerClass != null) {
-                target = scenarioInstances.get(definition.ownerClass.getName());
-            }
-            if (target == null && definition.ownerClass != null) {
-                // Lazy instantiation: only create when the step is actually executed,
-                // so that GlobalVariables/profiles are already initialized.
-                try {
-                    target = definition.ownerClass.getDeclaredConstructor().newInstance();
-                    scenarioInstances.put(definition.ownerClass.getName(), target);
-                } catch (Throwable t) {
-                    Throwable root = t;
-                    while (root.getCause() != null) root = root.getCause();
-                    throw new RuntimeException("Failed to instantiate step definition class '"
-                            + definition.ownerClass.getName() + "': " + root, t);
-                }
+                target = glueInstance(definition.ownerClass, scenarioInstances);
             }
             definition.method.invoke(target, parameters.toArray());
+        }
+    }
+
+    /**
+     * Glue instance of the running scenario for a step/hook class. Created lazily, only when a
+     * step or hook of the class actually runs, so that GlobalVariables/profiles are already set.
+     */
+    private static Object glueInstance(Class<?> ownerClass, Map<String, Object> scenarioInstances) {
+        Object target = scenarioInstances.get(ownerClass.getName());
+        if (target != null) return target;
+        try {
+            target = ownerClass.getDeclaredConstructor().newInstance();
+            scenarioInstances.put(ownerClass.getName(), target);
+            return target;
+        } catch (Throwable t) {
+            Throwable root = t;
+            while (root.getCause() != null) root = root.getCause();
+            throw new RuntimeException("Failed to instantiate step definition class '"
+                    + ownerClass.getName() + "': " + root, t);
+        }
+    }
+
+    private static class HookDefinition {
+        final String kind; // "Before" or "After"
+        final int order;
+        final List<String> tagExpressions;
+        final Method method;
+        final Class<?> ownerClass;
+
+        HookDefinition(String kind, int order, List<String> tagExpressions, Method method, Class<?> ownerClass) {
+            this.kind = kind;
+            this.order = order;
+            this.tagExpressions = tagExpressions;
+            this.method = method;
+            this.ownerClass = ownerClass;
+        }
+    }
+
+    /**
+     * cucumber.api.Scenario handed to hooks. Field names mirror Cucumber-JVM 4.x internals
+     * ({@code errors}) because project hooks read them by reflection to find the failure cause.
+     */
+    private static class HookScenario implements cucumber.api.Scenario {
+        private final Scenario scenario;
+        private final String featureName;
+        private final String uri;
+        private final List<Throwable> errors = new ArrayList<>();
+        private String status = "undefined";
+
+        HookScenario(Scenario scenario, String featureName, String uri) {
+            this.scenario = scenario;
+            this.featureName = featureName != null ? featureName : "";
+            this.uri = uri != null ? uri : "";
+        }
+
+        @Override public Collection<String> getSourceTagNames() { return new ArrayList<>(scenario.tags); }
+        @Override public String getStatus() { return status; }
+        @Override public boolean isFailed() { return "failed".equals(status) || !errors.isEmpty(); }
+        @Override public void embed(byte[] data, String mimeType) { embed(data, mimeType, null); }
+        @Override public void embed(byte[] data, String mimeType, String name) {
+            logger.debug("Scenario.embed ignored ({} bytes, {})", data != null ? data.length : 0, mimeType);
+        }
+        @Override public void write(String text) { logger.info("[{}] {}", scenario.name, text); }
+        @Override public String getName() { return scenario.name; }
+        @Override public String getId() { return toId(featureName) + ";" + toId(scenario.name); }
+        @Override public String getUri() { return uri; }
+        @Override public List<Integer> getLines() { return Collections.singletonList(scenario.lineNumber); }
+
+        private static String toId(String text) {
+            return text.replaceAll("[\\s'\"]", "-").toLowerCase();
         }
     }
     
