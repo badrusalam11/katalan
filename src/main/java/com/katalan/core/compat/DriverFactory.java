@@ -48,7 +48,7 @@ public class DriverFactory {
     public static Object executeScript(String script, Object... args) {
         WebDriver driver = getWebDriver();
         if (driver instanceof JavascriptExecutor) {
-            return ((JavascriptExecutor) driver).executeScript(script, args);
+            return ((JavascriptExecutor) driver).executeScript(script, args == null ? new Object[0] : args);
         }
         return null;
     }
