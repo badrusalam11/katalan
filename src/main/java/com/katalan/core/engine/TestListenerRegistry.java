@@ -445,8 +445,11 @@ public class TestListenerRegistry {
     }
 
     public void invokeAfterTestSuite(TestSuiteContext ctx) {
-        invoke(AfterTestSuite.class, ctx);
+        // Katalon runs the suite script's @TearDown before the listeners' @AfterTestSuite,
+        // mirroring the before side (e.g. a listener closing the browser must not run
+        // before the suite script's logout).
         invoke(TearDown.class, ctx);
+        invoke(AfterTestSuite.class, ctx);
     }
 
     // ----- Test Case hooks ---------------------------------------------------
@@ -457,8 +460,9 @@ public class TestListenerRegistry {
     }
 
     public void invokeAfterTestCase(TestCaseContext ctx) {
-        invoke(AfterTestCase.class, ctx);
+        // Mirror of invokeBeforeTestCase: suite script @TearDownTestCase, then listener @AfterTestCase
         invoke(TearDownTestCase.class, ctx);
+        invoke(AfterTestCase.class, ctx);
     }
 
     // ----- Internal ----------------------------------------------------------

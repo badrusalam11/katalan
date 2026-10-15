@@ -395,13 +395,15 @@ public class WebUI {
             element.clear();
         } catch (Exception ignore) { /* some inputs throw on clear - non-fatal */ }
         element.sendKeys(text);
-        // Dispatch input+change so React/Angular-controlled forms register the value
+        // Dispatch input+change so React/Angular-controlled forms register the value.
+        // No 'blur': Katalon's setText leaves focus on the field, and a synthetic blur
+        // closes widgets like NDS's "Cari menu" search so a following sendKeys(ENTER)
+        // hits a non-interactable element.
         try {
             ((JavascriptExecutor) getDriver()).executeScript(
                 "var el = arguments[0];" +
                 "try { el.dispatchEvent(new Event('input', {bubbles:true})); } catch(e){}" +
-                "try { el.dispatchEvent(new Event('change', {bubbles:true})); } catch(e){}" +
-                "try { el.dispatchEvent(new Event('blur', {bubbles:true})); } catch(e){}",
+                "try { el.dispatchEvent(new Event('change', {bubbles:true})); } catch(e){}",
                 element);
         } catch (Exception ignore) { /* best-effort */ }
     }
