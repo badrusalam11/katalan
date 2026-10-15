@@ -913,11 +913,21 @@ public class WebUiBuiltInKeywords {
     // ==================== JavaScript Keywords ====================
     
     public static Object executeJavaScript(String script, Object... args) {
+        // Katalon order: executeJavaScript(script, List arguments, FailureHandling)
+        if (args != null && args.length > 0 && args[args.length - 1] instanceof FailureHandling) {
+            FailureHandling flowControl = (FailureHandling) args[args.length - 1];
+            Object[] scriptArgs = java.util.Arrays.copyOf(args, args.length - 1);
+            return runObj(() -> WebUI.executeJavaScript(script, scriptArgs), flowControl, null);
+        }
         return WebUI.executeJavaScript(script, args);
     }
     
     public static Object executeJavaScript(String script, FailureHandling flowControl, Object... args) {
-        return runObj(() -> executeJavaScript(script, args), flowControl, null);
+        if (flowControl == null) {
+            // Groovy routes executeJavaScript(script, null, FailureHandling.X) here
+            return executeJavaScript(script, args);
+        }
+        return runObj(() -> WebUI.executeJavaScript(script, args), flowControl, null);
     }
     
     // ==================== Focus Keywords ====================

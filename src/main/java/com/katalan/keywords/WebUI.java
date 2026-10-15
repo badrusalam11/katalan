@@ -1445,7 +1445,7 @@ public class WebUI {
     public static Object executeJavaScript(String script, Object... args) {
         logger.debug("Executing JavaScript: {}", script);
         JavascriptExecutor js = (JavascriptExecutor) getDriver();
-        return js.executeScript(script, args);
+        return js.executeScript(script, normalizeScriptArgs(args));
     }
     
     /**
@@ -1454,7 +1454,27 @@ public class WebUI {
     public static Object executeAsyncJavaScript(String script, Object... args) {
         logger.debug("Executing async JavaScript: {}", script);
         JavascriptExecutor js = (JavascriptExecutor) getDriver();
-        return js.executeAsyncScript(script, args);
+        return js.executeAsyncScript(script, normalizeScriptArgs(args));
+    }
+    
+    /**
+     * Katalon's signature is executeJavaScript(String, List): scripts commonly pass
+     * null (no arguments) or a List whose items are the script arguments. Selenium
+     * NPEs on a null array, so map both forms to a plain Object[].
+     */
+    static Object[] normalizeScriptArgs(Object[] args) {
+        if (args == null) {
+            return new Object[0];
+        }
+        if (args.length == 1) {
+            if (args[0] == null) {
+                return new Object[0];
+            }
+            if (args[0] instanceof List) {
+                return ((List<?>) args[0]).toArray();
+            }
+        }
+        return args;
     }
     
     // ==================== Screenshot Keywords ====================
