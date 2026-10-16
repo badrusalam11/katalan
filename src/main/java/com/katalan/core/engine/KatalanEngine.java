@@ -534,6 +534,7 @@ public class KatalanEngine {
         while (attempts < maxAttempts) {
             attempts++;
             context.drainContinuedFailures();
+            context.drainApiCalls();
 
             try {
                 // Add test case variables to script (resolve GlobalVariableReferences)
@@ -655,7 +656,8 @@ public class KatalanEngine {
         }
         
         result.setRetryAttempt(attempts - 1);
-        
+        result.setApiCalls(context.drainApiCalls());
+
         // ----- Test Listener: @AfterTestCase / @TearDownTestCase -----
         tcCtx.setTestCaseStatus(String.valueOf(result.getStatus()));
         // Katalon hands listeners the same "<id> FAILED.\nReason:\n<stack trace>" text it logs

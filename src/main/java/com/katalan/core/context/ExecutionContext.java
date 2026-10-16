@@ -40,6 +40,7 @@ public class ExecutionContext {
     private Map<String, Object> properties;
     private boolean shouldStop;
     private final java.util.List<String> continuedFailures = new java.util.ArrayList<>();
+    private final java.util.List<com.katalan.core.model.ApiCallRecord> apiCalls = new java.util.ArrayList<>();
 
     public ExecutionContext() {
         this.globalVariables = new HashMap<>();
@@ -196,6 +197,18 @@ public class ExecutionContext {
     public java.util.List<String> drainContinuedFailures() {
         java.util.List<String> drained = new java.util.ArrayList<>(continuedFailures);
         continuedFailures.clear();
+        return drained;
+    }
+
+    /** Records an HTTP call made by WS.sendRequest so the report can show request and response. */
+    public void recordApiCall(com.katalan.core.model.ApiCallRecord call) {
+        apiCalls.add(call);
+    }
+
+    /** Returns the API calls recorded since the last call, and clears them. */
+    public java.util.List<com.katalan.core.model.ApiCallRecord> drainApiCalls() {
+        java.util.List<com.katalan.core.model.ApiCallRecord> drained = new java.util.ArrayList<>(apiCalls);
+        apiCalls.clear();
         return drained;
     }
     

@@ -76,6 +76,17 @@ Untuk setiap test case:
 - Error Message (jika ada)
 - Steps (max 10 step pertama)
 
+### 3. API Request & Response
+Setiap `WS.sendRequest(...)` yang dijalankan test case direkam otomatis (tanpa perlu ubah script)
+dan ditampilkan di halaman detail test case:
+- No. Test Case — link issue tracker pertama (`https://.../browse/KEY-123`) yang muncul di step BDD atau console
+- URL, Method, Headers
+- Request Body dan Response Body (JSON di-pretty-print)
+- Response Status (kode HTTP + waktu respons), atau pesan error bila request gagal terkirim
+
+Body yang sangat panjang dipotong di 20.000 karakter; ubah dengan `-Dkatalan.pdf.maxApiBodyChars=<n>`.
+Bila test case di-retry, yang ditampilkan hanya request dari attempt terakhir.
+
 ## Contoh Penggunaan di CI/CD
 
 ### GitLab CI

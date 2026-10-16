@@ -4,6 +4,8 @@ import com.kms.katalon.core.testobject.HttpBodyContent;
 import com.kms.katalon.core.testobject.RequestObject;
 import com.kms.katalon.core.testobject.ResponseObject;
 import com.kms.katalon.core.testobject.TestObjectProperty;
+import com.katalan.core.context.ExecutionContext;
+import com.katalan.core.model.ApiCallRecord;
 import org.apache.hc.client5.http.classic.methods.HttpUriRequestBase;
 import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
@@ -26,6 +28,7 @@ import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -90,6 +93,11 @@ public class WebService {
                 .setRedirectsEnabled(request.isFollowRedirects())
                 .build());
 
+        ApiCallRecord call = new ApiCallRecord();
+        call.setTimestamp(Instant.now());
+        call.setMethod(method);
+        call.setUrl(url);
+
         boolean hasContentType = false;
         for (TestObjectProperty header : request.getHttpHeaderProperties()) {
             if (header == null || !header.isActive() || header.getName() == null
@@ -105,6 +113,7 @@ public class WebService {
                 hasContentType = true;
             }
             httpRequest.addHeader(name, header.getValue() != null ? header.getValue() : "");
+            call.addRequestHeader(name, header.getValue() != null ? header.getValue() : "");
         }
 
         HttpBodyContent body = request.getBodyContent();
@@ -116,10 +125,30 @@ public class WebService {
                 entityType = ContentType.parseLenient(withCharset(body.getContentType(), body.getContentEncoding()));
             }
             httpRequest.setEntity(new ByteArrayEntity(out.toByteArray(), entityType));
+            call.setRequestBody(request.getHttpBody() != null ? request.getHttpBody()
+                    : new String(out.toByteArray(), StandardCharsets.UTF_8));
         }
 
         logger.info("WS {} {}", method, url);
         long start = System.currentTimeMillis();
+        try {
+            ResponseObject response = execute(httpRequest, method, url, start);
+            call.setStatusCode(response.getStatusCode());
+            call.setResponseHeaders(response.getHeaderFields());
+            call.setResponseBody(response.getResponseText());
+            call.setElapsedMs(response.getElapsedTime());
+            return response;
+        } catch (Exception e) {
+            call.setElapsedMs(System.currentTimeMillis() - start);
+            call.setError(e.getClass().getName() + ": " + e.getMessage());
+            throw e;
+        } finally {
+            ExecutionContext.getCurrent().recordApiCall(call);
+        }
+    }
+
+    private static ResponseObject execute(HttpUriRequestBase httpRequest, String method, String url, long start)
+            throws Exception {
         return getClient().execute(httpRequest, httpResponse -> {
             long headersAt = System.currentTimeMillis();
             ResponseObject response = new ResponseObject();
