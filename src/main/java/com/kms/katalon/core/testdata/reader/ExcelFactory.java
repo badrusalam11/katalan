@@ -1,21 +1,48 @@
 package com.kms.katalon.core.testdata.reader;
 
-import com.kms.katalon.core.testdata.TestData;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.text.MessageFormat;
+
+import com.kms.katalon.core.testdata.ExcelData;
 
 /**
- * Katalon compatibility class for ExcelFactory
+ * Port of Katalon's ExcelFactory. Katalon also tries an HTML-table provider for .xls files that
+ * are really HTML exports; katalan only reads real workbooks.
  */
 public class ExcelFactory {
-    
-    public static TestData getExcelDataWithDefaultSheet(String filePath, String sheetName, boolean hasHeader) {
-        return new TestData(filePath);
+
+    private static final ExcelProvider[] providers = new ExcelProvider[] { new WorbookProvider() };
+
+    public static ExcelData getExcelDataWithDefaultSheet(String fullFilePath, String sheetName, boolean hasHeaders)
+            throws IOException {
+        ExcelData excelData = getExcelData(fullFilePath, hasHeaders);
+        excelData.changeSheet(sheetName);
+        return excelData;
     }
-    
-    public static TestData getExcelData(String filePath, String sheetName) {
-        return new TestData(filePath);
-    }
-    
-    public static TestData getExcelData(String filePath, String sheetName, String range, boolean hasHeader) {
-        return new TestData(filePath);
+
+    public static ExcelData getExcelData(String fullFilePath, boolean hasHeaders) throws IOException {
+        File inputFile = new File(fullFilePath);
+        if (!inputFile.exists()) {
+            throw new FileNotFoundException(fullFilePath);
+        }
+
+        ExcelData excel = null;
+        for (ExcelProvider provider : providers) {
+            try {
+                excel = provider.getExcelData(fullFilePath, hasHeaders);
+                if (excel != null) {
+                    break;
+                }
+            } catch (Exception ex) {
+                // continue
+            }
+        }
+
+        if (excel == null) {
+            throw new IllegalArgumentException(MessageFormat.format("File ''{0}'' is unsupported", fullFilePath));
+        }
+        return excel;
     }
 }

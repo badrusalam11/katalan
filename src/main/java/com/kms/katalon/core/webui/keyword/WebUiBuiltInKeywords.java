@@ -538,8 +538,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static boolean verifyTextNotPresent(String text, boolean isRegex) {
-        logNotSupported("verifyTextNotPresent");
-        return true;
+        return WebUI.verifyTextNotPresent(text, isRegex);
     }
     
     public static boolean verifyTextNotPresent(String text, boolean isRegex, FailureHandling flowControl) {

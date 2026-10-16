@@ -31,6 +31,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -781,7 +782,9 @@ public class Mobile {
             File source = ts.getScreenshotAs(OutputType.FILE);
             Path destination = Path.of(getScreenshotPath(), filename + ".png");
             Files.createDirectories(destination.getParent());
-            AsyncScreenshotWriter.getInstance().submitCopy(source.toPath(), destination);
+            // Copy before returning: callers read the returned path right away (Katalon writes it
+            // synchronously too), e.g. Actmo listeners ImageIO.read() it in AfterTestCase.
+            Files.copy(source.toPath(), destination, StandardCopyOption.REPLACE_EXISTING);
 
             com.katalan.core.logging.XmlKeywordLogger kwLogger = com.katalan.core.logging.XmlKeywordLogger.getInstance();
             Map<String, String> props = new java.util.LinkedHashMap<>();

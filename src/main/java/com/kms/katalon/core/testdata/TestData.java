@@ -1,54 +1,42 @@
 package com.kms.katalon.core.testdata;
 
-import java.util.ArrayList;
+import java.io.IOException;
 import java.util.List;
 
 /**
- * Katalon compatibility class for TestData
+ * Katalon's TestData contract (com.kms.katalon.core.testdata.TestData). Row and column indexes
+ * are 1-based, and getValue always returns a String - scripts rely on that (e.g. `?.trim()`).
  */
-public class TestData {
-    private String dataId;
-    private List<List<Object>> data = new ArrayList<>();
-    private List<String> columnNames = new ArrayList<>();
-    
-    public TestData() {}
-    
-    public TestData(String dataId) {
-        this.dataId = dataId;
-    }
-    
-    public String getDataId() {
-        return dataId;
-    }
-    
-    public int getRowNumbers() {
-        return data.size();
-    }
-    
-    public int getColumnNumbers() {
-        return columnNames.size();
-    }
-    
-    public Object getValue(int columnIndex, int rowIndex) {
-        if (rowIndex - 1 < data.size() && columnIndex - 1 < data.get(rowIndex - 1).size()) {
-            return data.get(rowIndex - 1).get(columnIndex - 1);
-        }
-        return null;
-    }
-    
-    public Object getValue(String columnName, int rowIndex) {
-        int columnIndex = columnNames.indexOf(columnName) + 1;
-        if (columnIndex > 0) {
-            return getValue(columnIndex, rowIndex);
-        }
-        return null;
-    }
-    
-    public List<String> getColumnNames() {
-        return columnNames;
-    }
-    
-    public List<List<Object>> getAllData() {
-        return data;
-    }
+public interface TestData {
+    int BASE_INDEX = 1;
+
+    String getValue(String columnName, int rowIndex) throws IOException;
+
+    String getValue(int columnIndex, int rowIndex) throws IOException;
+
+    Object getObjectValue(String columnName, int rowIndex) throws IOException;
+
+    Object getObjectValue(int columnIndex, int rowIndex) throws IOException;
+
+    TestDataType getType();
+
+    String getSourceUrl();
+
+    String[] getColumnNames() throws IOException;
+
+    int getRowNumbers() throws IOException;
+
+    int getColumnNumbers() throws IOException;
+
+    boolean hasHeaders();
+
+    void activeHeaders(boolean active) throws IOException;
+
+    TestDataInfo getDataInfo();
+
+    List<List<Object>> getAllData() throws IOException;
+
+    String getProperty(String key);
+
+    void setProperty(String key, String value);
 }

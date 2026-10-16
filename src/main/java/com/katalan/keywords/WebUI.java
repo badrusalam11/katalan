@@ -1,6 +1,7 @@
 package com.katalan.keywords;
 
 import com.katalan.core.context.ExecutionContext;
+import com.katalan.core.driver.ActionDelay;
 import com.katalan.core.driver.SmartWait;
 import com.katalan.core.model.TestObject;
 import com.katalan.core.exception.StepFailedException;
@@ -118,6 +119,7 @@ public class WebUI {
     public static void navigateToUrl(String url) {
         logger.info("Navigating to URL: {}", url);
         WebDriver driver = getDriver();
+        ActionDelay.delay();
         driver.get(url);
         
         // Wait for page to be fully loaded (especially critical in headless mode)
@@ -194,6 +196,7 @@ public class WebUI {
      */
     public static void refresh() {
         logger.info("Refreshing page");
+        ActionDelay.delay();
         getDriver().navigate().refresh();
     }
     
@@ -202,6 +205,7 @@ public class WebUI {
      */
     public static void back() {
         logger.info("Navigating back");
+        ActionDelay.delay();
         getDriver().navigate().back();
     }
     
@@ -210,6 +214,7 @@ public class WebUI {
      */
     public static void forward() {
         logger.info("Navigating forward");
+        ActionDelay.delay();
         getDriver().navigate().forward();
     }
     
@@ -271,8 +276,10 @@ public class WebUI {
                 // PRE-CLICK STABILITY: Give SPA frameworks time to fully initialize the element
                 // This is critical for elements that are dynamically rendered/re-rendered (loops, modals)
                 // Prevents clicking on elements that are "clickable" but not yet ready
+                // Katalon's action delay runs before every click; never go below the 200 ms
+                // stability wait katalan has always used here.
                 try {
-                    Thread.sleep(200); // 200ms pre-click stability wait
+                    Thread.sleep(Math.max(200, ActionDelay.getDelayMs()));
                 } catch (InterruptedException ignored) {}
                 
                 // Scroll into view to avoid "not interactable" when the element is off-screen
@@ -390,22 +397,58 @@ public class WebUI {
     }
 
     private static void typeText(TestObject testObject, String text, int timeout) {
-        WebElement element = waitForElement(testObject, timeout);
-        try {
-            element.clear();
-        } catch (Exception ignore) { /* some inputs throw on clear - non-fatal */ }
-        element.sendKeys(text);
-        // Dispatch input+change so React/Angular-controlled forms register the value.
-        // No 'blur': Katalon's setText leaves focus on the field, and a synthetic blur
-        // closes widgets like NDS's "Cari menu" search so a following sendKeys(ENTER)
-        // hits a non-interactable element.
-        try {
-            ((JavascriptExecutor) getDriver()).executeScript(
-                "var el = arguments[0];" +
-                "try { el.dispatchEvent(new Event('input', {bubbles:true})); } catch(e){}" +
-                "try { el.dispatchEvent(new Event('change', {bubbles:true})); } catch(e){}",
-                element);
-        } catch (Exception ignore) { /* best-effort */ }
+        if (text == null) {
+            throw new IllegalArgumentException("Text is null");
+        }
+        retryUntilTimeout(timeout, () -> {
+            WebElement element = waitForElement(testObject, timeout);
+            try {
+                element.clear();
+            } catch (StaleElementReferenceException e) {
+                throw e;
+            } catch (Exception ignore) { /* some inputs throw on clear - non-fatal */ }
+            // Like Katalon: clear() can re-render the field (stale reference), so find it again.
+            element = waitForElement(testObject, timeout);
+            ActionDelay.delay();
+            element.sendKeys(text);
+            // Dispatch input so React/Angular-controlled forms register the value.
+            // No 'change' or 'blur': Katalon's setText fires neither and leaves focus on the
+            // field. A synthetic change runs the app's on-commit logic too early - NDS's
+            // Setor Tunai looks the account up on change and swaps in the Britama Bisnis form
+            // before the script's sendKeys(TAB), so that lookup no longer finds the field -
+            // and a synthetic blur closes widgets like NDS's "Cari menu" search.
+            try {
+                ((JavascriptExecutor) getDriver()).executeScript(
+                    "try { arguments[0].dispatchEvent(new Event('input', {bubbles:true})); } catch(e){}",
+                    element);
+            } catch (Exception ignore) { /* best-effort */ }
+        });
+    }
+
+    /**
+     * Katalon runs element actions (setText, sendKeys, ...) through SeleniumActionRetryController:
+     * when the element goes stale or is briefly not interactable (a re-render mid-action), the
+     * whole action - lookup included - is retried until the keyword timeout instead of failing.
+     */
+    private static void retryUntilTimeout(int timeout, Runnable action) {
+        long deadline = System.currentTimeMillis() + normalizeTimeout(timeout) * 1000L;
+        while (true) {
+            try {
+                action.run();
+                return;
+            } catch (StaleElementReferenceException | ElementNotInteractableException e) {
+                if (System.currentTimeMillis() >= deadline) {
+                    throw e;
+                }
+                logger.debug("Retrying action after {}", e.getClass().getSimpleName());
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw e;
+                }
+            }
+        }
     }
     
     /**
@@ -443,8 +486,11 @@ public class WebUI {
      */
     public static void sendKeys(TestObject testObject, int timeout, String text) {
     logger.info("Sending text to: {}", describe(testObject));
-        WebElement element = waitForElement(testObject, timeout);
-        element.sendKeys(text);
+        retryUntilTimeout(timeout, () -> {
+            WebElement element = waitForElement(testObject, timeout);
+            ActionDelay.delay();
+            element.sendKeys(text);
+        });
     }
     
     /**
@@ -452,10 +498,12 @@ public class WebUI {
      */
     public static void sendKeys(TestObject testObject, int timeout, Keys... keys) {
     logger.info("Sending keys to: {}", describe(testObject));
-        WebElement element = waitForElement(testObject, timeout);
-        for (Keys key : keys) {
-            element.sendKeys(key);
-        }
+        // One sendKeys call like Katalon (Keys.chord semantics), retried if the field re-renders.
+        retryUntilTimeout(timeout, () -> {
+            WebElement element = waitForElement(testObject, timeout);
+            ActionDelay.delay();
+            element.sendKeys(keys);
+        });
     }
     
     /**
@@ -471,6 +519,7 @@ public class WebUI {
     public static void uploadFile(TestObject testObject, String filePath, int timeout) {
     logger.info("Uploading file '{}' to: {}", filePath, describe(testObject));
         WebElement element = waitForElement(testObject, timeout);
+        ActionDelay.delay();
         element.sendKeys(filePath);
     }
     
@@ -664,6 +713,7 @@ public class WebUI {
     logger.info("Checking checkbox: {}", describe(testObject));
         WebElement element = waitForElement(testObject, timeout);
         if (!element.isSelected()) {
+            ActionDelay.delay();
             element.click();
         }
     }
@@ -682,6 +732,7 @@ public class WebUI {
     logger.info("Unchecking checkbox: {}", describe(testObject));
         WebElement element = waitForElement(testObject, timeout);
         if (element.isSelected()) {
+            ActionDelay.delay();
             element.click();
         }
     }
@@ -1050,21 +1101,48 @@ public class WebUI {
      */
     public static boolean verifyTextPresent(String text, boolean isRegex, Object failureHandling) {
         try {
-            String pageSource = getDriver().getPageSource();
-            boolean result;
-            if (isRegex) {
-                result = pageSource.matches("(?s).*" + text + ".*");
-            } else {
-                result = pageSource.contains(text);
-            }
-            if (!result) {
-                throw new StepFailedException("Text '" + text + "' not found in page source");
+            if (!isTextPresent(text, isRegex)) {
+                throw new StepFailedException("Text '" + text + "' is not present on page");
             }
             return true;
         } catch (Exception e) {
             com.katalan.core.compat.FailureHandling mode = toFailureHandling(failureHandling);
             return handleVerifyFailure("verifyTextPresent", e, mode);
         }
+    }
+
+    public static boolean verifyTextNotPresent(String text, boolean isRegex) {
+        return verifyTextNotPresent(text, isRegex, null);
+    }
+
+    public static boolean verifyTextNotPresent(String text, boolean isRegex, Object failureHandling) {
+        try {
+            if (isTextPresent(text, isRegex)) {
+                throw new StepFailedException("Text '" + text + "' is present on page");
+            }
+            return true;
+        } catch (Exception e) {
+            com.katalan.core.compat.FailureHandling mode = toFailureHandling(failureHandling);
+            return handleVerifyFailure("verifyTextNotPresent", e, mode);
+        }
+    }
+
+    /**
+     * Katalon's WebUiCommonHelper.isTextPresent: look up body through the smart-wait driver (so a
+     * submit's pending XHR/fetch finishes and the DOM settles first), then search the rendered
+     * text - not the HTML source - with contains() or regex find().
+     */
+    private static boolean isTextPresent(String text, boolean isRegex) {
+        if (text == null) {
+            throw new IllegalArgumentException("Text is null");
+        }
+        WebDriver driver = getDriver();
+        SmartWait.doSmartWait(driver);
+        String pageText = driver.findElement(By.tagName("body")).getText();
+        if (pageText == null || pageText.isEmpty()) {
+            return false;
+        }
+        return isRegex ? java.util.regex.Pattern.compile(text).matcher(pageText).find() : pageText.contains(text);
     }
     
     /**
@@ -1294,6 +1372,7 @@ public class WebUI {
      */
     public static void acceptAlert() {
         logger.info("Accepting alert");
+        ActionDelay.delay();
         getDriver().switchTo().alert().accept();
     }
     
@@ -1302,6 +1381,7 @@ public class WebUI {
      */
     public static void dismissAlert() {
         logger.info("Dismissing alert");
+        ActionDelay.delay();
         getDriver().switchTo().alert().dismiss();
     }
     
@@ -1509,8 +1589,9 @@ public class WebUI {
             Path destination = Path.of(getScreenshotPath(), filename + ".png");
             Files.createDirectories(destination.getParent());
 
-            // Submit copy to background executor to avoid blocking test thread on IO
-            AsyncScreenshotWriter.getInstance().submitCopy(source.toPath(), destination);
+            // Copy before returning: callers read the returned path right away (Katalon writes it
+            // synchronously too), e.g. Actmo listeners ImageIO.read() it in AfterTestCase.
+            Files.copy(source.toPath(), destination, StandardCopyOption.REPLACE_EXISTING);
             
             // Log to XmlKeywordLogger with attachment property (Katalon format)
             com.katalan.core.logging.XmlKeywordLogger kwLogger = 
