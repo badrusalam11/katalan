@@ -146,6 +146,15 @@ public final class SmartWait {
         if (override != null) {
             return Boolean.parseBoolean(override.trim());
         }
+        String value = readProjectSetting("execution.default.smartWaitMode");
+        return value == null || Boolean.parseBoolean(value);
+    }
+
+    /**
+     * A project execution setting (settings/internal/com.kms.katalon.execution[.webui].properties),
+     * unquoted, or null when the project doesn't set it.
+     */
+    static String readProjectSetting(String key) {
         try {
             ExecutionContext ctx = ExecutionContext.getCurrent();
             Path project = ctx != null ? ctx.getProjectPath() : null;
@@ -160,16 +169,16 @@ public final class SmartWait {
                     try (InputStream in = Files.newInputStream(settings)) {
                         props.load(in);
                     }
-                    String value = props.getProperty("execution.default.smartWaitMode");
+                    String value = props.getProperty(key);
                     if (value != null) {
-                        return Boolean.parseBoolean(value.replace("\"", "").trim());
+                        return value.replace("\"", "").trim();
                     }
                 }
             }
         } catch (Exception e) {
-            logger.debug("Could not read smart wait project setting: {}", e.getMessage());
+            logger.debug("Could not read project setting {}: {}", key, e.getMessage());
         }
-        return true;
+        return null;
     }
 
     /**
@@ -242,6 +251,46 @@ public final class SmartWait {
 
         Listener(WebDriver raw) {
             this.raw = raw;
+        }
+
+        @Override
+        public void beforeClick(WebElement element) {
+            ActionDelay.delay();
+        }
+
+        @Override
+        public void beforeSendKeys(WebElement element, CharSequence... keysToSend) {
+            ActionDelay.delay();
+        }
+
+        @Override
+        public void beforeBack(WebDriver.Navigation navigation) {
+            ActionDelay.delay();
+        }
+
+        @Override
+        public void beforeForward(WebDriver.Navigation navigation) {
+            ActionDelay.delay();
+        }
+
+        @Override
+        public void beforeRefresh(WebDriver.Navigation navigation) {
+            ActionDelay.delay();
+        }
+
+        @Override
+        public void beforeTo(WebDriver.Navigation navigation, String url) {
+            ActionDelay.delay();
+        }
+
+        @Override
+        public void beforeAccept(org.openqa.selenium.Alert alert) {
+            ActionDelay.delay();
+        }
+
+        @Override
+        public void beforeDismiss(org.openqa.selenium.Alert alert) {
+            ActionDelay.delay();
         }
 
         @Override
