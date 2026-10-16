@@ -39,6 +39,9 @@ public class TestCaseResult {
     
     // Test case tag from .tc file
     private String tag;
+
+    // HTTP calls made through WS.sendRequest during the (last) attempt
+    private List<ApiCallRecord> apiCalls = new ArrayList<>();
     
     public TestCaseResult() {
         this.stepResults = new ArrayList<>();
@@ -269,7 +272,15 @@ public class TestCaseResult {
     public void setTag(String tag) {
         this.tag = tag;
     }
-    
+
+    public List<ApiCallRecord> getApiCalls() {
+        return apiCalls;
+    }
+
+    public void setApiCalls(List<ApiCallRecord> apiCalls) {
+        this.apiCalls = apiCalls != null ? apiCalls : new ArrayList<>();
+    }
+
     /**
      * Nested class for step-level results
      */

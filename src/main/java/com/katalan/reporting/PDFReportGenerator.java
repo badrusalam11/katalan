@@ -556,6 +556,9 @@ public class PDFReportGenerator {
         // BETWEEN the test-case detail grid and the failure summary.
         addCucumberStepsBlock(doc, tc);
 
+        // HTTP calls made through WS.sendRequest: URL, method, headers, request and response body.
+        addApiCallsSection(doc, tc);
+
         // If test case failed or errored, include failure summary and truncated stacktrace + console snippet
         if (tc.getStatus() == TestCase.TestCaseStatus.FAILED || tc.getStatus() == TestCase.TestCaseStatus.ERROR) {
             // Failure header
@@ -1297,6 +1300,163 @@ public class PDFReportGenerator {
             }
         }
         doc.add(grid);
+    }
+
+    // ----- API request/response section -----
+
+    private static final java.util.regex.Pattern ISSUE_LINK =
+            java.util.regex.Pattern.compile("https?://[^\\s\"'<>\\]\\[]+/browse/[A-Z][A-Z0-9_]+-\\d+");
+
+    private static final int API_BODY_MAX_CHARS = parseApiBodyMaxChars();
+
+    private static int parseApiBodyMaxChars() {
+        try {
+            String v = System.getProperty("katalan.pdf.maxApiBodyChars");
+            if (v != null && !v.isEmpty()) {
+                return Integer.parseInt(v.trim());
+            }
+        } catch (Exception ignored) { /* fall back */ }
+        return 20000;
+    }
+
+    private static final com.fasterxml.jackson.databind.ObjectMapper JSON =
+            new com.fasterxml.jackson.databind.ObjectMapper();
+
+    /** Courier font, created per generator because iText fonts belong to one PdfDocument. */
+    private com.itextpdf.kernel.font.PdfFont monoFont;
+
+    private com.itextpdf.kernel.font.PdfFont monoFont() {
+        if (monoFont == null) {
+            try {
+                monoFont = com.itextpdf.kernel.font.PdfFontFactory.createFont(
+                        com.itextpdf.io.font.constants.StandardFonts.COURIER);
+            } catch (Exception e) {
+                logger.debug("Courier font unavailable: {}", e.getMessage());
+            }
+        }
+        return monoFont;
+    }
+
+    private void addApiCallsSection(Document doc, TestCaseResult tc) {
+        java.util.List<com.katalan.core.model.ApiCallRecord> calls = tc.getApiCalls();
+        if (calls == null || calls.isEmpty()) return;
+
+        doc.add(new Paragraph("API Request & Response")
+                .setBold().setFontSize(12).setFontColor(COLOR_BRI_BLUE).setMarginTop(10).setMarginBottom(4));
+
+        String issueLink = findIssueLink(tc);
+        int n = 0;
+        for (com.katalan.core.model.ApiCallRecord call : calls) {
+            n++;
+            Table t = new Table(UnitValue.createPercentArray(new float[]{1.3f, 5f}))
+                    .useAllAvailableWidth().setMarginBottom(10);
+
+            String title = calls.size() > 1 ? "Request #" + n + " — " + nvl(call.getMethod()) : nvl(call.getMethod()) + " Request";
+            t.addHeaderCell(new Cell(1, 2)
+                    .add(new Paragraph(title).setBold().setFontSize(10).setFontColor(ColorConstants.WHITE))
+                    .setBackgroundColor(COLOR_TBL_HEADER)
+                    .setBorder(Border.NO_BORDER)
+                    .setPadding(6));
+
+            if (issueLink != null && n == 1) {
+                t.addCell(detailLabel("No. Test Case"));
+                t.addCell(new Cell()
+                        .add(new Paragraph(new com.itextpdf.layout.element.Link(issueLink,
+                                com.itextpdf.kernel.pdf.action.PdfAction.createURI(issueLink)))
+                                .setFontSize(9).setFontColor(COLOR_BRI_BLUE).setUnderline())
+                        .setBorder(new SolidBorder(COLOR_BORDER, 0.5f))
+                        .setPadding(8));
+            }
+
+            t.addCell(detailLabel("URL"));
+            t.addCell(detailValue(call.getUrl(), false));
+            t.addCell(detailLabel("Method"));
+            t.addCell(detailValue(call.getMethod(), true));
+
+            StringBuilder headers = new StringBuilder();
+            for (String[] h : call.getRequestHeaders()) {
+                if (headers.length() > 0) headers.append('\n');
+                headers.append(h[0]).append(" = ").append(h[1]);
+            }
+            t.addCell(detailLabel("Headers"));
+            t.addCell(detailValue(headers.toString(), false));
+
+            t.addCell(detailLabel("Request Body"));
+            t.addCell(codeCell(prettyBody(call.getRequestBody())));
+
+            t.addCell(detailLabel("Response Status"));
+            t.addCell(responseStatusCell(call));
+
+            if (call.getError() == null) {
+                t.addCell(detailLabel("Response Body"));
+                t.addCell(codeCell(prettyBody(call.getResponseBody())));
+            }
+            doc.add(t);
+        }
+    }
+
+    private Cell responseStatusCell(com.katalan.core.model.ApiCallRecord call) {
+        String text;
+        DeviceRgb color;
+        if (call.getError() != null) {
+            text = "No response — " + call.getError();
+            color = COLOR_ERROR;
+        } else {
+            text = "HTTP " + call.getStatusCode() + "  ·  " + call.getElapsedMs() + " ms";
+            color = call.getStatusCode() >= 200 && call.getStatusCode() < 400 ? COLOR_PASSED : COLOR_FAILED;
+        }
+        return new Cell()
+                .add(new Paragraph(text).setBold().setFontSize(9).setFontColor(color))
+                .setBorder(new SolidBorder(COLOR_BORDER, 0.5f))
+                .setPadding(8)
+                .setVerticalAlignment(VerticalAlignment.MIDDLE);
+    }
+
+    private Cell codeCell(String text) {
+        // iText drops leading spaces on each line; non-breaking spaces keep the JSON indentation.
+        String shown = text == null || text.isEmpty() ? DASH : text;
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(?m)^ +").matcher(shown);
+        StringBuffer sb = new StringBuffer();
+        while (m.find()) {
+            m.appendReplacement(sb, m.group().replace(' ', ' '));
+        }
+        m.appendTail(sb);
+        Paragraph p = new Paragraph(sb.toString())
+                .setFontSize(7.5f).setFontColor(COLOR_TEXT).setMultipliedLeading(1.1f);
+        if (monoFont() != null) p.setFont(monoFont());
+        return new Cell()
+                .add(p)
+                .setBackgroundColor(new DeviceRgb(248, 249, 251))
+                .setBorder(new SolidBorder(COLOR_BORDER, 0.5f))
+                .setPadding(6);
+    }
+
+    /** Pretty-prints JSON bodies; other bodies are shown as sent, with tabs expanded. Long bodies are cut. */
+    private static String prettyBody(String body) {
+        if (body == null) return null;
+        String s = body.trim();
+        if (s.startsWith("{") || s.startsWith("[")) {
+            try {
+                s = JSON.writerWithDefaultPrettyPrinter().writeValueAsString(JSON.readTree(s));
+            } catch (Exception ignored) { /* not valid JSON: show as-is */ }
+        }
+        s = s.replace("\t", "    ").replace("\r\n", "\n");
+        if (s.length() > API_BODY_MAX_CHARS) {
+            s = s.substring(0, API_BODY_MAX_CHARS) + "\n… (" + (s.length() - API_BODY_MAX_CHARS) + " more characters omitted)";
+        }
+        return s;
+    }
+
+    /** First issue-tracker link (e.g. https://jira.../browse/SQAESB-123) the test case printed or passed to a step. */
+    private static String findIssueLink(TestCaseResult tc) {
+        for (String source : new String[]{
+                tc.getBddScenarioData() != null ? String.valueOf(tc.getBddScenarioData()) : null,
+                tc.getConsoleOutput()}) {
+            if (source == null) continue;
+            java.util.regex.Matcher m = ISSUE_LINK.matcher(source);
+            if (m.find()) return m.group();
+        }
+        return null;
     }
 
     // ----- detail-grid helpers -----
