@@ -733,12 +733,7 @@ public class WebUI {
         timeout = normalizeTimeout(timeout);
         logger.info("Waiting for element present: {} (timeout={}s)", describe(testObject), timeout);
         try {
-            WebDriver driver = getDriver();
-            By locator = smartLocator(testObject);
-            
-            // Use 50ms polling for fast detection (consistent with waitForElement)
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(50));
-            wait.until(ExpectedConditions.presenceOfElementLocated(locator));
+            waitForElement(testObject, timeout);
             return true;
         } catch (Exception e) {
             // Katalon-compatible behavior: wait* methods log warning and return false by default
@@ -779,12 +774,10 @@ public class WebUI {
         timeout = normalizeTimeout(timeout);
         logger.info("Waiting for element visible: {} (timeout={}s)", describe(testObject), timeout);
         try {
-            WebDriver driver = getDriver();
-            By locator = smartLocator(testObject);
-            
-            // Use 50ms polling for fast detection (consistent with waitForElement)
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(50));
-            wait.until(ExpectedConditions.visibilityOfElementLocated(locator));
+            By locator = testObject.toSeleniumBy();
+            if (pollLikeKatalon(timeout, ExpectedConditions.visibilityOfElementLocated(locator)::apply) == null) {
+                throw new TimeoutException("Timed out after " + timeout + "s waiting for visibility of element located by: " + locator);
+            }
             return true;
         } catch (Exception e) {
             // Katalon-compatible behavior: wait* methods log warning and return false by default
@@ -825,12 +818,10 @@ public class WebUI {
         timeout = normalizeTimeout(timeout);
         logger.info("Waiting for element clickable: {} (timeout={}s)", describe(testObject), timeout);
         try {
-            WebDriver driver = getDriver();
-            By locator = smartLocator(testObject);
-            
-            // Use 50ms polling for fast detection (consistent with waitForElement)
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(50));
-            wait.until(ExpectedConditions.elementToBeClickable(locator));
+            By locator = testObject.toSeleniumBy();
+            if (pollLikeKatalon(timeout, ExpectedConditions.elementToBeClickable(locator)::apply) == null) {
+                throw new TimeoutException("Timed out after " + timeout + "s waiting for element to be clickable: " + locator);
+            }
             return true;
         } catch (Exception e) {
             // Katalon-compatible behavior: wait* methods log warning and return false by default
@@ -1957,33 +1948,46 @@ public class WebUI {
      * - Simple presence check (no visibility/enabled requirements)
      */
     private static WebElement waitForElement(TestObject testObject, int timeout) {
-        WebDriver driver = getDriver();
-        By locator = smartLocator(testObject);
-        
-        // OPTIMIZATION: Quick check if element already present
-        // This avoids creating WebDriverWait when element is already there
-        try {
-            WebElement element = driver.findElement(locator);
-            // Element found immediately - return it
-            return element;
-        } catch (NoSuchElementException ignored) {
-            // Element not present yet, proceed to wait
-        }
-        
-        // Element not immediately available, use WebDriverWait with fast polling
-        // Use 50ms polling for faster detection (was 100ms)
         // timeout=0 means "default timeout" in Katalon (e.g. scrollToElement(obj, 0))
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(normalizeTimeout(timeout)), Duration.ofMillis(50));
-        
-        // Wait for presence with auto-retry on stale elements
-        return wait.until(driver1 -> {
+        timeout = normalizeTimeout(timeout);
+        By locator = testObject.toSeleniumBy();
+        WebElement element = pollLikeKatalon(timeout, driver -> driver.findElement(locator));
+        if (element == null) {
+            throw new TimeoutException("Timed out after " + timeout + "s waiting for presence of element located by: " + locator);
+        }
+        return element;
+    }
+
+    /**
+     * Katalon's element lookup loop (WebUiCommonHelper.findElementByNormalMethods): smart wait
+     * before every poll, and keep polling while the whole seconds elapsed are <= timeout. A page
+     * that is still loading (AJAX in flight, DOM changing) therefore stretches the wait instead of
+     * eating into it, and a timeout of 5 really allows up to ~6 s - e.g. esb-msr's
+     * verifyElementPresent(kibanaLoginForm, 5), which raced a slow Kibana with a strict 5 s wait.
+     *
+     * @return the first non-null result of {@code attempt}, or null when the time is up
+     */
+    private static <T> T pollLikeKatalon(int timeout, java.util.function.Function<WebDriver, T> attempt) {
+        WebDriver driver = getDriver();
+        long start = System.currentTimeMillis();
+        do {
+            SmartWait.doSmartWait(driver);
             try {
-                return driver1.findElement(locator);
-            } catch (StaleElementReferenceException e) {
-                // Auto-retry on stale - return null to continue polling
+                T result = attempt.apply(driver);
+                if (result != null) {
+                    return result;
+                }
+            } catch (NoSuchElementException | StaleElementReferenceException ignored) {
+                // not there (yet) - poll again
+            }
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
                 return null;
             }
-        });
+        } while ((System.currentTimeMillis() - start) / 1000L <= timeout);
+        return null;
     }
     
     private static WebElement findElement(TestObject testObject) {
