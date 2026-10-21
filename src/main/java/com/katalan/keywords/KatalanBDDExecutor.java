@@ -785,6 +785,10 @@ public class KatalanBDDExecutor {
                             String timestamp = System.currentTimeMillis() + "_error";
                             String screenshotPath = WebUI.takeScreenshot(timestamp);
                             logger.info("📸 Screenshot captured on step failure: {}", screenshotPath);
+                            if (screenshotPath != null) {
+                                context.setProperty(
+                                        com.katalan.core.engine.KatalanEngine.FAILURE_SCREENSHOT_TAKEN, true);
+                            }
                             
                             // Add screenshot info to log
                             Map<String, Object> screenshotLog = new LinkedHashMap<>();

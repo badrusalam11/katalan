@@ -154,7 +154,7 @@ public final class SmartWait {
      * A project execution setting (settings/internal/com.kms.katalon.execution[.webui].properties),
      * unquoted, or null when the project doesn't set it.
      */
-    static String readProjectSetting(String key) {
+    public static String readProjectSetting(String key) {
         try {
             ExecutionContext ctx = ExecutionContext.getCurrent();
             Path project = ctx != null ? ctx.getProjectPath() : null;

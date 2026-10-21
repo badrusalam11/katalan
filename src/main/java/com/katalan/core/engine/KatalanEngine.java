@@ -535,6 +535,7 @@ public class KatalanEngine {
             attempts++;
             context.drainContinuedFailures();
             context.drainApiCalls();
+            context.setProperty(FAILURE_SCREENSHOT_TAKEN, null);
 
             try {
                 // Add test case variables to script (resolve GlobalVariableReferences)
@@ -799,6 +800,9 @@ public class KatalanEngine {
         return quitDriversAfterTestCase;
     }
 
+    /** Context flag: a failure screenshot was already captured at the failing step. */
+    public static final String FAILURE_SCREENSHOT_TAKEN = "failureScreenshotTaken";
+
     private void handleTestFailure(TestCase testCase, TestCaseResult result,
                                     Throwable e, int attempt, int maxAttempts) {
         e = KatalonStepFailure.unwrap(e);
@@ -817,7 +821,10 @@ public class KatalanEngine {
             // Log FAILED record to execution0.log (Katalon format)
             logTestCaseFailure(testCase, e, errorMessage, stackTrace);
             
-            if (config.isTakeScreenshotOnFailure()) {
+            // Katalon captures one screenshot where the step failed, never a second one for
+            // the test case; skip ours when the failing BDD step already took it.
+            if (config.isTakeScreenshotOnFailure()
+                    && !Boolean.TRUE.equals(context.getProperty(FAILURE_SCREENSHOT_TAKEN))) {
                 takeScreenshot(result, "failure");
             }
         }
@@ -844,7 +851,10 @@ public class KatalanEngine {
             // Log FAILED record to execution0.log (Katalon format - errors logged as FAILED)
             logTestCaseFailure(testCase, e, errorMessage, stackTrace);
             
-            if (config.isTakeScreenshotOnFailure()) {
+            // Katalon captures one screenshot where the step failed, never a second one for
+            // the test case; skip ours when the failing BDD step already took it.
+            if (config.isTakeScreenshotOnFailure()
+                    && !Boolean.TRUE.equals(context.getProperty(FAILURE_SCREENSHOT_TAKEN))) {
                 takeScreenshot(result, "error");
             }
         }

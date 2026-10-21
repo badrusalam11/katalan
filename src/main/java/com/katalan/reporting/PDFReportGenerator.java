@@ -909,20 +909,22 @@ public class PDFReportGenerator {
     private java.util.List<Path> collectScreenshots(TestCaseResult tc) {
         java.util.LinkedHashSet<Path> images = new java.util.LinkedHashSet<>();
 
-        // 1) Screenshot paths explicitly attached to the test case result
+        // 1) Authoritative source: parse execution0.log for <property name="attachment">
+        //    records that occur between "Start Test Case : <name>" / "End Test Case : <name>".
+        //    It holds every screenshot in capture order (takeScreenshot, takeFullPageScreenshot,
+        //    failure shots), like the Katalon report.
+        java.util.List<String> attachments = lookupAttachments(tc.getTestCaseName());
+        for (String fileName : attachments) {
+            Path p = resolveImagePath(fileName);
+            if (p != null) images.add(p);
+        }
+
+        // 2) Screenshot paths attached to the test case result (the engine's failure shot).
+        //    Merged in, never instead of the log: they only cover the failure, so letting them
+        //    win dropped every step screenshot of a failed test case from the PDF.
         if (tc.getScreenshotPaths() != null) {
             for (String s : tc.getScreenshotPaths()) {
                 Path p = resolveImagePath(s);
-                if (p != null) images.add(p);
-            }
-        }
-
-        // 2) Authoritative source: parse execution0.log for <property name="attachment">
-        //    records that occur between "Start Test Case : <name>" / "End Test Case : <name>"
-        if (images.isEmpty()) {
-            java.util.List<String> attachments = lookupAttachments(tc.getTestCaseName());
-            for (String fileName : attachments) {
-                Path p = resolveImagePath(fileName);
                 if (p != null) images.add(p);
             }
         }
@@ -1632,7 +1634,13 @@ public class PDFReportGenerator {
         return name.toLowerCase().replaceAll("[^a-z0-9]+", "_");
     }
 
+    /** Absolute, normalised path of an existing image, so one file found via two sources dedupes. */
     private Path resolveImagePath(String s) {
+        Path p = locateImagePath(s);
+        return p == null ? null : p.toAbsolutePath().normalize();
+    }
+
+    private Path locateImagePath(String s) {
         if (s == null || s.isEmpty()) return null;
         try {
             Path p = Paths.get(s);

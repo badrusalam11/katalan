@@ -154,11 +154,41 @@ public class RunConfiguration {
         return getExecutionSource();
     }
     
+    // Katalon Studio's "Default wait for element timeout" when the project doesn't set it
+    private static final int UNSET_TIMEOUT = 30;
+    // Katalon's KeywordHelper.checkTimeout fallback for a timeout <= 0
+    private static final int INVALID_TIMEOUT_FALLBACK = 10;
+    private static volatile Path timeoutProject;
+    private static volatile int timeoutSeconds = UNSET_TIMEOUT;
+
     /**
-     * Get the default timeout for wait operations
+     * Default wait for element timeout in seconds: the project's {@code execution.default.timeout}
+     * (Project Settings > Execution), which Katalon uses for every keyword called without a timeout.
      */
     public static int getDefaultTimeout() {
-        return 40;
+        ExecutionContext ctx = ExecutionContext.getCurrent();
+        Path project = ctx != null ? ctx.getProjectPath() : null;
+        if (project == null) {
+            return UNSET_TIMEOUT;
+        }
+        if (!project.equals(timeoutProject)) {
+            int value = UNSET_TIMEOUT;
+            String raw = com.katalan.core.driver.SmartWait.readProjectSetting("execution.default.timeout");
+            if (raw != null) {
+                try {
+                    value = Integer.parseInt(raw.trim());
+                } catch (NumberFormatException e) {
+                    value = 0;
+                }
+                if (value <= 0) {
+                    value = INVALID_TIMEOUT_FALLBACK;
+                }
+            }
+            timeoutSeconds = value;
+            timeoutProject = project;
+            logger.info("Default wait for element timeout: {}s", value);
+        }
+        return timeoutSeconds;
     }
     
     /**
