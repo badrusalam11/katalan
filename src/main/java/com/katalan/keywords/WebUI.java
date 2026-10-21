@@ -2,6 +2,7 @@ package com.katalan.keywords;
 
 import com.katalan.core.context.ExecutionContext;
 import com.katalan.core.driver.ActionDelay;
+import com.katalan.core.driver.ElementInteractableWait;
 import com.katalan.core.driver.SmartWait;
 import com.katalan.core.model.TestObject;
 import com.katalan.core.exception.StepFailedException;
@@ -238,77 +239,39 @@ public class WebUI {
      * Click on an element
      */
     public static void click(TestObject testObject) {
-        click(testObject, 30);
+        click(testObject, defaultTimeout());
     }
     
     /**
-     * Click on an element with timeout
-     * 
-     * Implementation notes:
-     * - Waits for element to be clickable (visible + enabled)
-     * - Includes 200ms PRE-click stability wait for SPA frameworks
-     * - Scrolls element into view before clicking
-     * - Has retry mechanism for stale element references
-     * - Falls back to JavaScript click if native click fails
-     * 
-     * The PRE-click stability wait is critical for dynamically rendered elements
-     * (e.g., in loops, after modal close, after previous form submission) where
-     * the element passes elementToBeClickable but React/Angular/Vue hasn't yet:
-     *   • Attached event handlers to the new DOM element
-     *   • Completed state transitions/animations
-     *   • Removed invisible overlays or loading indicators
+     * Click on an element with timeout - Katalon's ClickKeyword.
+     *
+     * One attempt finds the element (smart wait before every poll), runs Katalon's interactable
+     * wait (visible, stable, enabled, topmost - the topmost phase scrolls the element into view) and
+     * clicks it natively. If the wait gives up it logs "Waiting for element timed out" and clicks
+     * anyway. Any WebDriverException (e.g. ElementClickInterceptedException from an overlay, a stale
+     * element, element not found) starts a new attempt while the elapsed time is within the timeout
+     * (SeleniumActionRetryController); after that the last exception fails the step. There is no
+     * JavaScript click fallback - Katalon has none, and a JS click goes through overlays a user
+     * could not click through. Action delay runs before the native click via the driver listener.
      */
     public static void click(TestObject testObject, int timeout) {
         logger.info("Clicking on: {}", describe(testObject));
         WebDriver driver = getDriver();
-        By by = smartLocator(testObject);
-        
-        // Retry mechanism for stale element reference
-        int maxRetries = 3;
-        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+        timeout = normalizeTimeout(timeout);
+        long timeoutMs = timeout * 1000L;
+        long start = System.currentTimeMillis();
+        while (true) {
             try {
-                // Use WebDriverWait with fast polling (100ms)
-                WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(100));
-                
-                // Wait for element to be clickable
-                WebElement element = wait.until(ExpectedConditions.elementToBeClickable(by));
-                
-                // PRE-CLICK STABILITY: Give SPA frameworks time to fully initialize the element
-                // This is critical for elements that are dynamically rendered/re-rendered (loops, modals)
-                // Prevents clicking on elements that are "clickable" but not yet ready
-                // Katalon's action delay runs before every click; never go below the 200 ms
-                // stability wait katalan has always used here.
-                try {
-                    Thread.sleep(Math.max(200, ActionDelay.getDelayMs()));
-                } catch (InterruptedException ignored) {}
-                
-                // Scroll into view to avoid "not interactable" when the element is off-screen
-                try {
-                    ((JavascriptExecutor) driver).executeScript(
-                        "arguments[0].scrollIntoView({block:'center', inline:'center'});", element);
-                } catch (Exception ignored) {}
-                
-                // Re-find element after scroll to avoid stale reference
-                element = driver.findElement(by);
-                
-                // Attempt click with fallback to JS click
-                try {
-                    element.click();
-                    return; // Success - exit method
-                } catch (ElementNotInteractableException e) {
-                    logger.warn("Native click failed ({}), retrying with JS click", e.getClass().getSimpleName());
-                    // Re-find again in case element changed
-                    element = driver.findElement(by);
-                    ((JavascriptExecutor) driver).executeScript("arguments[0].click();", element);
-                    return; // Success - exit method
+                WebElement element = waitForElement(testObject, timeout);
+                if (driver instanceof JavascriptExecutor) {
+                    ElementInteractableWait.waitInteractable((JavascriptExecutor) driver, element, timeoutMs, start);
                 }
-            } catch (StaleElementReferenceException e) {
-                if (attempt == maxRetries) {
-                    logger.error("Click failed after {} attempts due to stale element: {}", maxRetries, describe(testObject));
-                    throw new StepFailedException("Element is stale after " + maxRetries + " attempts: " + describe(testObject), e);
+                element.click();
+                return;
+            } catch (WebDriverException e) {
+                if (System.currentTimeMillis() - start > timeoutMs) {
+                    throw e;
                 }
-                logger.warn("Stale element detected on attempt {}/{}, retrying...", attempt, maxRetries);
-                try { Thread.sleep(200); } catch (InterruptedException ignored) {}
             }
         }
     }
@@ -317,7 +280,7 @@ public class WebUI {
      * Double click on an element
      */
     public static void doubleClick(TestObject testObject) {
-        doubleClick(testObject, 30);
+        doubleClick(testObject, defaultTimeout());
     }
     
     /**
@@ -333,7 +296,7 @@ public class WebUI {
      * Right click on an element
      */
     public static void rightClick(TestObject testObject) {
-        rightClick(testObject, 30);
+        rightClick(testObject, defaultTimeout());
     }
     
     /**
@@ -349,7 +312,7 @@ public class WebUI {
      * Click on element using JavaScript
      */
     public static void clickUsingJavaScript(TestObject testObject) {
-        clickUsingJavaScript(testObject, 30);
+        clickUsingJavaScript(testObject, defaultTimeout());
     }
     
     /**
@@ -367,7 +330,7 @@ public class WebUI {
      * Set text to an input field
      */
     public static void setText(TestObject testObject, String text) {
-        setText(testObject, text, 30);
+        setText(testObject, text, defaultTimeout());
     }
     
     /**
@@ -388,7 +351,7 @@ public class WebUI {
      * setText. The plain text is never logged.
      */
     public static void setEncryptedText(TestObject testObject, String encryptedText) {
-        setEncryptedText(testObject, encryptedText, 30);
+        setEncryptedText(testObject, encryptedText, defaultTimeout());
     }
 
     public static void setEncryptedText(TestObject testObject, String encryptedText, int timeout) {
@@ -455,7 +418,7 @@ public class WebUI {
      * Clear text from an input field
      */
     public static void clearText(TestObject testObject) {
-        clearText(testObject, 30);
+        clearText(testObject, defaultTimeout());
     }
     
     /**
@@ -471,14 +434,14 @@ public class WebUI {
      * Send keys to an element
      */
     public static void sendKeys(TestObject testObject, Keys... keys) {
-        sendKeys(testObject, 30, keys);
+        sendKeys(testObject, defaultTimeout(), keys);
     }
     
     /**
      * Send keys (text string) to an element - Katalon compatibility
      */
     public static void sendKeys(TestObject testObject, String text) {
-        sendKeys(testObject, 30, text);
+        sendKeys(testObject, defaultTimeout(), text);
     }
     
     /**
@@ -510,7 +473,7 @@ public class WebUI {
      * Upload file
      */
     public static void uploadFile(TestObject testObject, String filePath) {
-        uploadFile(testObject, filePath, 30);
+        uploadFile(testObject, filePath, defaultTimeout());
     }
     
     /**
@@ -529,7 +492,7 @@ public class WebUI {
      * Get text from an element
      */
     public static String getText(TestObject testObject) {
-        return getText(testObject, 30);
+        return getText(testObject, defaultTimeout());
     }
     
     /**
@@ -544,7 +507,7 @@ public class WebUI {
      * Get attribute value from an element
      */
     public static String getAttribute(TestObject testObject, String attributeName) {
-        return getAttribute(testObject, attributeName, 30);
+        return getAttribute(testObject, attributeName, defaultTimeout());
     }
     
     /**
@@ -559,7 +522,7 @@ public class WebUI {
      * Get CSS value from an element
      */
     public static String getCssValue(TestObject testObject, String cssProperty) {
-        return getCssValue(testObject, cssProperty, 30);
+        return getCssValue(testObject, cssProperty, defaultTimeout());
     }
     
     /**
@@ -576,14 +539,14 @@ public class WebUI {
      * Select option by visible text
      */
     public static void selectOptionByLabel(TestObject testObject, String label) {
-        selectOptionByLabel(testObject, label, false, 30);
+        selectOptionByLabel(testObject, label, false, defaultTimeout());
     }
     
     /**
      * Select option by visible text (3-parameter version for Katalon compatibility)
      */
     public static void selectOptionByLabel(TestObject testObject, String label, Boolean isRegex) {
-        selectOptionByLabel(testObject, label, isRegex != null && isRegex, 30);
+        selectOptionByLabel(testObject, label, isRegex != null && isRegex, defaultTimeout());
     }
     
     /**
@@ -609,7 +572,7 @@ public class WebUI {
      * Select option by value
      */
     public static void selectOptionByValue(TestObject testObject, String value) {
-        selectOptionByValue(testObject, value, false, 30);
+        selectOptionByValue(testObject, value, false, defaultTimeout());
     }
     
     /**
@@ -635,7 +598,7 @@ public class WebUI {
      * Select option by index
      */
     public static void selectOptionByIndex(TestObject testObject, int index) {
-        selectOptionByIndex(testObject, index, 30);
+        selectOptionByIndex(testObject, index, defaultTimeout());
     }
     
     /**
@@ -652,7 +615,7 @@ public class WebUI {
      * Deselect all options
      */
     public static void deselectAllOption(TestObject testObject) {
-        deselectAllOption(testObject, 30);
+        deselectAllOption(testObject, defaultTimeout());
     }
     
     /**
@@ -669,7 +632,7 @@ public class WebUI {
      * Get number of options in a select
      */
     public static int getNumberOfSelectedOption(TestObject testObject) {
-        return getNumberOfSelectedOption(testObject, 30);
+        return getNumberOfSelectedOption(testObject, defaultTimeout());
     }
     
     /**
@@ -685,7 +648,7 @@ public class WebUI {
      * Get number of total options in a select
      */
     public static int getNumberOfTotalOption(TestObject testObject) {
-        return getNumberOfTotalOption(testObject, 30);
+        return getNumberOfTotalOption(testObject, defaultTimeout());
     }
     
     /**
@@ -703,7 +666,7 @@ public class WebUI {
      * Check a checkbox
      */
     public static void check(TestObject testObject) {
-        check(testObject, 30);
+        check(testObject, defaultTimeout());
     }
     
     /**
@@ -722,7 +685,7 @@ public class WebUI {
      * Uncheck a checkbox
      */
     public static void uncheck(TestObject testObject) {
-        uncheck(testObject, 30);
+        uncheck(testObject, defaultTimeout());
     }
     
     /**
@@ -747,22 +710,22 @@ public class WebUI {
      * return immediately as soon as the condition is met". It does NOT mean
      * "wait literally 0 seconds".
      * 
-     * This method converts timeout=0 to RunConfiguration.getTimeOut() (default 40s).
+     * This method converts timeout=0 to RunConfiguration.getTimeOut() (project default timeout).
      * Negative timeouts are also normalized to the default.
      * 
      * @param timeout the requested timeout in seconds (0 = use default)
      * @return the actual timeout to use (always >= 1)
      */
     private static int normalizeTimeout(int timeout) {
-        if (timeout <= 0) {
-            try {
-                int defaultTimeout = com.kms.katalon.core.configuration.RunConfiguration.getTimeOut();
-                return defaultTimeout > 0 ? defaultTimeout : 40;
-            } catch (Throwable t) {
-                return 40; // Fallback default
-            }
-        }
-        return timeout;
+        return timeout <= 0 ? defaultTimeout() : timeout;
+    }
+
+    /**
+     * Katalon's default wait for element timeout (project setting execution.default.timeout),
+     * used by every keyword called without an explicit timeout.
+     */
+    public static int defaultTimeout() {
+        return com.kms.katalon.core.configuration.RunConfiguration.getTimeOut();
     }
     
     /**
@@ -1181,7 +1144,7 @@ public class WebUI {
      * Verify element text
      */
     public static boolean verifyElementText(TestObject testObject, String expectedText) {
-        return verifyElementText(testObject, expectedText, false, 30, null);
+        return verifyElementText(testObject, expectedText, false, defaultTimeout(), null);
     }
     
     /**
@@ -1284,7 +1247,7 @@ public class WebUI {
      * Switch to frame by WebElement
      */
     public static void switchToFrame(TestObject testObject) {
-        switchToFrame(testObject, 30);
+        switchToFrame(testObject, defaultTimeout());
     }
     
     /**
@@ -1423,7 +1386,7 @@ public class WebUI {
      * Scroll to element
      */
     public static void scrollToElement(TestObject testObject) {
-        scrollToElement(testObject, 30);
+        scrollToElement(testObject, defaultTimeout());
     }
     
     /**
@@ -1463,7 +1426,7 @@ public class WebUI {
      * Mouse over element
      */
     public static void mouseOver(TestObject testObject) {
-        mouseOver(testObject, 30);
+        mouseOver(testObject, defaultTimeout());
     }
     
     /**
@@ -1479,7 +1442,7 @@ public class WebUI {
      * Drag and drop
      */
     public static void dragAndDrop(TestObject source, TestObject target) {
-        dragAndDrop(source, target, 30);
+        dragAndDrop(source, target, defaultTimeout());
     }
     
     /**
@@ -1496,7 +1459,7 @@ public class WebUI {
      * Focus on element
      */
     public static void focus(TestObject testObject) {
-        focus(testObject, 30);
+        focus(testObject, defaultTimeout());
     }
     
     /**
@@ -1928,7 +1891,7 @@ public class WebUI {
      */
     private static int toIntTimeout(Object timeout) {
         if (timeout == null) {
-            return 30; // default timeout
+            return defaultTimeout();
         }
         if (timeout instanceof Number) {
             return ((Number) timeout).intValue();
@@ -1937,10 +1900,10 @@ public class WebUI {
             try {
                 return Integer.parseInt((String) timeout);
             } catch (NumberFormatException e) {
-                return 30; // default if parse fails
+                return defaultTimeout();
             }
         }
-        return 30; // default
+        return defaultTimeout();
     }
     
     /**
@@ -2103,14 +2066,14 @@ public class WebUI {
      * Click element with offset (x, y coordinates from element's top-left corner)
      */
     public static void clickOffset(TestObject testObject, int offsetX, int offsetY) {
-        clickOffset(testObject, offsetX, offsetY, 30);
+        clickOffset(testObject, offsetX, offsetY, defaultTimeout());
     }
     
     /**
      * Click element with offset - accepts any TestObject type
      */
     public static void clickOffset(Object testObjectParam, int offsetX, int offsetY) {
-        clickOffset(convertTestObject(testObjectParam), offsetX, offsetY, 30);
+        clickOffset(convertTestObject(testObjectParam), offsetX, offsetY, defaultTimeout());
     }
     
     /**
@@ -2133,14 +2096,14 @@ public class WebUI {
      * Enhanced click with retry mechanism for flaky elements
      */
     public static void enhancedClick(TestObject testObject) {
-        enhancedClick(testObject, 30);
+        enhancedClick(testObject, defaultTimeout());
     }
     
     /**
      * Enhanced click - accepts any TestObject type (Katalon or katalan)
      */
     public static void enhancedClick(Object testObjectParam) {
-        enhancedClick(convertTestObject(testObjectParam), 30);
+        enhancedClick(convertTestObject(testObjectParam), defaultTimeout());
     }
     
     /**
@@ -2151,36 +2114,61 @@ public class WebUI {
     }
     
     /**
-     * Enhanced click with retry mechanism and timeout
+     * Enhanced click with timeout - Katalon's EnhancedClickKeyword.
+     *
+     * Each attempt finds the element (smart wait before every poll) and tries, in order: a native
+     * click; scrolling to the element (Actions.moveToElement + scrollIntoView(true)), waiting up to
+     * the timeout for it to be clickable and a native click; a JavaScript click. Unlike click(),
+     * falling back to the JavaScript click is the point of this keyword. A WebDriverException that
+     * escapes all three (e.g. element not found, stale while clicking via JS) starts a new attempt
+     * while the elapsed time is within the timeout, then fails the step.
      */
     public static void enhancedClick(TestObject testObject, int timeout) {
         logger.info("Enhanced clicking on: {}", describe(testObject));
         WebDriver driver = getDriver();
-        By by = smartLocator(testObject);
-        
-        int maxRetries = 3;
-        for (int i = 0; i < maxRetries; i++) {
+        timeout = normalizeTimeout(timeout);
+        long timeoutMs = timeout * 1000L;
+        long start = System.currentTimeMillis();
+        while (true) {
             try {
-                WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeout), Duration.ofMillis(100));
-                WebElement element = wait.until(ExpectedConditions.elementToBeClickable(by));
-                
-                // Scroll into view
-                ((JavascriptExecutor) driver).executeScript(
-                    "arguments[0].scrollIntoView({block:'center', inline:'center'});", element);
-                
+                WebElement element = waitForElement(testObject, timeout);
                 try {
+                    logger.debug("Trying Selenium click !");
                     element.click();
-                    return; // Success
-                } catch (ElementClickInterceptedException e) {
-                    // Try JS click as fallback
-                    ((JavascriptExecutor) driver).executeScript("arguments[0].click();", element);
                     return;
+                } catch (Exception seleniumClickFailed) {
+                    try {
+                        logger.debug("Trying to scroll to the element, wait for it to be clickable and use Selenium click !");
+                        scrollToElementForEnhancedClick(driver, element);
+                        element = new WebDriverWait(driver, Duration.ofSeconds(timeout))
+                                .until(ExpectedConditions.elementToBeClickable(element));
+                        element.click();
+                        return;
+                    } catch (Exception scrolledClickFailed) {
+                        logger.debug("Trying Javascript click !");
+                        ((JavascriptExecutor) driver).executeScript("arguments[0].click();", element);
+                        return;
+                    }
                 }
-            } catch (StaleElementReferenceException e) {
-                if (i == maxRetries - 1) throw e;
-                logger.debug("Stale element, retrying... ({}/{})", i + 1, maxRetries);
-                delay(1);
+            } catch (WebDriverException e) {
+                if (System.currentTimeMillis() - start > timeoutMs) {
+                    throw e;
+                }
             }
+        }
+    }
+
+    // EnhancedClickKeyword.scrollToElement: failures are logged, never thrown
+    private static void scrollToElementForEnhancedClick(WebDriver driver, WebElement element) {
+        try {
+            new Actions(driver).moveToElement(element).build().perform();
+        } catch (Exception e) {
+            logger.error(e.getMessage());
+        }
+        try {
+            ((JavascriptExecutor) driver).executeScript("arguments[0].scrollIntoView(true);", element);
+        } catch (Exception e) {
+            logger.error(e.getMessage());
         }
     }
     
@@ -2188,14 +2176,14 @@ public class WebUI {
      * Find single web element using TestObject
      */
     public static WebElement findWebElement(TestObject testObject) {
-        return findWebElement(testObject, 30);
+        return findWebElement(testObject, defaultTimeout());
     }
     
     /**
      * Find single web element - accepts any TestObject type
      */
     public static WebElement findWebElement(Object testObjectParam) {
-        return findWebElement(convertTestObject(testObjectParam), 30);
+        return findWebElement(convertTestObject(testObjectParam), defaultTimeout());
     }
     
     /**
@@ -2216,14 +2204,14 @@ public class WebUI {
      * Find multiple web elements using TestObject
      */
     public static List<WebElement> findWebElements(TestObject testObject) {
-        return findWebElements(testObject, 30);
+        return findWebElements(testObject, defaultTimeout());
     }
     
     /**
      * Find multiple web elements - accepts any TestObject type
      */
     public static List<WebElement> findWebElements(Object testObjectParam) {
-        return findWebElements(convertTestObject(testObjectParam), 30);
+        return findWebElements(convertTestObject(testObjectParam), defaultTimeout());
     }
     
     /**

@@ -374,11 +374,11 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void sendKeys(TestObject to, String keys) {
-        WebUI.sendKeys(toKatalan(to), 30, keys);
+        WebUI.sendKeys(toKatalan(to), WebUI.defaultTimeout(), keys);
     }
     
     public static void sendKeys(TestObject to, String keys, FailureHandling flowControl) {
-        runVoid(() -> WebUI.sendKeys(toKatalan(to), 30, keys), flowControl);
+        runVoid(() -> WebUI.sendKeys(toKatalan(to), WebUI.defaultTimeout(), keys), flowControl);
     }
     
     public static void clearText(TestObject to) {
@@ -482,11 +482,11 @@ public class WebUiBuiltInKeywords {
     }
     
     public static boolean verifyElementVisible(TestObject to) {
-        return WebUI.verifyElementVisible(toKatalan(to), 30);
+        return WebUI.verifyElementVisible(toKatalan(to), WebUI.defaultTimeout());
     }
     
     public static boolean verifyElementVisible(TestObject to, FailureHandling flowControl) {
-        return runBool(() -> WebUI.verifyElementVisible(toKatalan(to), 30), flowControl);
+        return runBool(() -> WebUI.verifyElementVisible(toKatalan(to), WebUI.defaultTimeout()), flowControl);
     }
     
     public static boolean verifyElementVisible(TestObject to, int timeout) {
@@ -498,19 +498,19 @@ public class WebUiBuiltInKeywords {
     }
     
     public static boolean verifyElementNotVisible(TestObject to) {
-        return verifyElementNotVisible(to, 30);
+        return verifyElementNotVisible(to, WebUI.defaultTimeout());
     }
     
     public static boolean verifyElementNotVisible(TestObject to, FailureHandling flowControl) {
-        return verifyElementNotVisible(to, 30, flowControl);
+        return verifyElementNotVisible(to, WebUI.defaultTimeout(), flowControl);
     }
     
     public static boolean verifyElementClickable(TestObject to) {
-        return verifyElementClickable(to, 30);
+        return verifyElementClickable(to, WebUI.defaultTimeout());
     }
     
     public static boolean verifyElementClickable(TestObject to, FailureHandling flowControl) {
-        return verifyElementClickable(to, 30, flowControl);
+        return verifyElementClickable(to, WebUI.defaultTimeout(), flowControl);
     }
     
     public static boolean verifyElementText(TestObject to, String text) {
@@ -593,7 +593,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void selectOptionByValue(TestObject to, String value, boolean isRegex) {
-        WebUI.selectOptionByValue(toKatalan(to), value, isRegex, 30);
+        WebUI.selectOptionByValue(toKatalan(to), value, isRegex, WebUI.defaultTimeout());
     }
     
     public static void selectOptionByValue(TestObject to, String value, boolean isRegex, FailureHandling flowControl) {
@@ -605,7 +605,7 @@ public class WebUiBuiltInKeywords {
     }
     
     public static void selectOptionByLabel(TestObject to, String label, boolean isRegex) {
-        WebUI.selectOptionByLabel(toKatalan(to), label, isRegex, 30);
+        WebUI.selectOptionByLabel(toKatalan(to), label, isRegex, WebUI.defaultTimeout());
     }
     
     public static void selectOptionByLabel(TestObject to, String label, boolean isRegex, FailureHandling flowControl) {
@@ -1008,6 +1008,10 @@ public class WebUiBuiltInKeywords {
     
     public static void enhancedClick(TestObject to, int timeout) {
         WebUI.enhancedClick(toKatalan(to), timeout);
+    }
+
+    public static void enhancedClick(TestObject to, FailureHandling flowControl) {
+        runVoid(() -> WebUI.enhancedClick(toKatalan(to)), flowControl);
     }
     
     public static void loading() {

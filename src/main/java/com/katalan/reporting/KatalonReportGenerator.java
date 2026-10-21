@@ -79,6 +79,9 @@ public class KatalonReportGenerator {
     private final String katalanVersion; // katalan version for reports
     private final String katalonCompatVersion = "10.3.2.0"; // Katalon Studio compatibility version
     private Path currentReportDir;
+    // Report dir and execution0.log screenshots while the HTML report is being built
+    private Path htmlReportDir;
+    private Map<String, List<ScreenshotRecord>> htmlScreenshots = Collections.emptyMap();
     
     public KatalonReportGenerator(Path projectPath) {
         this.projectPath = projectPath;
@@ -272,6 +275,8 @@ public class KatalonReportGenerator {
      * Generate main HTML report
      */
     private void generateHtmlReport(Path reportDir, String timestamp, ExecutionResult result) throws IOException {
+        htmlReportDir = reportDir;
+        htmlScreenshots = indexScreenshotAttachments(reportDir.resolve("execution0.log"));
         String html = buildKatalonHtml(result, timestamp);
         Files.writeString(reportDir.resolve(timestamp + ".html"), html);
     }
@@ -469,8 +474,9 @@ public class KatalonReportGenerator {
             runFeatureStep.put("startTime", ISO_TIMESTAMP_FORMATTER.format(ZonedDateTime.ofInstant(tcResult.getStartTime(), ZoneId.systemDefault())));
             runFeatureStep.put("endTime", ISO_TIMESTAMP_FORMATTER.format(ZonedDateTime.ofInstant(tcResult.getEndTime(), ZoneId.systemDefault())));
             
-            // Add scenario data as children of runFeatureFile
-            runFeatureStep.put("children", tcResult.getBddScenarioData());
+            // Add scenario data as children of runFeatureFile (a copy: screenshots get attached
+            // to it below, and the PDF/cucumber reports still read the original)
+            runFeatureStep.put("children", deepCopy(tcResult.getBddScenarioData()));
             runFeatureStep.put("index", 0);
             runFeatureStep.put("startIndex", 0);
             
@@ -526,10 +532,231 @@ public class KatalonReportGenerator {
             }
         }
         
+        attachScreenshots(children, lookupScreenshots(tcResult.getTestCaseName()));
+
         data.put("children", children);
         data.put("logs", Collections.emptyList());
         
         return toJson(data);
+    }
+
+    /** One screenshot attachment record from execution0.log. */
+    private static final class ScreenshotRecord {
+        final long millis;
+        final String file;
+        final String level;
+
+        ScreenshotRecord(long millis, String file, String level) {
+            this.millis = millis;
+            this.file = file;
+            this.level = level;
+        }
+    }
+
+    /**
+     * Screenshots in {@code execution0.log} (records carrying an {@code attachment} property),
+     * keyed by the top-level test case they were taken in, in capture order. Every screenshot
+     * counts - takeScreenshot, takeFullPageScreenshot and failure shots - like Katalon's report.
+     */
+    private Map<String, List<ScreenshotRecord>> indexScreenshotAttachments(Path log) {
+        Map<String, List<ScreenshotRecord>> idx = new LinkedHashMap<>();
+        if (!Files.exists(log)) return idx;
+        try {
+            javax.xml.parsers.DocumentBuilderFactory factory = javax.xml.parsers.DocumentBuilderFactory.newInstance();
+            factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+            factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+            javax.xml.parsers.DocumentBuilder builder = factory.newDocumentBuilder();
+            builder.setEntityResolver((p, sId) -> new org.xml.sax.InputSource(new StringReader("")));
+            org.w3c.dom.NodeList records = builder.parse(log.toFile()).getElementsByTagName("record");
+
+            Deque<String> open = new ArrayDeque<>();
+            for (int i = 0; i < records.getLength(); i++) {
+                org.w3c.dom.Element rec = (org.w3c.dom.Element) records.item(i);
+                String message = childText(rec, "message");
+                if (message != null && message.startsWith("Start Test Case :")) {
+                    open.push(message.substring("Start Test Case :".length()).trim());
+                    continue;
+                }
+                if (message != null && message.startsWith("End Test Case :")) {
+                    if (!open.isEmpty()) open.pop();
+                    continue;
+                }
+                if (open.isEmpty()) continue;
+                org.w3c.dom.NodeList props = rec.getElementsByTagName("property");
+                for (int j = 0; j < props.getLength(); j++) {
+                    org.w3c.dom.Element prop = (org.w3c.dom.Element) props.item(j);
+                    String file = prop.getTextContent();
+                    if (!"attachment".equals(prop.getAttribute("name")) || file == null || file.isBlank()) continue;
+                    long millis;
+                    try {
+                        millis = Long.parseLong(childText(rec, "millis").trim());
+                    } catch (Exception e) {
+                        millis = 0L;
+                    }
+                    String level = childText(rec, "level");
+                    // Attribute to the outermost open test case (the suite's test case, not the
+                    // nested SCENARIO / called test case).
+                    idx.computeIfAbsent(open.peekLast(), k -> new ArrayList<>())
+                            .add(new ScreenshotRecord(millis, file.trim(), level));
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("Failed to read screenshot attachments from {}: {}", log, e.getMessage());
+        }
+        return idx;
+    }
+
+    private static String childText(org.w3c.dom.Element el, String tag) {
+        org.w3c.dom.NodeList nl = el.getElementsByTagName(tag);
+        return nl.getLength() > 0 ? nl.item(0).getTextContent() : null;
+    }
+
+    private List<ScreenshotRecord> lookupScreenshots(String testCaseName) {
+        if (testCaseName == null || htmlScreenshots.isEmpty()) return Collections.emptyList();
+        for (Map.Entry<String, List<ScreenshotRecord>> e : htmlScreenshots.entrySet()) {
+            String key = e.getKey();
+            if (key.equals(testCaseName) || key.equals("Test Cases/" + testCaseName)
+                    || key.endsWith("/" + testCaseName)) {
+                return e.getValue();
+            }
+        }
+        return Collections.emptyList();
+    }
+
+    /**
+     * Embed each screenshot (base64, the way Katalon's HTML report carries it) as a child step of
+     * the step that was running when it was taken - or of the last step started before it.
+     */
+    @SuppressWarnings("unchecked")
+    private void attachScreenshots(List<Map<String, Object>> topSteps, List<ScreenshotRecord> shots) {
+        if (shots.isEmpty()) return;
+        List<Map<String, Object>> leaves = new ArrayList<>();
+        collectLeafSteps(topSteps, leaves);
+        if (leaves.isEmpty()) {
+            Map<String, Object> holder = new LinkedHashMap<>();
+            holder.put("type", "TEST_STEP");
+            holder.put("name", "Screenshots");
+            holder.put("description", "");
+            holder.put("retryCount", 0);
+            holder.put("status", "COMPLETED");
+            holder.put("result", "PASSED");
+            String t = formatMillis(shots.get(0).millis);
+            holder.put("startTime", t);
+            holder.put("endTime", formatMillis(shots.get(shots.size() - 1).millis));
+            holder.put("children", new ArrayList<>());
+            holder.put("index", topSteps.size());
+            holder.put("startIndex", 0);
+            holder.put("logs", new ArrayList<>());
+            topSteps.add(holder);
+            leaves.add(holder);
+        }
+        for (ScreenshotRecord shot : shots) {
+            String content = toDataUri(shot.file);
+            if (content == null) continue;
+            Map<String, Object> target = leaves.get(0);
+            for (Map<String, Object> leaf : leaves) {
+                Long start = parseIsoMillis(leaf.get("startTime"));
+                if (start != null && start <= shot.millis) target = leaf;
+            }
+            Object existing = target.get("children");
+            List<Map<String, Object>> kids = existing instanceof List
+                    ? new ArrayList<>((List<Map<String, Object>>) existing) : new ArrayList<>();
+
+            String time = formatMillis(shot.millis);
+            boolean failed = "FAILED".equals(shot.level) || shot.file.contains("_error")
+                    || shot.file.contains("_failure");
+            Map<String, Object> attachment = new LinkedHashMap<>();
+            attachment.put("type", "IMAGE");
+            attachment.put("name", shot.file);
+            attachment.put("content", content);
+            Map<String, Object> log = new LinkedHashMap<>();
+            log.put("time", time);
+            log.put("level", "PASSED");
+            log.put("message", "Taking screenshot successfully");
+            log.put("attachments", Collections.singletonList(attachment));
+
+            Map<String, Object> step = new LinkedHashMap<>();
+            step.put("type", "TEST_STEP");
+            step.put("name", failed ? "Screenshot on failure: " + shot.file : "takeScreenshot: " + shot.file);
+            step.put("description", "");
+            step.put("message", "Taking screenshot successfully");
+            step.put("retryCount", 0);
+            step.put("status", "COMPLETED");
+            step.put("result", "PASSED");
+            step.put("startTime", time);
+            step.put("endTime", time);
+            step.put("children", Collections.emptyList());
+            step.put("index", kids.size());
+            step.put("startIndex", 0);
+            step.put("logs", Collections.singletonList(log));
+            kids.add(step);
+            target.put("children", kids);
+        }
+    }
+
+    /** Steps with no child steps (BDD steps, flat test steps), in report order. */
+    @SuppressWarnings("unchecked")
+    private static void collectLeafSteps(List<?> nodes, List<Map<String, Object>> out) {
+        if (nodes == null) return;
+        for (Object n : nodes) {
+            if (!(n instanceof Map)) continue;
+            Map<String, Object> node = (Map<String, Object>) n;
+            Object kids = node.get("children");
+            if (kids instanceof List && !((List<?>) kids).isEmpty()) {
+                collectLeafSteps((List<?>) kids, out);
+            } else if ("TEST_STEP".equals(node.get("type")) && node.get("startTime") != null) {
+                out.add(node);
+            }
+        }
+    }
+
+    private String toDataUri(String file) {
+        Path dir = htmlReportDir;
+        if (dir == null) return null;
+        Path p = dir.resolve(file);
+        if (!Files.isRegularFile(p)) p = dir.resolve("screenshots").resolve(file);
+        if (!Files.isRegularFile(p)) return null;
+        try {
+            String lower = file.toLowerCase(Locale.ROOT);
+            String mime = lower.endsWith(".jpg") || lower.endsWith(".jpeg") ? "image/jpeg" : "image/png";
+            return "data:" + mime + ";base64," + Base64.getEncoder().encodeToString(Files.readAllBytes(p));
+        } catch (IOException e) {
+            logger.debug("Could not embed screenshot {}: {}", p, e.getMessage());
+            return null;
+        }
+    }
+
+    private static String formatMillis(long millis) {
+        return ISO_TIMESTAMP_FORMATTER.format(ZonedDateTime.ofInstant(Instant.ofEpochMilli(millis), ZoneId.systemDefault()));
+    }
+
+    private static Long parseIsoMillis(Object iso) {
+        if (iso == null) return null;
+        try {
+            return java.time.OffsetDateTime.parse(iso.toString()).toInstant().toEpochMilli();
+        } catch (Exception e) {
+            try {
+                return Instant.parse(iso.toString()).toEpochMilli();
+            } catch (Exception ignored) {
+                return null;
+            }
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> T deepCopy(T value) {
+        if (value instanceof Map) {
+            Map<Object, Object> copy = new LinkedHashMap<>();
+            ((Map<Object, Object>) value).forEach((k, v) -> copy.put(k, deepCopy(v)));
+            return (T) copy;
+        }
+        if (value instanceof List) {
+            List<Object> copy = new ArrayList<>();
+            for (Object v : (List<Object>) value) copy.add(deepCopy(v));
+            return (T) copy;
+        }
+        return value;
     }
     
     /**
