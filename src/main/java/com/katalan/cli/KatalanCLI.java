@@ -87,6 +87,12 @@ public class KatalanCLI implements Callable<Integer> {
 
         @Option(names = {"--headless"}, description = "Run browser in headless mode")
         private boolean headless;
+
+        @Option(names = {"--insecure"}, description = "With --headless: present a regular Chrome User-Agent (and sec-ch-ua brands) instead of HeadlessChrome, for sites whose WAF blocks headless browsers")
+        private boolean insecure;
+
+        @Option(names = {"--user-agent"}, description = "Custom browser User-Agent string (Chrome)")
+        private String userAgent;
         
         @Option(names = {"-r", "--report"}, description = "Report output folder", defaultValue = "reports")
         private Path reportPath;
@@ -198,6 +204,8 @@ public class KatalanCLI implements Callable<Integer> {
                 RunConfiguration.Builder configBuilder = RunConfiguration.builder()
                         .browserType(parseBrowserType(platform))
                         .headless(headless)
+                        .insecure(insecure)
+                        .userAgent(userAgent)
                         .implicitWait(timeout)
                         .pageLoadTimeout(60)
                         .scriptTimeout(timeout)

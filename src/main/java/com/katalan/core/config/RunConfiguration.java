@@ -12,6 +12,10 @@ public class RunConfiguration {
     // Browser Configuration
     private BrowserType browserType = BrowserType.CHROME;
     private boolean headless = false;
+    // Custom browser User-Agent (--user-agent); null = browser default
+    private String userAgent;
+    // --insecure: in headless Chrome, report a regular "Chrome" UA instead of "HeadlessChrome"
+    private boolean insecure = false;
     // Katalon sets implicit wait to 0 by default. WebUI keywords use their own
     // explicit WebDriverWait with per-call timeout, so implicit wait would only
     // interfere (each failed findElement during polling blocks for implicit*seconds).
@@ -100,6 +104,16 @@ public class RunConfiguration {
         
         public Builder headless(boolean headless) {
             config.headless = headless;
+            return this;
+        }
+
+        public Builder userAgent(String userAgent) {
+            config.userAgent = userAgent;
+            return this;
+        }
+
+        public Builder insecure(boolean insecure) {
+            config.insecure = insecure;
             return this;
         }
         
@@ -293,6 +307,22 @@ public class RunConfiguration {
     
     public void setHeadless(boolean headless) {
         this.headless = headless;
+    }
+
+    public String getUserAgent() {
+        return userAgent;
+    }
+
+    public void setUserAgent(String userAgent) {
+        this.userAgent = userAgent;
+    }
+
+    public boolean isInsecure() {
+        return insecure;
+    }
+
+    public void setInsecure(boolean insecure) {
+        this.insecure = insecure;
     }
     
     public int getImplicitWait() {

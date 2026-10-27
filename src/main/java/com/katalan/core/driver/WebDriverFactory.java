@@ -306,6 +306,23 @@ public class WebDriverFactory {
         if (config.getBrowserBinaryPath() != null && !config.getBrowserBinaryPath().isEmpty()) {
             options.setBinary(config.getBrowserBinaryPath());
         }
+
+        // ============================================================
+        // User-Agent override (--user-agent, or --insecure in headless)
+        // A launch-time --user-agent applies to every tab/window. For
+        // --insecure the UA is derived from the real browser after the
+        // first launch (see applyHeadlessUserAgentFix) and cached, so
+        // later browsers in the same run get it at launch too.
+        // ============================================================
+        String launchUserAgent = config.getUserAgent();
+        if ((launchUserAgent == null || launchUserAgent.isEmpty())
+                && config.isHeadless() && config.isInsecure()) {
+            launchUserAgent = cachedHeadlessFixUserAgent;
+        }
+        if (launchUserAgent != null && !launchUserAgent.isEmpty()) {
+            options.addArguments("--user-agent=" + launchUserAgent);
+            logger.info("Chrome User-Agent override: {}", launchUserAgent);
+        }
         
         // ============================================================
         // ChromeDriver Service with explicit port + cleanup
@@ -365,6 +382,11 @@ public class WebDriverFactory {
             }
         }
         
+        if (config.isHeadless() && config.isInsecure()
+                && (config.getUserAgent() == null || config.getUserAgent().isEmpty())) {
+            applyHeadlessUserAgentFix(driver);
+        }
+
         // ============================================================
         // Track PIDs for cleanup manager
         // ============================================================
@@ -411,6 +433,61 @@ public class WebDriverFactory {
         return driver;
     }
     
+    /** Regular-Chrome UA derived by --insecure, reused for later launches in this JVM. */
+    private static volatile String cachedHeadlessFixUserAgent;
+
+    /**
+     * --insecure: headless Chrome reports "HeadlessChrome" in both the User-Agent
+     * and the sec-ch-ua client hints, which some WAFs block. Read the
+     * real UA via CDP, swap in "Chrome", and override UA + client hints.
+     */
+    private static void applyHeadlessUserAgentFix(ChromeDriver driver) {
+        try {
+            Map<String, Object> version = driver.executeCdpCommand("Browser.getVersion", new java.util.HashMap<>());
+            String realUa = String.valueOf(version.get("userAgent"));
+            String product = String.valueOf(version.get("product")); // e.g. HeadlessChrome/141.0.7390.54
+            String fixedUa = realUa.replace("HeadlessChrome", "Chrome");
+            String fullVersion = product.contains("/") ? product.substring(product.indexOf('/') + 1) : "";
+            String major = fullVersion.contains(".") ? fullVersion.substring(0, fullVersion.indexOf('.')) : fullVersion;
+
+            java.util.List<Map<String, String>> brands = java.util.Arrays.asList(
+                brand("Google Chrome", major), brand("Chromium", major), brand("Not?A_Brand", "99"));
+            java.util.List<Map<String, String>> fullVersionList = java.util.Arrays.asList(
+                brand("Google Chrome", fullVersion), brand("Chromium", fullVersion), brand("Not?A_Brand", "99.0.0.0"));
+
+            String os = System.getProperty("os.name", "").toLowerCase();
+            String platform = os.contains("win") ? "Windows" : os.contains("mac") ? "macOS" : "Linux";
+            String arch = System.getProperty("os.arch", "").toLowerCase();
+
+            Map<String, Object> metadata = new java.util.HashMap<>();
+            metadata.put("brands", brands);
+            metadata.put("fullVersionList", fullVersionList);
+            metadata.put("fullVersion", fullVersion);
+            metadata.put("platform", platform);
+            metadata.put("platformVersion", "");
+            metadata.put("architecture", arch.contains("aarch64") || arch.contains("arm") ? "arm" : "x86");
+            metadata.put("model", "");
+            metadata.put("mobile", false);
+
+            Map<String, Object> params = new java.util.HashMap<>();
+            params.put("userAgent", fixedUa);
+            params.put("userAgentMetadata", metadata);
+            driver.executeCdpCommand("Network.setUserAgentOverride", params);
+
+            cachedHeadlessFixUserAgent = fixedUa;
+            logger.info("--insecure: headless User-Agent overridden: {}", fixedUa);
+        } catch (Exception e) {
+            logger.warn("--insecure: failed to override headless User-Agent: {}", e.getMessage());
+        }
+    }
+
+    private static Map<String, String> brand(String name, String version) {
+        Map<String, String> m = new java.util.HashMap<>();
+        m.put("brand", name);
+        m.put("version", version);
+        return m;
+    }
+
     /**
      * Create Firefox WebDriver
      */
