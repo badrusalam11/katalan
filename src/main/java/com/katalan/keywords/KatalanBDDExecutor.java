@@ -1016,15 +1016,49 @@ public class KatalanBDDExecutor {
     }
     
     /**
+     * Resolve a step-definition file under Include/scripts/groovy through the project class loader,
+     * which compiles the (preprocessed) Include sources once - the same class a test script or another
+     * glue class gets when it imports it. Returns null when there is no project loader or the class
+     * name cannot be derived, so the caller falls back to compiling the file directly.
+     */
+    private Class<?> loadGlueFromProjectLoader(Path groovyFile) {
+        GroovyClassLoader projectLoader = com.katalan.core.engine.ProjectClassLoader.get();
+        if (projectLoader == null || projectPath == null) {
+            return null;
+        }
+        Path includeRoot = projectPath.resolve("Include").resolve("scripts").resolve("groovy").toAbsolutePath().normalize();
+        Path file = groovyFile.toAbsolutePath().normalize();
+        if (!file.startsWith(includeRoot)) {
+            return null;
+        }
+        String className = includeRoot.relativize(file).toString()
+                .replaceAll("\\.groovy$", "")
+                .replace('/', '.')
+                .replace('\\', '.');
+        try {
+            return groovyShell.getClassLoader().loadClass(className);
+        } catch (ClassNotFoundException e) {
+            return null; // e.g. package declaration differs from the folder layout
+        } catch (Throwable e) {
+            // Let the direct compile below report the error (or succeed with the BDD imports).
+            logger.debug("Glue {} not loadable from project loader: {}", className, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
      * Load step definitions from a single Groovy file
      */
     private void loadStepDefinitionFile(Path groovyFile, List<StepDefinition> definitions,
                                         List<HookDefinition> hookDefinitions) {
         Class<?> clazz = null;
         try {
-            String content = Files.readString(groovyFile);
-            content = preprocessStepDefinitionScript(content);
-            clazz = groovyShell.getClassLoader().parseClass(content, groovyFile.getFileName().toString());
+            clazz = loadGlueFromProjectLoader(groovyFile);
+            if (clazz == null) {
+                String content = Files.readString(groovyFile);
+                content = preprocessStepDefinitionScript(content);
+                clazz = groovyShell.getClassLoader().parseClass(content, groovyFile.getFileName().toString());
+            }
         } catch (Exception e) {
             String msg = e.getMessage();
             if (msg == null && e.getCause() != null) msg = e.getCause().toString();
@@ -1322,12 +1356,20 @@ public class KatalanBDDExecutor {
         binding.setVariable("findTestObject", new FindTestObjectBinding(context));
         binding.setVariable("findTestCase", new FindTestCaseBinding(context));
         
-        GroovyClassLoader classLoader = new GroovyClassLoader(getClass().getClassLoader(), config);
-        
-        // Add project-specific paths and libraries so that imports like
-        // `import website.CSWeb` or `import support.ExcelLocator` can be resolved
-        // from the project's Keywords/, Include/scripts/groovy/, Drivers/, Libs/, bin/lib folders.
-        addProjectLibrariesToClassLoader(classLoader);
+        GroovyClassLoader projectLoader = com.katalan.core.engine.ProjectClassLoader.get();
+        GroovyClassLoader classLoader;
+        if (projectLoader != null) {
+            // Step definitions and the keywords they call must be the same classes the test case
+            // script and listeners use (Katalon has one project class loader), otherwise static
+            // state such as a report keyword's step list is split across copies.
+            classLoader = new GroovyClassLoader(projectLoader, config);
+        } else {
+            classLoader = new GroovyClassLoader(getClass().getClassLoader(), config);
+            // Add project-specific paths and libraries so that imports like
+            // `import website.CSWeb` or `import support.ExcelLocator` can be resolved
+            // from the project's Keywords/, Include/scripts/groovy/, Drivers/, Libs/, bin/lib folders.
+            addProjectLibrariesToClassLoader(classLoader);
+        }
         
         return new GroovyShell(classLoader, binding, config);
     }
@@ -1726,6 +1768,14 @@ public class KatalanBDDExecutor {
          * infrastructure itself encounters an error.
          */
         private Object compileAndInstantiateKeyword(String className, Path keywordFile) {
+            GroovyClassLoader projectLoader = com.katalan.core.engine.ProjectClassLoader.get();
+            if (projectLoader != null) {
+                try {
+                    return projectLoader.loadClass(className).getDeclaredConstructor().newInstance();
+                } catch (Throwable e) {
+                    logger.debug("Keyword {} not loadable from project loader: {}", className, e.getMessage());
+                }
+            }
             try {
                 String script = Files.readString(keywordFile);
                 

@@ -21,9 +21,47 @@ public class ObjectRepository {
     }
     
     /**
+     * Katalon's parameterized test object: every {@code ${name}} in the object's properties and
+     * selectors is replaced by {@code variables[name]}, e.g. a mobile object whose locator is
+     * {@code ${set}} looked up with {@code findTestObject('Mobile/Custom/xpath', [set: xpath])}.
+     */
+    public static TestObject findTestObject(String objectId, java.util.Map<String, Object> variables) {
+        TestObject to = findTestObject(objectId, (Object[]) null);
+        if (to != null && variables != null && !variables.isEmpty()) {
+            applyVariables(to, variables);
+        }
+        return to;
+    }
+
+    private static void applyVariables(TestObject testObject, java.util.Map<String, Object> variables) {
+        for (TestObjectProperty prop : testObject.getProperties()) {
+            prop.setValue(substitute(prop.getValue(), variables));
+        }
+        for (SelectorMethod method : new java.util.ArrayList<>(testObject.getSelectorCollection().keySet())) {
+            testObject.setSelectorValue(method, substitute(testObject.getSelectorValue(method), variables));
+        }
+    }
+
+    private static String substitute(String value, java.util.Map<String, Object> variables) {
+        if (value == null || value.indexOf('$') < 0) {
+            return value;
+        }
+        for (java.util.Map.Entry<String, Object> e : variables.entrySet()) {
+            String replacement = e.getValue() != null ? e.getValue().toString() : "";
+            value = value.replace("${" + e.getKey() + "}", replacement);
+        }
+        return value;
+    }
+
+    /**
      * Find a TestObject by its ID/path with parameterized values
      */
     public static TestObject findTestObject(String objectId, Object... params) {
+        if (params != null && params.length == 1 && params[0] instanceof java.util.Map) {
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, Object> variables = (java.util.Map<String, Object>) params[0];
+            return findTestObject(objectId, variables);
+        }
         try {
             ExecutionContext context = ExecutionContext.getCurrent();
             if (context == null) {

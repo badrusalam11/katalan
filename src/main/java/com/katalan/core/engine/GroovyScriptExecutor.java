@@ -139,12 +139,14 @@ public class GroovyScriptExecutor {
         // and star imports correctly lose to a script's explicit import.
         importCustomizer.addImports(
             "com.kms.katalon.core.model.FailureHandling",
-            "com.katalan.core.compat.GlobalVariable",
-            "com.katalan.core.compat.TestCase",
-            "com.katalan.core.compat.TestCaseContext"
+            "com.katalan.core.compat.GlobalVariable"
         );
         
         config.addCompilationCustomizers(importCustomizer);
+        // Keywords compiled by this loader keep their own `import ...context.TestCaseContext`.
+        config.addCompilationCustomizers(new DefaultImportCustomizer()
+                .addImport("com.katalan.core.compat.TestCase")
+                .addImport("com.katalan.core.compat.TestCaseContext"));
         
         // Add keyword logging AST transformation
         try {
@@ -222,6 +224,7 @@ public class GroovyScriptExecutor {
         }
         
         this.groovyClassLoader = classLoader;
+        ProjectClassLoader.set(classLoader);
         return new GroovyShell(classLoader, binding, config);
     }
     
@@ -894,6 +897,15 @@ public class GroovyScriptExecutor {
          * Load and compile custom keyword classes from Keywords folder
          */
         private Class<?> loadKeywordClass(String packageAndClass) {
+            // Same class (and static state) the test script and listeners see, as in Katalon.
+            GroovyClassLoader projectLoader = ProjectClassLoader.get();
+            if (projectLoader != null) {
+                try {
+                    return projectLoader.loadClass(packageAndClass);
+                } catch (Throwable e) {
+                    logger.debug("Keyword class {} not loadable from project loader: {}", packageAndClass, e.getMessage());
+                }
+            }
             // Ensure all keyword classes are pre-loaded
             preloadAllKeywordClasses();
             

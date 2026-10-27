@@ -77,14 +77,13 @@ public class DriverFactory {
     }
     
     /**
-     * Get the browser type
+     * The browser type of this run, as Katalon's {@link WebUIDriverType} (scripts do
+     * {@code WebUIDriverType t = DriverFactory.getExecutedBrowser()} or compare
+     * {@code getExecutedBrowser().getName() == "CHROME_DRIVER"}).
      */
-    public static String getExecutedBrowser() {
-        ExecutionContext ctx = ExecutionContext.getCurrent();
-        if (ctx != null && ctx.getRunConfiguration() != null) {
-            return ctx.getRunConfiguration().getBrowserType().name();
-        }
-        return "CHROME";
+    public static WebUIDriverType getExecutedBrowser() {
+        return WebUIDriverType.valueOf(
+                com.kms.katalon.core.configuration.RunConfiguration.getKatalonWebUIDriverType());
     }
     
     /**

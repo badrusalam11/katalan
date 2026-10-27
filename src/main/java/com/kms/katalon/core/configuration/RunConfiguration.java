@@ -377,30 +377,65 @@ public class RunConfiguration {
         // Katalon reports the WebUIDriverType constant name here (CHROME_DRIVER, HEADLESS_DRIVER, ...),
         // not katalan's own enum name; listeners such as Actmov3 map these exact strings to a platform
         // and only take a failure screenshot when it is a browser. A mobile run has no WebUI entry.
-        if (!isMobileMode()) {
-            webUI.put("browserType", getKatalonWebUIDriverType());
-        }
-
-        // Populate Mobile driver details from the live session, if one is active.
-        // Scripts like brimerchant's report generator read
-        // execution.drivers.system.Mobile.{deviceId,deviceName,deviceModel,deviceOS,deviceOSVersion}.
-        if (isMobileMode()) {
-            mobile.put("deviceId", com.katalan.keywords.Mobile.getDeviceId());
-            mobile.put("deviceName", com.katalan.keywords.Mobile.getDeviceName());
-            mobile.put("deviceModel", com.katalan.keywords.Mobile.getDeviceModel());
-            mobile.put("deviceOS", com.katalan.keywords.Mobile.getDeviceOS());
-            mobile.put("deviceOSVersion", com.katalan.keywords.Mobile.getDeviceOSVersion());
-            mobile.put("devicePlatform", com.katalan.keywords.Mobile.getDeviceOS());
+        if (isMobileRun()) {
+            // execution.drivers.system.Mobile.{deviceId,deviceName,deviceModel,deviceOS,deviceOSVersion,devicePlatform}
+            mobile.putAll(com.katalan.core.driver.MobileDeviceInfo.systemProperties());
+            system.put("Mobile", mobile);
         } else {
+            webUI.put("browserType", getKatalonWebUIDriverType());
             mobile.put("devicePlatform", ""); // Empty for non-mobile tests
+            system.put("WebUI", webUI);
+            system.put("Mobile", mobile);
         }
-
-        system.put("WebUI", webUI);
-        system.put("Mobile", mobile);
         drivers.put("system", system);
+        drivers.put("preferences", getDriverPreferencesProperties());
         props.put("drivers", drivers);
 
         return props;
+    }
+
+    /** True for a {@code --platform android|ios} run, whether or not the Appium session has started yet. */
+    public static boolean isMobileRun() {
+        return com.katalan.core.driver.MobileDeviceInfo.isMobileRun() || isMobileMode();
+    }
+
+    /**
+     * Katalon's {@code execution.drivers.preferences}: one entry per driver type used by the run
+     * ("WebUI" for a browser run, "Mobile" for an Android/iOS run). Scripts detect the platform with
+     * {@code getDriverPreferencesProperties()['Mobile'] != null}.
+     */
+    public static Map<String, Object> getDriverPreferencesProperties() {
+        Map<String, Object> prefs = new java.util.LinkedHashMap<>();
+        if (isMobileRun()) {
+            Map<String, Object> mobile = new java.util.LinkedHashMap<>(getMobileDriverPreferencesProperties());
+            mobile.putIfAbsent("deviceId", "");
+            prefs.put("Mobile", mobile);
+        } else {
+            prefs.put("WebUI", new java.util.LinkedHashMap<>(getWebDriverPreferencesProperties()));
+        }
+        return prefs;
+    }
+
+    @SuppressWarnings("unchecked")
+    public static Map<String, Object> getDriverPreferencesProperties(String driverConnectorId) {
+        return (Map<String, Object>) getDriverPreferencesProperties().get(driverConnectorId);
+    }
+
+    /** Katalon's {@code execution.drivers.system}, keyed by driver type. */
+    @SuppressWarnings("unchecked")
+    public static Map<String, Object> getDriverSystemProperties() {
+        Map<String, Object> drivers = (Map<String, Object>) getExecutionProperties().get("drivers");
+        return (Map<String, Object>) drivers.get("system");
+    }
+
+    @SuppressWarnings("unchecked")
+    public static Map<String, Object> getDriverSystemProperties(String driverConnectorId) {
+        return (Map<String, Object>) getDriverSystemProperties().get(driverConnectorId);
+    }
+
+    public static Object getDriverSystemProperty(String driverConnectorId, String propertyName) {
+        Map<String, Object> props = getDriverSystemProperties(driverConnectorId);
+        return props != null ? props.get(propertyName) : null;
     }
 
     // ============================================================
@@ -518,7 +553,7 @@ public class RunConfiguration {
      * Check if running in web UI test mode
      */
     public static boolean isWebUIMode() {
-        return true;
+        return !isMobileRun();
     }
     
     /**

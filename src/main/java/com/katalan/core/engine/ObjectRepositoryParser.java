@@ -155,6 +155,8 @@ public class ObjectRepositoryParser {
                 }
             }
             
+            applyMobileLocator(root, testObject);
+
             logger.debug("Parsed test object: {} -> {} = {}", name, 
                     testObject.getSelectorMethod(), testObject.getSelectorValue());
             
@@ -166,6 +168,62 @@ public class ObjectRepositoryParser {
         }
     }
     
+    /**
+     * Katalon Mobile objects ({@code <MobileElementEntity>}) keep their locator in
+     * {@code <locator>} with a {@code <locatorStrategy>} (XPATH, ID, ACCESSIBILITY, CLASS_NAME,
+     * NAME, ANDROID_UI_AUTOMATOR, IOS_PREDICATE_STRING, IOS_CLASS_CHAIN, ...). ATTRIBUTES (or no
+     * strategy) means "locate by the selected properties", which the webElementProperties
+     * handling above already covers. The locator may hold a {@code ${var}} placeholder that
+     * {@code findTestObject(id, [var: value])} fills in later.
+     */
+    private static void applyMobileLocator(Element root, TestObject testObject) {
+        if (!"MobileElementEntity".equals(root.getTagName())) {
+            return;
+        }
+        String locator = getElementText(root, "locator");
+        String strategy = getElementText(root, "locatorStrategy");
+        if (locator == null || locator.isEmpty() || strategy == null || "ATTRIBUTES".equalsIgnoreCase(strategy)) {
+            return;
+        }
+        String upper = strategy.toUpperCase();
+        if (!"XPATH".equals(upper) && !"ID".equals(upper)) {
+            // property-based strategies: a selector derived from webElementProperties would win otherwise
+            testObject.setSelectorMethod(null);
+            testObject.setSelectorValue(null);
+        }
+        switch (upper) {
+            case "XPATH":
+                testObject.setSelectorMethod(TestObject.SelectorMethod.XPATH);
+                testObject.setSelectorValue(locator);
+                break;
+            case "ID":
+                testObject.setSelectorMethod(TestObject.SelectorMethod.ID);
+                testObject.setSelectorValue(locator);
+                break;
+            case "ACCESSIBILITY":
+                testObject.addProperty("content-desc", locator);
+                break;
+            case "CLASS_NAME":
+                testObject.addProperty("class", locator);
+                break;
+            case "NAME":
+                testObject.addProperty("name", locator);
+                break;
+            case "ANDROID_UI_AUTOMATOR":
+                testObject.addProperty("android uiautomator", locator);
+                break;
+            case "IOS_PREDICATE_STRING":
+                testObject.addProperty("-ios predicate string", locator);
+                break;
+            case "IOS_CLASS_CHAIN":
+                testObject.addProperty("-ios class chain", locator);
+                break;
+            default:
+                logger.debug("Unsupported mobile locatorStrategy {} for {}", strategy, testObject.getName());
+                break;
+        }
+    }
+
     /**
      * Get priority for property type (lower is better)
      */
