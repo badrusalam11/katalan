@@ -71,6 +71,8 @@ java -jar katalan-runner-1.0.0.jar run \
 | `-tc, --test-case` | Test case file(s) to run | - |
 | `--platform` | What to run against: chrome, firefox, edge, safari, android, ios | chrome |
 | `--headless` | Run in headless mode | false |
+| `--insecure` | With `--headless` (Chrome): send a regular Chrome User-Agent and `sec-ch-ua` instead of `HeadlessChrome`, for sites whose WAF blocks headless browsers. See [docs/HEADLESS_INSECURE.md](docs/HEADLESS_INSECURE.md) | false |
+| `--user-agent` | Custom Chrome User-Agent string | - |
 | `-r, --report` | Report output folder | reports |
 | `--screenshot-on-failure` | Capture on failure | true |
 | `--screenshot-on-success` | Capture on success | false |
@@ -385,6 +387,18 @@ java -jar katalan-runner.jar run \
   --retry 2 \
   --fail-fast
 ```
+
+### Headless Mode Blocked by a WAF
+
+```bash
+java -jar katalan-runner.jar run \
+  -p /project \
+  -ts "Test Suites/Regression" \
+  --headless \
+  --insecure
+```
+
+See [docs/HEADLESS_INSECURE.md](docs/HEADLESS_INSECURE.md) for what `--insecure` changes and how it differs from `--user-agent`.
 
 ## 🤝 Contributing
 
