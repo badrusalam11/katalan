@@ -327,27 +327,7 @@ public class Mobile {
         ExecutionContext context = ExecutionContext.getCurrent();
         AppiumDriver driver = context.getMobileDriver();
         Object udid = driver != null ? driver.getCapabilities().getCapability("udid") : null;
-        try {
-            List<String> command = new ArrayList<>();
-            command.add("adb");
-            if (udid != null) {
-                command.add("-s");
-                command.add(udid.toString());
-            }
-            command.add("shell");
-            command.add("getprop");
-            command.add(prop);
-            Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
-            try (java.io.BufferedReader reader =
-                         new java.io.BufferedReader(new java.io.InputStreamReader(process.getInputStream()))) {
-                String line = reader.readLine();
-                process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
-                return line != null ? line.trim() : null;
-            }
-        } catch (Exception e) {
-            logger.debug("adb getprop {} failed: {}", prop, e.getMessage());
-            return null;
-        }
+        return com.katalan.core.driver.MobileDriverFactory.adbGetProp(udid != null ? udid.toString() : null, prop);
     }
 
     // ==================== Element Interaction ====================

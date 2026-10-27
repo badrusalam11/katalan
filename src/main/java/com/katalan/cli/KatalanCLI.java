@@ -213,8 +213,14 @@ public class KatalanCLI implements Callable<Integer> {
                         .mobileFullReset(mobileFullReset)
                         .appiumServerPort(appiumPort);
 
+                // Katalon resolves the device before the run and writes it into execution.properties;
+                // keywords read it at class-init time (before any Appium session), so detect it now.
+                if ((deviceId == null || deviceId.isEmpty()) && "android".equalsIgnoreCase(platform)) {
+                    deviceId = com.katalan.core.driver.MobileDriverFactory.autoDetectAndroidDeviceId();
+                }
                 if (deviceId != null && !deviceId.isEmpty()) {
                     configBuilder.mobileDeviceId(deviceId);
+                    System.setProperty(com.katalan.core.driver.MobileDriverFactory.DEVICE_ID_PROPERTY, deviceId);
                 }
                 if (platformVersion != null && !platformVersion.isEmpty()) {
                     configBuilder.mobilePlatformVersion(platformVersion);

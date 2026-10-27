@@ -167,13 +167,96 @@ public class MobileDriverFactory {
         }
         String deviceId = devices.get(0);
         logger.info("🔌 Auto-detected single attached ADB device: {}", deviceId);
+        config.setMobileDeviceId(deviceId);
+        System.setProperty(DEVICE_ID_PROPERTY, deviceId);
         return deviceId;
+    }
+
+    /** System property mirroring the resolved device id (visible across Groovy class loaders). */
+    public static final String DEVICE_ID_PROPERTY = "katalan.mobile.deviceId";
+
+    /**
+     * Eager, non-throwing variant of the device lookup used before any Appium session exists:
+     * Katalon writes the device into execution.properties up front, and keywords read it at
+     * class-init time. Returns the id only when exactly one device is attached.
+     */
+    public static String autoDetectAndroidDeviceId() {
+        List<String> devices = listAdbDevices();
+        if (devices.size() == 1) {
+            logger.info("🔌 Auto-detected single attached ADB device: {}", devices.get(0));
+            return devices.get(0);
+        }
+        if (devices.size() > 1) {
+            logger.warn("Multiple ADB devices attached ({}) - pass --device-id to pick one", devices);
+        }
+        return null;
+    }
+
+    /**
+     * Locate adb: PATH first, then ANDROID_HOME / ANDROID_SDK_ROOT, then the default SDK
+     * locations used by Android Studio and Katalon Studio.
+     */
+    public static String adbExecutable() {
+        String exe = System.getProperty("os.name", "").toLowerCase().contains("win") ? "adb.exe" : "adb";
+        String path = System.getenv("PATH");
+        if (path != null) {
+            for (String dir : path.split(java.io.File.pathSeparator)) {
+                java.io.File f = new java.io.File(dir, exe);
+                if (f.canExecute()) {
+                    return f.getAbsolutePath();
+                }
+            }
+        }
+        String home = System.getProperty("user.home");
+        String[] sdks = {
+                System.getenv("ANDROID_HOME"),
+                System.getenv("ANDROID_SDK_ROOT"),
+                home + "/Library/Android/sdk",
+                home + "/Android/Sdk",
+                home + "/AppData/Local/Android/Sdk",
+                home + "/.katalon/tools/android_sdk"
+        };
+        for (String sdk : sdks) {
+            if (sdk == null || sdk.isEmpty()) {
+                continue;
+            }
+            java.io.File f = new java.io.File(sdk, "platform-tools/" + exe);
+            if (f.canExecute()) {
+                return f.getAbsolutePath();
+            }
+        }
+        return exe;
+    }
+
+    /** {@code adb [-s serial] shell getprop <prop>}, or null when adb is unavailable. */
+    public static String adbGetProp(String serial, String prop) {
+        List<String> command = new java.util.ArrayList<>();
+        command.add(adbExecutable());
+        if (serial != null && !serial.isEmpty()) {
+            command.add("-s");
+            command.add(serial);
+        }
+        command.add("shell");
+        command.add("getprop");
+        command.add(prop);
+        try {
+            Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+            try (java.io.BufferedReader reader =
+                         new java.io.BufferedReader(new java.io.InputStreamReader(process.getInputStream()))) {
+                String line = reader.readLine();
+                process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
+                return line != null ? line.trim() : null;
+            }
+        } catch (Exception e) {
+            logger.debug("adb getprop {} failed: {}", prop, e.getMessage());
+            return null;
+        }
     }
 
     private static List<String> listAdbDevices() {
         List<String> result = new java.util.ArrayList<>();
         try {
-            Process process = new ProcessBuilder("adb", "devices").redirectErrorStream(true).start();
+            Process process = new ProcessBuilder(adbExecutable(), "devices").redirectErrorStream(true).start();
             try (java.io.BufferedReader reader =
                          new java.io.BufferedReader(new java.io.InputStreamReader(process.getInputStream()))) {
                 String line;
@@ -195,7 +278,7 @@ public class MobileDriverFactory {
             }
             process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
         } catch (Exception e) {
-            logger.debug("adb devices lookup failed (adb on PATH?): {}", e.getMessage());
+            logger.debug("adb devices lookup failed: {}", e.getMessage());
         }
         return result;
     }

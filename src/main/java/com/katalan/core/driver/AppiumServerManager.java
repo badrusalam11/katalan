@@ -9,6 +9,8 @@ import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.lang.reflect.Field;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Manages the lifecycle of a local Appium server process, the same way
@@ -85,6 +87,27 @@ public class AppiumServerManager {
             builder.usingAnyFreePort();
         }
         builder.withIPAddress("127.0.0.1");
+
+        // UiAutomator2 refuses to start a session unless ANDROID_HOME/ANDROID_SDK_ROOT is set.
+        // Katalon Studio always exports it for the Appium process (its bundled SDK); do the same
+        // with the SDK that owns the adb we found, so an unset shell variable doesn't break the run.
+        Map<String, String> env = new HashMap<>(System.getenv());
+        if (isBlank(env.get("ANDROID_HOME")) || isBlank(env.get("ANDROID_SDK_ROOT"))) {
+            String sdk = !isBlank(env.get("ANDROID_HOME")) ? env.get("ANDROID_HOME") : env.get("ANDROID_SDK_ROOT");
+            if (isBlank(sdk)) {
+                File adb = new File(MobileDriverFactory.adbExecutable());
+                File platformTools = adb.getAbsoluteFile().getParentFile();
+                if (adb.isFile() && platformTools != null && "platform-tools".equals(platformTools.getName())) {
+                    sdk = platformTools.getParent();
+                }
+            }
+            if (!isBlank(sdk)) {
+                env.put("ANDROID_HOME", isBlank(env.get("ANDROID_HOME")) ? sdk : env.get("ANDROID_HOME"));
+                env.put("ANDROID_SDK_ROOT", isBlank(env.get("ANDROID_SDK_ROOT")) ? sdk : env.get("ANDROID_SDK_ROOT"));
+                logger.info("Using Android SDK for Appium: {}", sdk);
+                builder.withEnvironment(env);
+            }
+        }
 
         registerShutdownHook();
 
@@ -193,5 +216,9 @@ public class AppiumServerManager {
             logger.debug("which/where {} lookup failed: {}", name, e.getMessage());
         }
         return null;
+    }
+
+    private static boolean isBlank(String s) {
+        return s == null || s.trim().isEmpty();
     }
 }

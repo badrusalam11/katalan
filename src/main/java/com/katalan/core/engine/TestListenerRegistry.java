@@ -106,6 +106,11 @@ public class TestListenerRegistry {
         // any JARs in the JVM classpath - all of which live on the class
         // loader that loaded this class.
         ClassLoader isolatedParent = TestListenerRegistry.class.getClassLoader();
+        // Katalon compiles a project into ONE class loader: a listener's `CustomReport` is the same
+        // class (same static state) the test scripts and BDD steps use. The script executor's loader
+        // already carries the preprocessed Keywords/, Include/scripts/groovy and project jars, so
+        // listeners become its children instead of compiling a private copy of every keyword.
+        GroovyClassLoader projectLoader = parentLoader != null ? parentLoader : ProjectClassLoader.get();
 
         // Build a dedicated GroovyClassLoader for listeners with its own compiler
         // configuration (extra default imports) so we don't pollute the main
@@ -200,15 +205,19 @@ public class TestListenerRegistry {
             // the next one (Groovy caches failures per-classloader and
             // re-raises them as a 'BUG! exception ... There should not have
             // been any compilation from this call').
-            GroovyClassLoader listenerLoader = new GroovyClassLoader(isolatedParent, cc);
-            if (keywordsClasspath != null) listenerLoader.addClasspath(keywordsClasspath);
-            if (includeClasspath != null)  listenerLoader.addClasspath(includeClasspath);
-            listenerLoader.addClasspath(listenersWorkDir.toString());
-
-            // Add project's JAR libraries — use pre-collected URLs (no re-scan).
-            for (URL url : projectJarUrls) {
-                listenerLoader.addURL(url);
+            GroovyClassLoader listenerLoader;
+            if (projectLoader != null) {
+                listenerLoader = new GroovyClassLoader(projectLoader, cc);
+            } else {
+                listenerLoader = new GroovyClassLoader(isolatedParent, cc);
+                if (keywordsClasspath != null) listenerLoader.addClasspath(keywordsClasspath);
+                if (includeClasspath != null)  listenerLoader.addClasspath(includeClasspath);
+                // Add project's JAR libraries — use pre-collected URLs (no re-scan).
+                for (URL url : projectJarUrls) {
+                    listenerLoader.addURL(url);
+                }
             }
+            listenerLoader.addClasspath(listenersWorkDir.toString());
 
             long t0 = System.currentTimeMillis();
             try {
@@ -267,13 +276,20 @@ public class TestListenerRegistry {
         cc.addCompilationCustomizers(new ListenerStepTracingCustomizer());
         cc.addCompilationCustomizers(new CustomReportSkippingCustomizer());
 
-        ClassLoader isolatedParent = TestListenerRegistry.class.getClassLoader();
-        GroovyClassLoader loader = new GroovyClassLoader(isolatedParent, cc);
-        if (cachedKeywordsClasspath != null) loader.addClasspath(cachedKeywordsClasspath);
-        if (cachedIncludeClasspath != null) loader.addClasspath(cachedIncludeClasspath);
+        GroovyClassLoader loader;
+        GroovyClassLoader projectLoader = ProjectClassLoader.get();
+        if (projectLoader != null) {
+            // Share keyword classes (and their static state) with listeners and test scripts.
+            loader = new GroovyClassLoader(projectLoader, cc);
+        } else {
+            ClassLoader isolatedParent = TestListenerRegistry.class.getClassLoader();
+            loader = new GroovyClassLoader(isolatedParent, cc);
+            if (cachedKeywordsClasspath != null) loader.addClasspath(cachedKeywordsClasspath);
+            if (cachedIncludeClasspath != null) loader.addClasspath(cachedIncludeClasspath);
 
-        List<URL> jarUrls = collectProjectJarUrls(cachedProjectPath);
-        for (URL url : jarUrls) loader.addURL(url);
+            List<URL> jarUrls = collectProjectJarUrls(cachedProjectPath);
+            for (URL url : jarUrls) loader.addURL(url);
+        }
 
         Path suiteScriptWorkDir = suiteScriptPath.getParent();
 

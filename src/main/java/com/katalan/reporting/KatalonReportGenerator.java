@@ -1155,47 +1155,26 @@ public class KatalonReportGenerator {
         // drivers object
         Map<String, Object> drivers = new LinkedHashMap<>();
         Map<String, Object> driversSystem = new LinkedHashMap<>();
-        Map<String, Object> webUiDriver = new LinkedHashMap<>();
-        // chromeDriverPath - hardcoded Katalon path for compatibility
-        webUiDriver.put("chromeDriverPath", "/Applications/Katalon Studio.app/Contents/Eclipse/configuration/resources/drivers/chromedriver_mac/chromedriver");
-        webUiDriver.put("browserType", "CHROME_DRIVER");
-        driversSystem.put("WebUI", webUiDriver);
-
-        // Mobile driver entry — populated from the live Appium session when one is active,
-        // or from the katalan RunConfiguration (CLI --udid / --platform) when called early
-        // (i.e. prepareReportDirectory() before the Appium session starts).
-        // CSMobile.groovy reads execution.drivers.system.Mobile.deviceId at class-init time
-        // via MyComputer.executionProperties, so the value must be present in the early write.
-        Map<String, Object> mobileDriver = new LinkedHashMap<>();
-        if (com.kms.katalon.core.configuration.RunConfiguration.isMobileMode()) {
-            mobileDriver.put("deviceId", com.katalan.keywords.Mobile.getDeviceId());
-            mobileDriver.put("deviceName", com.katalan.keywords.Mobile.getDeviceName());
-            mobileDriver.put("deviceModel", com.katalan.keywords.Mobile.getDeviceModel());
-            mobileDriver.put("deviceOS", com.katalan.keywords.Mobile.getDeviceOS());
-            mobileDriver.put("deviceOSVersion", com.katalan.keywords.Mobile.getDeviceOSVersion());
-        } else {
-            // No live session yet — seed from CLI config so static initializers in keyword
-            // classes (e.g. CSMobile.deviceId) get the right value on first class load.
-            com.katalan.core.context.ExecutionContext ctx =
-                    com.katalan.core.context.ExecutionContext.getCurrent();
-            if (ctx != null && ctx.getRunConfiguration() != null) {
-                com.katalan.core.config.RunConfiguration cfg = ctx.getRunConfiguration();
-                String udid = cfg.getMobileDeviceId();
-                if (udid != null && !udid.isEmpty()) {
-                    mobileDriver.put("deviceId", udid);
-                    mobileDriver.put("deviceName", udid);
-                    mobileDriver.put("deviceModel", "");
-                    mobileDriver.put("deviceOS",
-                            cfg.getMobilePlatform() != null ? cfg.getMobilePlatform().name() : "Android");
-                    mobileDriver.put("deviceOSVersion", "");
-                }
-            }
-        }
-        driversSystem.put("Mobile", mobileDriver);
-        drivers.put("system", driversSystem);
-        
         Map<String, Object> driversPrefs = new LinkedHashMap<>();
-        driversPrefs.put("WebUI", new LinkedHashMap<>());
+        if (com.kms.katalon.core.configuration.RunConfiguration.isMobileRun()) {
+            // A Katalon mobile run has only a Mobile driver entry: execution.drivers.system.Mobile
+            // carries the device resolved before the run (deviceId, deviceOS, devicePlatform=ANDROID_DRIVER, ...)
+            // and preferences.Mobile the project's mobile settings. Listeners/keywords read these at
+            // class-init time (e.g. CSMobile.deviceId, brispot's GeneralListener platform detection),
+            // so they must be correct in this early write, before the Appium session starts.
+            driversSystem.put("Mobile", com.katalan.core.driver.MobileDeviceInfo.systemProperties());
+            driversPrefs.put("Mobile",
+                    com.kms.katalon.core.configuration.RunConfiguration.getDriverPreferencesProperties("Mobile"));
+        } else {
+            Map<String, Object> webUiDriver = new LinkedHashMap<>();
+            // chromeDriverPath - hardcoded Katalon path for compatibility
+            webUiDriver.put("chromeDriverPath", "/Applications/Katalon Studio.app/Contents/Eclipse/configuration/resources/drivers/chromedriver_mac/chromedriver");
+            webUiDriver.put("browserType", "CHROME_DRIVER");
+            driversSystem.put("WebUI", webUiDriver);
+            driversSystem.put("Mobile", new LinkedHashMap<>());
+            driversPrefs.put("WebUI", new LinkedHashMap<>());
+        }
+        drivers.put("system", driversSystem);
         drivers.put("preferences", driversPrefs);
         execution.put("drivers", drivers);
         
