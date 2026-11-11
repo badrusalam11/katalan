@@ -1,6 +1,8 @@
 package com.katalan.core.engine;
 
 import com.katalan.core.compat.GlobalVariable;
+import groovy.lang.GString;
+import groovy.lang.GroovyShell;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
@@ -71,6 +73,7 @@ public class GlobalVariableLoader {
             
             // Parse GlobalVariableEntity elements
             NodeList entities = doc.getElementsByTagName("GlobalVariableEntity");
+            GroovyShell shell = new GroovyShell(GlobalVariableLoader.class.getClassLoader());
             
             for (int i = 0; i < entities.getLength(); i++) {
                 Element entity = (Element) entities.item(i);
@@ -78,7 +81,7 @@ public class GlobalVariableLoader {
                 String initValue = getElementText(entity, "initValue");
                 
                 if (name != null && initValue != null) {
-                    Object value = parseValue(initValue);
+                    Object value = evaluateProfileValue(shell, name, initValue);
                     variables.put(name, value);
                     GlobalVariable.set(name, value);
                     logger.debug("Loaded global variable: {} = {}", name, value);
@@ -93,6 +96,29 @@ public class GlobalVariableLoader {
         }
         
         return variables;
+    }
+    
+    /**
+     * Evaluate a profile initValue the way Katalon does: as a Groovy expression.
+     * This makes "[]" a real ArrayList, "[:]" a LinkedHashMap, "['a','b']" a List, etc.,
+     * so scripts can do GlobalVariable.X << item and GlobalVariable.X[-1] exactly like in
+     * Katalon Studio. Falls back to the simple literal parser if evaluation fails
+     * (e.g. the expression references something unavailable at load time).
+     */
+    static Object evaluateProfileValue(GroovyShell shell, String name, String initValue) {
+        String expr = initValue == null ? "" : initValue.trim();
+        if (expr.isEmpty()) {
+            return null;
+        }
+        try {
+            Object value = shell.evaluate(expr);
+            // Interpolated "..." literals come back as GString; store a plain String
+            return value instanceof GString ? value.toString() : value;
+        } catch (Throwable t) {
+            logger.debug("Could not evaluate initValue of {} as Groovy ({}), using literal parser",
+                    name, t.getMessage());
+            return parseValue(expr);
+        }
     }
     
     /**
