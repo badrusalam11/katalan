@@ -76,14 +76,14 @@ public class KatalanEngine {
         com.katalan.core.compat.ObjectRepository.setContext(context);
 
         // Before any project class is compiled: keywords missing from the WebUI stub must also
-        // resolve through project subclasses (CSWeb extends WebUI), whose metaclass is built on
+        // resolve through project subclasses (MyWeb extends WebUI), whose metaclass is built on
         // first use.
         com.kms.katalon.core.webui.keyword.WebUiBuiltInKeywords.installSubclassForwarding();
 
         startupProfiler.begin("GroovyScriptExecutor.init");
         this.scriptExecutor = new GroovyScriptExecutor(context);
         // Default executor for WebUI.callTestCase. Without this, callTestCase from
-        // suite hooks/listeners/keywords (e.g. QIM suites: @BeforeTestSuite ->
+        // suite hooks/listeners/keywords (e.g. a suite whose @BeforeTestSuite ->
         // LoginKeywords.login -> '00 - Open Browser') fails with "no executor available"
         // because findTestCase there is the static TestCaseFactory import.
         context.setProperty("executor", scriptExecutor);
@@ -131,9 +131,9 @@ public class KatalanEngine {
         }
         
         // DO NOT create WebDriver here!
-        // CSWeb library checks DriverFactory.getWebDriver() to determine if it needs to open browser.
-        // If driver exists, CSWeb skips URL navigation and only logs "Starting Chrome driver".
-        // By not creating driver here, CSWeb will properly call WebUI.openBrowser(url).
+        // MyWeb library checks DriverFactory.getWebDriver() to determine if it needs to open browser.
+        // If driver exists, MyWeb skips URL navigation and only logs "Starting Chrome driver".
+        // By not creating driver here, MyWeb will properly call WebUI.openBrowser(url).
         
         // Load Test Listeners (Katalon-compatible lifecycle hooks)
         startupProfiler.begin("TestListeners.load");
@@ -254,7 +254,7 @@ public class KatalanEngine {
         kwLogger.logRunData("katalonVersion", "10.3.2.0");
         
         // Add suiteResult to executionResult EARLY so prepareReportDirectory()
-        // can determine correct folder structure (e.g. "Testing QIMSol" not "Test Suite")
+        // can determine correct folder structure (e.g. "Regression Suite" not "Test Suite")
         executionResult.addSuiteResult(suiteResult);
         
         // Prepare Katalon-style nested report folder BEFORE test cases run
@@ -536,6 +536,8 @@ public class KatalanEngine {
             context.drainContinuedFailures();
             context.drainApiCalls();
             context.setProperty(FAILURE_SCREENSHOT_TAKEN, null);
+            context.setProperty(FAILURE_SCREENSHOT_PATH, null);
+            com.katalan.core.diagnostics.StepClock.reset();
 
             try {
                 // Add test case variables to script (resolve GlobalVariableReferences)
@@ -802,6 +804,8 @@ public class KatalanEngine {
 
     /** Context flag: a failure screenshot was already captured at the failing step. */
     public static final String FAILURE_SCREENSHOT_TAKEN = "failureScreenshotTaken";
+    /** Context property: path of the failure screenshot taken at the failing BDD step. */
+    public static final String FAILURE_SCREENSHOT_PATH = "failureScreenshotPath";
 
     private void handleTestFailure(TestCase testCase, TestCaseResult result,
                                     Throwable e, int attempt, int maxAttempts) {
@@ -827,6 +831,8 @@ public class KatalanEngine {
                     && !Boolean.TRUE.equals(context.getProperty(FAILURE_SCREENSHOT_TAKEN))) {
                 takeScreenshot(result, "failure");
             }
+
+            runFailureDiagnostics(testCase, result, e, errorMessage, stackTrace, attempt, maxAttempts, "FAILED");
         }
     }
     
@@ -857,9 +863,42 @@ public class KatalanEngine {
                     && !Boolean.TRUE.equals(context.getProperty(FAILURE_SCREENSHOT_TAKEN))) {
                 takeScreenshot(result, "error");
             }
+
+            runFailureDiagnostics(testCase, result, e, errorMessage, stackTrace, attempt, maxAttempts, "ERROR");
         }
     }
     
+    /**
+     * Collect "why did it fail" evidence while the browser is still open (final attempt only) and print
+     * the KATALAN_FAILURE line. Bounded by katalan.failureDiagnostics.timeoutMs, never throws and never
+     * changes the result. See docs/FAILURE_DIAGNOSTICS.md.
+     */
+    private void runFailureDiagnostics(TestCase testCase, TestCaseResult result, Throwable e,
+                                       String errorMessage, String stackTrace,
+                                       int attempt, int maxAttempts, String kind) {
+        if (!com.katalan.core.config.FailureDiagnosticsConfig.isEnabled()) {
+            return;
+        }
+        try {
+            String screenshot = null;
+            Object bddShot = context.getProperty(FAILURE_SCREENSHOT_PATH);
+            if (bddShot != null) {
+                screenshot = bddShot.toString();
+            } else if (result.getScreenshotPaths() != null && !result.getScreenshotPaths().isEmpty()) {
+                screenshot = result.getScreenshotPaths().get(result.getScreenshotPaths().size() - 1);
+            }
+            Map<String, Object> diagnosis = com.katalan.core.diagnostics.FailureDiagnostics.diagnose(
+                    context.getWebDriver(), config.isHeadless(), testCase.getId(), attempt, maxAttempts, kind,
+                    e, errorMessage, stackTrace, screenshot);
+            result.setFailureDiagnosis(diagnosis);
+            com.katalan.core.diagnostics.FailureDiagnostics.emit(diagnosis);
+            logger.info("Failure diagnosis [{}] {} ({} ms)", diagnosis.get("category"),
+                    diagnosis.get("summary"), diagnosis.get("diagnosticsMs"));
+        } catch (Throwable t) {
+            logger.warn("Failure diagnostics skipped: {}", t.getMessage());
+        }
+    }
+
     /**
      * Take screenshot and add to result
      */

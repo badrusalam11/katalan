@@ -34,7 +34,7 @@ public class TestCaseResult {
     // BDD hierarchical scenario data (for Katalon-style report)
     private List<Map<String, Object>> bddScenarioData;
     
-    // Test case script path (relative to project root, e.g., "Test Cases/MyApp/...")
+    // Test case script path (relative to project root, e.g., "Test Cases/Checkout/...")
     private String scriptPath;
     
     // Test case tag from .tc file
@@ -42,6 +42,9 @@ public class TestCaseResult {
 
     // HTTP calls made through WS.sendRequest during the (last) attempt
     private List<ApiCallRecord> apiCalls = new ArrayList<>();
+
+    // Failure diagnostics (category, summary, evidence...) - see docs/FAILURE_DIAGNOSTICS.md
+    private Map<String, Object> failureDiagnosis;
     
     public TestCaseResult() {
         this.stepResults = new ArrayList<>();
@@ -279,6 +282,14 @@ public class TestCaseResult {
 
     public void setApiCalls(List<ApiCallRecord> apiCalls) {
         this.apiCalls = apiCalls != null ? apiCalls : new ArrayList<>();
+    }
+
+    public Map<String, Object> getFailureDiagnosis() {
+        return failureDiagnosis;
+    }
+
+    public void setFailureDiagnosis(Map<String, Object> failureDiagnosis) {
+        this.failureDiagnosis = failureDiagnosis;
     }
 
     /**

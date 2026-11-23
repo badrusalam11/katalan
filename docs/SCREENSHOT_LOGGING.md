@@ -32,12 +32,12 @@ Ketika test case gagal dan screenshot diambil, entry berikut akan ditambahkan ke
   <class>com.katalan.core.engine.KatalanEngine</class>
   <method>takeScreenshot</method>
   <thread>1</thread>
-  <message>Screenshot captured on error: MyApp_Transfer_Fund_Account_to_Account_Standart_TC_TC01_..._error_1777050048265.png</message>
+  <message>Screenshot captured on error: Checkout_Payment_TC01_..._error_1777050048265.png</message>
   <properties>
-    <screenshot.filename>MyApp_Transfer_Fund_Account_to_Account_Standart_TC_TC01_..._error_1777050048265.png</screenshot.filename>
+    <screenshot.filename>Checkout_Payment_TC01_..._error_1777050048265.png</screenshot.filename>
     <screenshot.type>error</screenshot.type>
-    <screenshot.path>/path/to/Reports/20260424_235540/.../screenshots/MyApp_..._error_1777050048265.png</screenshot.path>
-    <attachment>MyApp_Transfer_Fund_Account_to_Account_Standart_TC_TC01_..._error_1777050048265.png</attachment>
+    <screenshot.path>/path/to/Reports/20260424_235540/.../screenshots/Checkout_..._error_1777050048265.png</screenshot.path>
+    <attachment>Checkout_Payment_TC01_..._error_1777050048265.png</attachment>
     <testops-method-name>com.katalan.core.engine.KatalanEngine.takeScreenshot</testops-method-name>
     <testops-execution-stacktrace></testops-execution-stacktrace>
   </properties>

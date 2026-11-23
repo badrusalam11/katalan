@@ -217,9 +217,9 @@ katalan.circuitBreaker.halfOpenDelay=10
 # Command:
 # java -Xms512m -Xmx1536m -XX:+UseG1GC \
 #      -jar katalan-runner-1.1.1.jar run \
-#      -p /path/to/my-automation-project \
-#      -ts "Test Suites/Regresion/Production/Account to Account" \
-#      --profile "Pre Deploy"
+#      -p /path/to/your-katalon-project \
+#      -ts "Test Suites/Regression/Smoke" \
+#      --profile "default"
 #
 # Expected result: RAM usage drops from 4GB → 1.5GB max
 # No katalan.properties changes needed!
@@ -227,7 +227,7 @@ katalan.circuitBreaker.halfOpenDelay=10
 # ------------------------------------------------------------------------------
 # Example 2: Optimize for 50+ Tests
 # ------------------------------------------------------------------------------
-# Add to project root (my-automation-project/katalan.properties):
+# Add to project root (<your-project>/katalan.properties):
 #
 # katalan.optimization.enabled=true
 # katalan.screenshot.format=JPEG
@@ -240,7 +240,7 @@ katalan.circuitBreaker.halfOpenDelay=10
 # ------------------------------------------------------------------------------
 # Example 3: CI/CD Aggressive Optimization
 # ------------------------------------------------------------------------------
-# See my-automation-project/katalan.properties for full CI/CD config
+# See your project's katalan.properties for a full CI/CD config
 # Run with katalan-cicd-runner.sh script
 
 # ==============================================================================
@@ -266,3 +266,10 @@ katalan.logging.compression=true
 katalan.memory.gcAfterTest=true
 
 # ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Failure diagnostics (see docs/FAILURE_DIAGNOSTICS.md)
+# ------------------------------------------------------------------------------
+# katalan.failureDiagnostics.enabled=true
+# katalan.failureDiagnostics.timeoutMs=1500
+# katalan.failureDiagnostics.maxTextChars=300

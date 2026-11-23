@@ -99,7 +99,7 @@ public class WebUiBuiltInKeywords {
 
     /**
      * Groovy invokes this for any static call that no overload on this class accepts - including
-     * calls made through a subclass such as a project's {@code class CSWeb extends WebUI}.
+     * calls made through a subclass such as a project's {@code class MyWeb extends WebUI}.
      *
      * <p>Scripts reach this class through {@code import ...WebUiBuiltInKeywords as WebUI}, which
      * nearly every Katalon script carries. This stub declares fewer keywords than
@@ -150,8 +150,8 @@ public class WebUiBuiltInKeywords {
 
     /**
      * Make {@link #$static_methodMissing} apply to project subclasses too
-     * ({@code class CSWeb extends WebUI}). Groovy does not inherit that hook for static calls, so
-     * {@code CSWeb.verifyMatch(..)} would still fail. Groovy resolves static calls through a class's
+     * ({@code class MyWeb extends WebUI}). Groovy does not inherit that hook for static calls, so
+     * {@code MyWeb.verifyMatch(..)} would still fail. Groovy resolves static calls through a class's
      * metaclass, so subclasses get one that falls back to the hook; every other class keeps
      * whatever metaclass the previous factory would have built.
      *
@@ -200,11 +200,13 @@ public class WebUiBuiltInKeywords {
 
         @Override
         public Object invokeStaticMethod(Object object, String methodName, Object[] arguments) {
+            long start = com.katalan.core.diagnostics.StepClock.begin(methodName);
             try {
                 return super.invokeStaticMethod(object, methodName, arguments);
             } catch (VirtualMachineError e) {
                 throw e;
             } catch (Throwable t) {
+                com.katalan.core.diagnostics.StepClock.failed(methodName, start);
                 throw KatalonStepFailure.forKeyword(methodName, arguments, t);
             }
         }
@@ -1000,7 +1002,7 @@ public class WebUiBuiltInKeywords {
         return WebUI.findWebElements(toKatalan(to), timeout);
     }
     
-    // ==================== CSWeb Compatibility Keywords ====================
+    // ==================== MyWeb Compatibility Keywords ====================
     
     public static void enhancedClick(TestObject to) {
         WebUI.enhancedClick(toKatalan(to));

@@ -53,8 +53,8 @@ public class TestSuiteParser {
             suite.setName(name);
 
             // Compute suite ID as relative path from "Test Suites/" root
-            // e.g. projectPath/Test Suites/Regresion/Sample/Account to Account.ts
-            //   -> "Regresion/Sample/Account to Account"
+            // e.g. projectPath/Test Suites/Regression/Smoke/Login.ts
+            //   -> "Regression/Smoke/Login"
             String computedId = name;
             try {
                 Path absSuite = suitePath.toAbsolutePath().normalize();

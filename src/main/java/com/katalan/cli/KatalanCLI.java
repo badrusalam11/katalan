@@ -292,7 +292,7 @@ public class KatalanCLI implements Callable<Integer> {
                 KatalanEngine engine = new KatalanEngine(config);
 
                 // CRITICAL: Change working directory to project path BEFORE engine.initialize()
-                // This ensures automation scripts that use relative file paths (new File("MyActmo.txt"))
+                // This ensures automation scripts that use relative file paths (new File("config.txt"))
                 // write to the PROJECT directory, not the katalan jar's directory.
                 // Save original to restore later.
                 String originalUserDir = System.getProperty("user.dir");
@@ -330,6 +330,10 @@ public class KatalanCLI implements Callable<Integer> {
                 // Decide whether project Test Listeners may run their own report exporter.
                 // katalan.properties first, then let an explicit CLI flag win over it.
                 com.katalan.core.config.CustomReportConfig.loadFrom(projectPath);
+                com.katalan.core.config.FailureDiagnosticsConfig.loadFrom(projectPath);
+                if (com.katalan.core.config.FailureDiagnosticsConfig.isEnabled()) {
+                    com.katalan.core.diagnostics.FailureDiagnostics.startCpuSampler();
+                }
                 if (skipCustomReport) {
                     com.katalan.core.config.CustomReportConfig.setSkipCustomReport(true);
                 }

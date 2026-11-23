@@ -760,8 +760,8 @@ public class WebUI {
             }
             // CONTINUE_ON_FAILURE or OPTIONAL - log and return false
             if (mode == com.katalan.core.compat.FailureHandling.CONTINUE_ON_FAILURE) {
-                logger.warn("Web element with id: '{}' located by '{}' not found", 
-                    testObject.getName(), testObject.toSeleniumBy());
+                logger.warn("Web element {}located by '{}' not found",
+                    idPart(testObject.getName()), testObject.toSeleniumBy());
             } else {
                 logger.debug("waitForElementPresent failed (optional): {}", e.getMessage());
             }
@@ -804,8 +804,8 @@ public class WebUI {
             }
             // CONTINUE_ON_FAILURE or OPTIONAL - log and return false
             if (mode == com.katalan.core.compat.FailureHandling.CONTINUE_ON_FAILURE) {
-                logger.warn("Web element with id: '{}' located by '{}' not found", 
-                    testObject.getName(), testObject.toSeleniumBy());
+                logger.warn("Web element {}located by '{}' not found",
+                    idPart(testObject.getName()), testObject.toSeleniumBy());
             } else {
                 logger.debug("waitForElementVisible failed (optional): {}", e.getMessage());
             }
@@ -848,8 +848,8 @@ public class WebUI {
             }
             // CONTINUE_ON_FAILURE or OPTIONAL - log and return false (Katalon-style log format)
             if (mode == com.katalan.core.compat.FailureHandling.CONTINUE_ON_FAILURE) {
-                logger.warn("Web element with id: '{}' located by '{}' not found", 
-                    testObject.getName(), testObject.toSeleniumBy());
+                logger.warn("Web element {}located by '{}' not found",
+                    idPart(testObject.getName()), testObject.toSeleniumBy());
             } else {
                 logger.debug("waitForElementClickable failed (optional): {}", e.getMessage());
             }
@@ -874,7 +874,7 @@ public class WebUI {
      */
     public static boolean waitForElementNotPresent(TestObject testObject, int timeout, Object failureHandling) {
         timeout = normalizeTimeout(timeout);
-        logger.info("Waiting for element not present: {} (timeout={}s)", testObject.getName(), timeout);
+        logger.info("Waiting for element not present: {} (timeout={}s)", describe(testObject), timeout);
         try {
             WebDriver driver = getDriver();
             By locator = smartLocator(testObject);
@@ -915,8 +915,8 @@ public class WebUI {
             }
             // CONTINUE_ON_FAILURE or OPTIONAL - log and return false
             if (mode == com.katalan.core.compat.FailureHandling.CONTINUE_ON_FAILURE) {
-                logger.warn("Web element with id: '{}' located by '{}' still present", 
-                    testObject.getName(), testObject.toSeleniumBy());
+                logger.warn("Web element {}located by '{}' still present",
+                    idPart(testObject.getName()), testObject.toSeleniumBy());
             } else {
                 logger.debug("waitForElementNotPresent failed (optional): {}", e.getMessage());
             }
@@ -1254,7 +1254,7 @@ public class WebUI {
      * Switch to frame by TestObject with timeout
      */
     public static void switchToFrame(TestObject testObject, int timeout) {
-        logger.info("Switching to frame: {}", testObject.getName());
+        logger.info("Switching to frame: {}", describe(testObject));
         WebElement element = waitForElement(testObject, timeout);
         getDriver().switchTo().frame(element);
     }
@@ -1393,7 +1393,7 @@ public class WebUI {
      * Scroll to element with timeout
      */
     public static void scrollToElement(TestObject testObject, int timeout) {
-        logger.info("Scrolling to element: {}", testObject.getName());
+        logger.info("Scrolling to element: {}", describe(testObject));
         WebElement element = waitForElement(testObject, timeout);
         executeJavaScript("arguments[0].scrollIntoView(true);", element);
     }
@@ -1433,7 +1433,7 @@ public class WebUI {
      * Mouse over element with timeout
      */
     public static void mouseOver(TestObject testObject, int timeout) {
-        logger.info("Mouse over: {}", testObject.getName());
+        logger.info("Mouse over: {}", describe(testObject));
         WebElement element = waitForElement(testObject, timeout);
         new Actions(getDriver()).moveToElement(element).perform();
     }
@@ -1449,7 +1449,7 @@ public class WebUI {
      * Drag and drop with timeout
      */
     public static void dragAndDrop(TestObject source, TestObject target, int timeout) {
-        logger.info("Drag and drop from {} to {}", source.getName(), target.getName());
+        logger.info("Drag and drop from {} to {}", describe(source), describe(target));
         WebElement sourceElement = waitForElement(source, timeout);
         WebElement targetElement = waitForElement(target, timeout);
         new Actions(getDriver()).dragAndDrop(sourceElement, targetElement).perform();
@@ -1466,7 +1466,7 @@ public class WebUI {
      * Focus on element with timeout
      */
     public static void focus(TestObject testObject, int timeout) {
-        logger.info("Focusing on: {}", testObject.getName());
+        logger.info("Focusing on: {}", describe(testObject));
         WebElement element = waitForElement(testObject, timeout);
         new Actions(getDriver()).moveToElement(element).perform();
     }
@@ -1553,7 +1553,7 @@ public class WebUI {
             Files.createDirectories(destination.getParent());
 
             // Copy before returning: callers read the returned path right away (Katalon writes it
-            // synchronously too), e.g. Actmo listeners ImageIO.read() it in AfterTestCase.
+            // synchronously too), e.g. reporting listeners ImageIO.read() it in AfterTestCase.
             Files.copy(source.toPath(), destination, StandardCopyOption.REPLACE_EXISTING);
             
             // Log to XmlKeywordLogger with attachment property (Katalon format)
@@ -1977,6 +1977,14 @@ public class WebUI {
      * Describe a TestObject for logging: prefer name, fall back to selector.
      * Optimized for performance - minimal string operations.
      */
+    /**
+     * "with id: 'X' " for objects from the Object Repository, "" for objects built from a locator in the
+     * script. Printing id: 'null' there read as if the script itself were broken.
+     */
+    static String idPart(String id) {
+        return id == null || id.isEmpty() || "null".equals(id) ? "" : "with id: '" + id + "' ";
+    }
+
     private static String describe(TestObject testObject) {
         if (testObject == null) return "<null>";
         String name = testObject.getName();
@@ -2006,7 +2014,7 @@ public class WebUI {
      * Katalon's element lookup loop (WebUiCommonHelper.findElementByNormalMethods): smart wait
      * before every poll, and keep polling while the whole seconds elapsed are <= timeout. A page
      * that is still loading (AJAX in flight, DOM changing) therefore stretches the wait instead of
-     * eating into it, and a timeout of 5 really allows up to ~6 s - e.g. esb-msr's
+     * eating into it, and a timeout of 5 really allows up to ~6 s - e.g. a project's
      * verifyElementPresent(kibanaLoginForm, 5), which raced a slow Kibana with a strict 5 s wait.
      *
      * @return the first non-null result of {@code attempt}, or null when the time is up
@@ -2060,7 +2068,7 @@ public class WebUI {
         return "screenshots";
     }
     
-    // ==================== Additional Keywords (CSWeb compatibility) ====================
+    // ==================== Additional Keywords (MyWeb compatibility) ====================
     
     /**
      * Click element with offset (x, y coordinates from element's top-left corner)

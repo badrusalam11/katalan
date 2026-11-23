@@ -16,7 +16,7 @@ import java.util.Map;
  * This provides access to runtime configuration settings that Katalon scripts expect.
  * 
  * IMPORTANT: This returns com.kms.katalon.core.model.FailureHandling because JAR libraries
- * compiled against Katalon (like CSWeb) expect this type when casting the FailureHandling field.
+ * compiled against Katalon (like MyWeb) expect this type when casting the FailureHandling field.
  */
 public class RunConfiguration {
     
@@ -56,7 +56,7 @@ public class RunConfiguration {
     
     /**
      * Get the project directory path (always returned as absolute path).
-     * Katalon scripts expect absolute paths (e.g. `CSWeb` checks
+     * Katalon scripts expect absolute paths (e.g. `MyWeb` checks
      * `getProjectDir().substring(0,7) == '/Users/'`), so we resolve
      * relative paths like "." to the real absolute directory.
      */
@@ -363,7 +363,7 @@ public class RunConfiguration {
     /**
      * Get execution properties as a Map structure compatible with Katalon
      * This returns a structure that mimics Katalon's ExecutionProperties object
-     * Used by listeners like Actmov3 that call RunConfiguration.getExecutionProperties().drivers.system
+     * Used by reporting listeners that call RunConfiguration.getExecutionProperties().drivers.system
      */
     public static Map<String, Object> getExecutionProperties() {
         Map<String, Object> props = new HashMap<>();
@@ -375,14 +375,14 @@ public class RunConfiguration {
         Map<String, Object> mobile = new HashMap<>();
 
         // Katalon reports the WebUIDriverType constant name here (CHROME_DRIVER, HEADLESS_DRIVER, ...),
-        // not katalan's own enum name; listeners such as Actmov3 map these exact strings to a platform
+        // not katalan's own enum name; reporting listeners map these exact strings to a platform
         // and only take a failure screenshot when it is a browser. A mobile run has no WebUI entry.
         if (!isMobileMode()) {
             webUI.put("browserType", getKatalonWebUIDriverType());
         }
 
         // Populate Mobile driver details from the live session, if one is active.
-        // Scripts like brimerchant's report generator read
+        // Some report-generator scripts read
         // execution.drivers.system.Mobile.{deviceId,deviceName,deviceModel,deviceOS,deviceOSVersion}.
         if (isMobileMode()) {
             mobile.put("deviceId", com.katalan.keywords.Mobile.getDeviceId());

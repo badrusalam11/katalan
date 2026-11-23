@@ -250,8 +250,8 @@ public class KatalanBDDExecutor {
     private void addProjectLibrariesToClassLoader(GroovyClassLoader classLoader) {
         if (projectPath == null) return;
         
-        // Add Keywords folder so that imports like `import website.CSWeb`
-        // or `import support.ExcelLocator` can be resolved from Keywords/website/CSWeb.groovy etc.
+        // Add Keywords folder so that imports like `import keywords.MyWeb`
+        // or `import support.DataHelper` can be resolved from Keywords/keywords/MyWeb.groovy etc.
         // Preprocess source files to fix Groovy 4 parser incompatibilities (e.g. `((x) as T)`).
         Path keywordsPath = projectPath.resolve("Keywords");
         if (Files.exists(keywordsPath)) {
@@ -788,6 +788,8 @@ public class KatalanBDDExecutor {
                             if (screenshotPath != null) {
                                 context.setProperty(
                                         com.katalan.core.engine.KatalanEngine.FAILURE_SCREENSHOT_TAKEN, true);
+                                context.setProperty(
+                                        com.katalan.core.engine.KatalanEngine.FAILURE_SCREENSHOT_PATH, screenshotPath);
                             }
                             
                             // Add screenshot info to log
@@ -1282,7 +1284,7 @@ public class KatalanBDDExecutor {
         // We rely on the kms.* compatibility stubs bundled in katalan-runner
         // to delegate to com.katalan.keywords.WebUI transparently, so we
         // must NOT rewrite kms.* imports here - that would break class
-        // inheritance (e.g. CSWeb extends WebUI loses disableSmartWait
+        // inheritance (e.g. MyWeb extends WebUI loses disableSmartWait
         // and openBrowser(url, FailureHandling) overloads).
         return com.katalan.core.compat.GroovySourcePreprocessor.preprocess(script);
     }
@@ -1325,7 +1327,7 @@ public class KatalanBDDExecutor {
         GroovyClassLoader classLoader = new GroovyClassLoader(getClass().getClassLoader(), config);
         
         // Add project-specific paths and libraries so that imports like
-        // `import website.CSWeb` or `import support.ExcelLocator` can be resolved
+        // `import keywords.MyWeb` or `import support.DataHelper` can be resolved
         // from the project's Keywords/, Include/scripts/groovy/, Drivers/, Libs/, bin/lib folders.
         addProjectLibrariesToClassLoader(classLoader);
         
@@ -1363,7 +1365,7 @@ public class KatalanBDDExecutor {
      * Filters out internal Java/Katalon/Selenium/Cucumber frames so the
      * caller can see exactly which user file/line caused the failure.
      *
-     * Returned strings look like: {@code "CSWeb.groovy:55  →  website.CSWeb.cari()"}.
+     * Returned strings look like: {@code "MyWeb.groovy:55  →  keywords.MyWeb.find()"}.
      */
     private static java.util.List<String> extractUserGroovyFrames(Throwable t) {
         java.util.LinkedHashSet<String> result = new java.util.LinkedHashSet<>();
@@ -1747,8 +1749,8 @@ public class KatalanBDDExecutor {
                 GroovyClassLoader classLoader = new GroovyClassLoader(getClass().getClassLoader(), config);
                 
                 // Add Keywords folder, Include/scripts/groovy folder, and project JAR libraries
-                // so the keyword script can resolve imports like `import website.CSWeb` or
-                // `import support.ExcelLocator` from other files in Keywords folder.
+                // so the keyword script can resolve imports like `import keywords.MyWeb` or
+                // `import support.DataHelper` from other files in Keywords folder.
                 if (projectPath != null) {
                     Path kwPath = projectPath.resolve("Keywords");
                     if (Files.exists(kwPath)) {

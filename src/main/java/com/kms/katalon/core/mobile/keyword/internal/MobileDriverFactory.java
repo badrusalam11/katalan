@@ -5,7 +5,7 @@ import com.katalan.core.context.ExecutionContext;
 /**
  * Katalon compatibility layer for MobileDriverFactory.
  * Delegates to katalan's real Appium-backed Mobile engine. Matches Katalon's own
- * behavior of throwing when no driver session is active yet (CSMobile-style scripts
+ * behavior of throwing when no driver session is active yet (MyMobile-style scripts
  * rely on this to detect "do I need to start a session?" via try/catch).
  */
 public class MobileDriverFactory {

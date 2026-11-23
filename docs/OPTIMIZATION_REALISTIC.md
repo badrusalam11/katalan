@@ -209,7 +209,7 @@ katalan.memory.warningThreshold=70
 
 ## 🎓 **Usage Recommendations**
 
-### For Your Use Case (my-automation-project):
+### Choosing a configuration:
 
 Check your typical test suite size:
 ```bash

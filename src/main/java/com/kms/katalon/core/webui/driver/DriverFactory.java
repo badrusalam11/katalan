@@ -18,8 +18,8 @@ public class DriverFactory {
      * Get the current WebDriver instance.
      * 
      * IMPORTANT: This method throws an exception if WebDriver is not initialized.
-     * CSWeb library relies on this exception to determine if it needs to call openBrowser(url).
-     * If this returns null without exception, CSWeb skips URL navigation!
+     * MyWeb library relies on this exception to determine if it needs to call openBrowser(url).
+     * If this returns null without exception, MyWeb skips URL navigation!
      *
      * As in Katalon, the returned driver runs smart wait before every findElement(s), so a
      * script's own driver.findElements(..) right after a click sees the updated page.
@@ -32,7 +32,7 @@ public class DriverFactory {
                 return com.katalan.core.driver.SmartWait.decorate(driver);
             }
         }
-        // Throw exception so CSWeb knows browser is not opened yet
+        // Throw exception so MyWeb knows browser is not opened yet
         throw new IllegalStateException("WebDriver is not initialized");
     }
     

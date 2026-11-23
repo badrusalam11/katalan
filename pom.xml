@@ -250,7 +250,7 @@
         </dependency>
 
         <!-- Libraries Katalon Studio ships on its script classpath, so project scripts
-             import them freely (e.g. esb-msr's BDD step definitions):
+             import them freely (e.g. BDD step definitions):
              - commons-lang 2.x: org.apache.commons.lang.RandomStringUtils / math.RandomUtils
              - jaxb-api: javax.xml.bind.DatatypeConverter (removed from the JDK in 11)
              - google-oauth-client: com.google.api.client.auth.openidconnect.IdToken -->

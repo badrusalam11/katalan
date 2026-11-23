@@ -93,8 +93,8 @@ public class KatalonReportGenerator {
      * any files. Format: {@code Reports/<timestamp>/<SuiteRelativePath>/<timestamp>}.
      * Where {@code SuiteRelativePath} mirrors the suite's location under
      * {@code Test Suites/} (without the {@code .ts} extension). For example,
-     * a suite at {@code Test Suites/Regresion/Sample/Account to Account.ts} produces
-     * {@code Reports/<timestamp>/Regresion/Sample/Account to Account/<timestamp>}.
+     * a suite at {@code Test Suites/Regression/Smoke/Login.ts} produces
+     * {@code Reports/<timestamp>/Regression/Smoke/Login/<timestamp>}.
      */
     public Path computeReportDirectory(ExecutionResult result) {
         String timestamp = TIMESTAMP_FORMATTER.format(result.getStartTime());
@@ -1164,7 +1164,7 @@ public class KatalonReportGenerator {
         // Mobile driver entry — populated from the live Appium session when one is active,
         // or from the katalan RunConfiguration (CLI --udid / --platform) when called early
         // (i.e. prepareReportDirectory() before the Appium session starts).
-        // CSMobile.groovy reads execution.drivers.system.Mobile.deviceId at class-init time
+        // MyMobile.groovy reads execution.drivers.system.Mobile.deviceId at class-init time
         // via MyComputer.executionProperties, so the value must be present in the early write.
         Map<String, Object> mobileDriver = new LinkedHashMap<>();
         if (com.kms.katalon.core.configuration.RunConfiguration.isMobileMode()) {
@@ -1175,7 +1175,7 @@ public class KatalonReportGenerator {
             mobileDriver.put("deviceOSVersion", com.katalan.keywords.Mobile.getDeviceOSVersion());
         } else {
             // No live session yet — seed from CLI config so static initializers in keyword
-            // classes (e.g. CSMobile.deviceId) get the right value on first class load.
+            // classes (e.g. MyMobile.deviceId) get the right value on first class load.
             com.katalan.core.context.ExecutionContext ctx =
                     com.katalan.core.context.ExecutionContext.getCurrent();
             if (ctx != null && ctx.getRunConfiguration() != null) {
@@ -1399,7 +1399,7 @@ public class KatalonReportGenerator {
                                     String className = lastDot > 0 ? classAndMethod.substring(0, lastDot) : classAndMethod;
                                     String methodName = lastDot > 0 ? classAndMethod.substring(lastDot + 1) : "";
                                     
-                                    // Extract source file name and line from (CSMobile.groovy:228)
+                                    // Extract source file name and line from (MyMobile.groovy:228)
                                     String lineInfo = frameInfo.substring(methodEnd);
                                     int colonIndex = lineInfo.lastIndexOf(':');
                                     String lineNumber = "";
@@ -2614,7 +2614,7 @@ public class KatalonReportGenerator {
         xml.append("tests=\"1\" ");
         xml.append("time=\"").append(String.format("%.6f", durationSec)).append("\">\n");
         
-        // Extract test suite name from test case path (e.g., "Test Suites/Regresion/Sample/Account to Account" -> "Account to Account")
+        // Extract test suite name from test case path (e.g., "Test Suites/Regression/Payments/Card to Card" -> "Card to Card")
         String testSuiteName = extractTestSuiteName(tcResult.getTestCaseName());
         String scenarioName = tcResult.getScenarioName() != null ? tcResult.getScenarioName() : testSuiteName;
         
@@ -2659,7 +2659,7 @@ public class KatalonReportGenerator {
     
     /**
      * Extract test suite name from test case path
-     * E.g., "Test Cases/MyApp/Transfer Fund/Account to Account/Standart TC/TC01..." -> "Account to Account"
+     * E.g., "Test Cases/App/Transfer/Card to Card/Standard TC/TC01..." -> "Card to Card"
      * The test suite name is usually the last folder before "Standart TC" or before the TC file
      */
     private String extractTestSuiteName(String testCasePath) {
@@ -2684,7 +2684,7 @@ public class KatalonReportGenerator {
                 }
             }
             
-            // If we find a specific pattern like "Account to Account", "VACA to VACA", return it
+            // If we find a specific pattern like "Card to Card", "Bank to Wallet", return it
             if (part.contains(" to ") && i < parts.length - 1) {
                 return part;
             }
@@ -3078,7 +3078,7 @@ public class KatalonReportGenerator {
             match.put("location", "StepDefinitions." + stepName.replace(" ", "_").toLowerCase() + "()");
             
             // Extract arguments from step name (parameters that were captured)
-            // Compare stepName with stepInfo.text to find placeholders like <role>, <fitur>
+            // Compare stepName with stepInfo.text to find placeholders like <role>, <feature>
             List<Map<String, Object>> arguments = new ArrayList<>();
             if (stepInfo != null && stepInfo.text != null) {
                 arguments = extractStepArguments(stepName, stepInfo.text);
@@ -3100,7 +3100,7 @@ public class KatalonReportGenerator {
     private List<Map<String, Object>> extractArgumentsWithOffsets(String executedStep, String stepDefinition, List<Object> parameters) {
         List<Map<String, Object>> arguments = new ArrayList<>();
         
-        // Find placeholders in step definition (e.g., <role>, <fitur>)
+        // Find placeholders in step definition (e.g., <role>, <feature>)
         java.util.regex.Pattern placeholderPattern = java.util.regex.Pattern.compile("<([^>]+)>");
         java.util.regex.Matcher matcher = placeholderPattern.matcher(stepDefinition);
         
@@ -3130,13 +3130,13 @@ public class KatalonReportGenerator {
     
     /**
      * Extract arguments from step execution vs step definition
-     * Example: "Login app role Maker dengan All Fitur" vs "Login app role <role> dengan <fitur>"
-     * Returns: [{"val": "Maker", "offset": 17}, {"val": "All Fitur", "offset": 30}]
+     * Example: "Login as Maker with All Features" vs "Login as <role> with <feature>"
+     * Returns: [{"val": "Maker", "offset": 9}, {"val": "All Features", "offset": 20}]
      */
     private List<Map<String, Object>> extractStepArguments(String executedStep, String stepDefinition) {
         List<Map<String, Object>> arguments = new ArrayList<>();
         
-        // Find placeholders in step definition (e.g., <role>, <fitur>)
+        // Find placeholders in step definition (e.g., <role>, <feature>)
         java.util.regex.Pattern placeholderPattern = java.util.regex.Pattern.compile("<([^>]+)>");
         java.util.regex.Matcher matcher = placeholderPattern.matcher(stepDefinition);
         
@@ -3407,7 +3407,7 @@ public class KatalonReportGenerator {
     
     /**
      * Find project name from .prj file in project directory.
-     * Katalon projects have a .prj file with the project name (e.g., "bricams-addons-katalon.prj").
+     * Katalon projects have a .prj file with the project name (e.g., "my-project.prj").
      */
     private String findProjectName(Path projectPath) {
         try {

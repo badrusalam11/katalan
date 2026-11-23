@@ -50,7 +50,7 @@ import java.util.Properties;
 import java.util.Set;
 
 /**
- * corporate-style automation test report PDF generator.
+ * Automation test report PDF generator.
  */
 public class PDFReportGenerator {
 
@@ -62,7 +62,7 @@ public class PDFReportGenerator {
 
     private static final String DASH = "-";
 
-    private static final DeviceRgb COLOR_ORG_BLUE   = new DeviceRgb(0, 47, 108);
+    private static final DeviceRgb COLOR_PRIMARY   = new DeviceRgb(0, 47, 108);
     private static final DeviceRgb COLOR_PASSED     = new DeviceRgb(40, 167, 69);
     private static final DeviceRgb COLOR_FAILED     = new DeviceRgb(220, 53, 69);
     private static final DeviceRgb COLOR_ERROR      = new DeviceRgb(253, 126, 20);
@@ -80,10 +80,10 @@ public class PDFReportGenerator {
     /** Cache: test case name (as written in {@code execution0.log}) -> ordered list of attachment filenames. */
     private java.util.Map<String, java.util.List<String>> attachmentsByTestCase;
 
-    /** Cache: test case name -> ordered list of CSMobile testcase() scenarios. */
+    /** Cache: test case name -> ordered list of MyMobile testcase() scenarios. */
     private java.util.Map<String, java.util.List<ScenarioInfo>> scenariosByTestCase;
 
-    /** A single scenario block extracted from a CSMobile.testcase() ⏺ marker. */
+    /** A single scenario block extracted from a MyMobile.testcase() ⏺ marker. */
     static final class ScenarioInfo {
         final String fitur;
         final String subfitur;
@@ -219,7 +219,7 @@ public class PDFReportGenerator {
                 ? (exec.getName() != null ? exec.getName() : "Test Suite")
                 : exec.getSuiteResults().get(0).getSuiteName();
         
-        // Prefer test suite path from CLI system property (e.g., "Test Suites/Regresion/...")
+        // Prefer test suite path from CLI system property (e.g., "Test Suites/Regression/...")
         String sysTestSuite = System.getProperty("katalan.testSuite");
         if (sysTestSuite != null && !sysTestSuite.isEmpty()) {
             suiteId = sysTestSuite;
@@ -310,7 +310,7 @@ public class PDFReportGenerator {
 
                 table.addCell(tdCell(String.valueOf(idx++)).setTextAlignment(TextAlignment.CENTER));
 
-                // Show test case ID (Test Cases/MyApp/Transfer Fund/...) with duration
+                // Show test case ID (Test Cases/Checkout/Payment/...) with duration
                 Cell idCell = new Cell()
                         .setPadding(6)
                         .setBorder(new SolidBorder(COLOR_BORDER, 0.5f));
@@ -477,7 +477,7 @@ public class PDFReportGenerator {
     }
 
     // =====================================================================
-    //  Detail pages (one per test case, corporate-style)
+    //  Detail pages (one per test case)
     // =====================================================================
 
     private void addTestCaseDetailPages(Document doc, ExecutionResult exec) {
@@ -508,14 +508,14 @@ public class PDFReportGenerator {
         Cell headCell = new Cell()
                 .add(new Paragraph(nvl(cleanTestCaseName(tc.getTestCaseName())))
                         .setBold().setFontSize(13).setFontColor(ColorConstants.WHITE))
-                .setBackgroundColor(COLOR_ORG_BLUE)
+                .setBackgroundColor(COLOR_PRIMARY)
                 .setPadding(10)
                 .setBorder(Border.NO_BORDER)
                 .setTextAlignment(TextAlignment.CENTER);
         head.addCell(headCell);
         doc.add(head);
 
-        // 2) Details grid (matches corporate layout: ID, Description, Tag, Start/End, Status/Elapsed)
+        // 2) Details grid (ID, Description, Tag, Start/End, Status/Elapsed)
         Table grid = new Table(UnitValue.createPercentArray(new float[]{1.4f, 3, 1.2f, 2.4f}))
                 .useAllAvailableWidth();
 
@@ -567,6 +567,12 @@ public class PDFReportGenerator {
             doc.add(failHdr);
 
             String errMsg = tc.getErrorMessage() != null ? tc.getErrorMessage() : "Test failed";
+            // Failure diagnosis: category + one human sentence + evidence, before the technical detail
+            boolean diagnosed = addFailureDiagnosisBlock(doc, tc.getFailureDiagnosis());
+            if (diagnosed) {
+                doc.add(new Paragraph("Detail teknis").setFontSize(9).setBold()
+                        .setFontColor(COLOR_TEXT_MUTED).setMarginTop(4).setMarginBottom(2));
+            }
             // Show a short human-friendly first line
             Paragraph em = new Paragraph(errMsg.split("\n")[0]).setFontSize(9).setFontColor(COLOR_TEXT_MUTED);
             doc.add(em);
@@ -590,15 +596,15 @@ public class PDFReportGenerator {
             java.util.List<String> userFrames = extractUserGroovyFrames(st, console);
             if (!userFrames.isEmpty()) {
                 Paragraph srcHdr = new Paragraph("📍 Source File(s) Involved")
-                        .setFontSize(10).setBold().setFontColor(COLOR_ORG_BLUE).setMarginTop(6).setMarginBottom(4);
+                        .setFontSize(10).setBold().setFontColor(COLOR_PRIMARY).setMarginTop(6).setMarginBottom(4);
                 doc.add(srcHdr);
                 StringBuilder srcSb = new StringBuilder();
                 for (String f : userFrames) {
                     srcSb.append("➜  ").append(f).append("\n");
                 }
                 Paragraph srcPara = new Paragraph(srcSb.toString().trim())
-                        .setFontSize(9).setFontColor(COLOR_ORG_BLUE).setBold();
-                srcPara.setBorder(new SolidBorder(COLOR_ORG_BLUE, 0.8f))
+                        .setFontSize(9).setFontColor(COLOR_PRIMARY).setBold();
+                srcPara.setBorder(new SolidBorder(COLOR_PRIMARY, 0.8f))
                         .setBackgroundColor(COLOR_BG_LIGHT).setPadding(6).setMarginBottom(6);
                 doc.add(srcPara);
             }
@@ -633,7 +639,7 @@ public class PDFReportGenerator {
                 .setFontColor(prev != null ? COLOR_TEXT : COLOR_TEXT_MUTED);
 
         Cell curCell = new Cell()
-                .add(new Paragraph(nvl(cleanTestCaseName(tc.getTestCaseName()))).setBold().setFontColor(COLOR_ORG_BLUE).setFontSize(10))
+                .add(new Paragraph(nvl(cleanTestCaseName(tc.getTestCaseName()))).setBold().setFontColor(COLOR_PRIMARY).setFontSize(10))
                 .setBorder(new SolidBorder(COLOR_BORDER, 0.5f))
                 .setPadding(8)
                 .setTextAlignment(TextAlignment.CENTER)
@@ -660,17 +666,17 @@ public class PDFReportGenerator {
             addFailureSection(doc, tc);
         }
 
-        // 5) CSMobile testcase() scenarios (scenario table + per-scenario screenshots)
+        // 5) MyMobile testcase() scenarios (scenario table + per-scenario screenshots)
         //    If scenarios were found, show them instead of the flat screenshot block.
-        java.util.Map<String, java.util.List<ScenarioInfo>> scenarioIdx = parseCSMobileScenariosIndex();
+        java.util.Map<String, java.util.List<ScenarioInfo>> scenarioIdx = parseScenarioMarkersIndex();
         java.util.List<ScenarioInfo> tcScenarios = lookupScenarios(scenarioIdx, tc.getTestCaseName());
-        boolean hasCSMobileScenarios = tcScenarios != null && !tcScenarios.isEmpty();
-        addCSMobileScenarioSection(doc, tc);
+        boolean hasScenarioMarkers = tcScenarios != null && !tcScenarios.isEmpty();
+        addScenarioMarkerSection(doc, tc);
 
-        // 6) Screenshots (with Information sidebar — corporate style)
+        // 6) Screenshots (with Information sidebar)
         //    Skip flat screenshots if already rendered per-scenario above.
-        if (!hasCSMobileScenarios) {
-            addScreenshotsBriStyle(doc, tc);
+        if (!hasScenarioMarkers) {
+            addScreenshotsWithInfo(doc, tc);
         }
     }
 
@@ -710,7 +716,7 @@ public class PDFReportGenerator {
     }
 
     /**
-     * corporate-style screenshot block: "Screenshot" label, an Information sidebar
+     * Screenshot block: "Screenshot" label, an Information sidebar
      * (file name, size, dimension, created time) on the left and the image
      * on the right, with the absolute path printed below.
      */
@@ -729,7 +735,7 @@ public class PDFReportGenerator {
         return 90L * 1024L * 1024L; // ~90MB → leaves headroom under 100MB total PDF
     }
 
-    private void addScreenshotsBriStyle(Document doc, TestCaseResult tc) {
+    private void addScreenshotsWithInfo(Document doc, TestCaseResult tc) {
         java.util.List<Path> images = collectScreenshots(tc);
         if (images.isEmpty()) return;
 
@@ -784,11 +790,11 @@ public class PDFReportGenerator {
     }
 
     private void addOneScreenshot(Document doc, Path img) throws Exception {
-        // Section label "Screenshot" with a thin underline like the corporate report
+        // Section label "Screenshot" with a thin underline
         doc.add(new Paragraph("Screenshot")
                 .setBold().setFontSize(10).setFontColor(COLOR_TEXT)
                 .setMarginTop(8).setMarginBottom(4)
-                .setBorderBottom(new SolidBorder(COLOR_ORG_BLUE, 1f))
+                .setBorderBottom(new SolidBorder(COLOR_PRIMARY, 1f))
                 .setPaddingBottom(2));
 
         // Compress image bytes (max 1280px wide JPEG q=0.6) to keep PDF small.
@@ -825,7 +831,7 @@ public class PDFReportGenerator {
                 .setPadding(10)
                 .setVerticalAlignment(VerticalAlignment.TOP);
         info.add(new Paragraph("Information")
-                .setBold().setFontSize(10).setFontColor(COLOR_ORG_BLUE).setMarginBottom(8));
+                .setBold().setFontSize(10).setFontColor(COLOR_PRIMARY).setMarginBottom(8));
         info.add(infoLine("File Name", img.getFileName().toString()));
         info.add(infoLine("Size", formatBytes(sizeBytes)));
         info.add(infoLine("Image Dimension",
@@ -1072,7 +1078,7 @@ public class PDFReportGenerator {
     }
 
     /**
-     * Parse execution0.log for ⏺ markers written by CSMobile.testcase().
+     * Parse execution0.log for ⏺ markers written by MyMobile.testcase().
      * Returns: testCaseName -> ordered list of ScenarioInfo (scenario boundary, type, screenshots, status).
      *
      * ⏺ marker format:
@@ -1080,7 +1086,7 @@ public class PDFReportGenerator {
      *
      * Screenshots and FAILED records between consecutive ⏺ markers are attributed to the current scenario.
      */
-    private synchronized java.util.Map<String, java.util.List<ScenarioInfo>> parseCSMobileScenariosIndex() {
+    private synchronized java.util.Map<String, java.util.List<ScenarioInfo>> parseScenarioMarkersIndex() {
         if (scenariosByTestCase != null) return scenariosByTestCase;
         java.util.Map<String, java.util.List<ScenarioInfo>> idx = new java.util.LinkedHashMap<>();
         Path log = reportDir.resolve("execution0.log");
@@ -1167,7 +1173,7 @@ public class PDFReportGenerator {
                 }
             }
         } catch (Exception e) {
-            logger.warn("Failed to parse execution0.log for CSMobile scenarios: {}", e.getMessage());
+            logger.warn("Failed to parse execution0.log for scenario markers: {}", e.getMessage());
         }
         scenariosByTestCase = idx;
         return idx;
@@ -1195,12 +1201,12 @@ public class PDFReportGenerator {
     }
 
     /**
-     * Render the CSMobile testcase() scenario section for a test case.
+     * Render the MyMobile testcase() scenario section for a test case.
      * Shows a # | Fitur | Scenario | Category | Status summary table,
      * then per-scenario screenshots.
      */
-    private void addCSMobileScenarioSection(Document doc, TestCaseResult tc) {
-        java.util.Map<String, java.util.List<ScenarioInfo>> idx = parseCSMobileScenariosIndex();
+    private void addScenarioMarkerSection(Document doc, TestCaseResult tc) {
+        java.util.Map<String, java.util.List<ScenarioInfo>> idx = parseScenarioMarkersIndex();
         java.util.List<ScenarioInfo> scenarios = lookupScenarios(idx, tc.getTestCaseName());
         if (scenarios == null || scenarios.isEmpty()) return;
 
@@ -1344,7 +1350,7 @@ public class PDFReportGenerator {
         if (calls == null || calls.isEmpty()) return;
 
         doc.add(new Paragraph("API Request & Response")
-                .setBold().setFontSize(12).setFontColor(COLOR_ORG_BLUE).setMarginTop(10).setMarginBottom(4));
+                .setBold().setFontSize(12).setFontColor(COLOR_PRIMARY).setMarginTop(10).setMarginBottom(4));
 
         String issueLink = findIssueLink(tc);
         int n = 0;
@@ -1365,7 +1371,7 @@ public class PDFReportGenerator {
                 t.addCell(new Cell()
                         .add(new Paragraph(new com.itextpdf.layout.element.Link(issueLink,
                                 com.itextpdf.kernel.pdf.action.PdfAction.createURI(issueLink)))
-                                .setFontSize(9).setFontColor(COLOR_ORG_BLUE).setUnderline())
+                                .setFontSize(9).setFontColor(COLOR_PRIMARY).setUnderline())
                         .setBorder(new SolidBorder(COLOR_BORDER, 0.5f))
                         .setPadding(8));
             }
@@ -1507,7 +1513,7 @@ public class PDFReportGenerator {
     }
 
     private String buildTestCaseId(TestCaseResult tc) {
-        // Use test case ID which contains "Test Cases/MyApp/Transfer Fund/..."
+        // Use test case ID which contains "Test Cases/Checkout/Payment/..."
         if (tc.getTestCaseId() != null && !tc.getTestCaseId().isEmpty()) {
             return tc.getTestCaseId();
         }
@@ -1962,7 +1968,7 @@ public class PDFReportGenerator {
         }
         
         try {
-            // Build path to .tc file from test case ID (e.g., "Test Cases/MyApp/Transfer Fund/...")
+            // Build path to .tc file from test case ID (e.g., "Test Cases/Checkout/Payment/...")
             // Use project root (user.dir) - reports may be deeply nested under Reports/<ts>/<sub>/...
             Path projectRoot = Paths.get(System.getProperty("user.dir", ""));
             Path tcFilePath = projectRoot.resolve(testCaseId + ".tc");
@@ -2087,7 +2093,7 @@ public class PDFReportGenerator {
 
     /**
      * Get relative test case ID from script path
-     * E.g., "Test Cases/MyApp/Transfer Fund/Account to Account/Standart TC/TC01 - Transaksi..."
+     * E.g., "Test Cases/App/Transfer/Card to Card/Standard TC/TC01 - Pay..."
      */
     private String getTestCaseId(TestCaseResult tc) {
         if (tc.getScriptPath() != null && !tc.getScriptPath().isEmpty()) {
@@ -2098,6 +2104,62 @@ public class PDFReportGenerator {
     }
 
     /* === Helper methods for failure rendering (focused error highlights) === */
+
+    private static final java.util.Map<String, String> CATEGORY_LABELS = java.util.Map.of(
+            "TEST_DATA", "Test Data",
+            "LOCATOR", "Locator berubah",
+            "NETWORK", "Network",
+            "RESOURCE", "Timing / beban mesin",
+            "OTHER", "Lainnya");
+
+    private static final java.util.Map<String, DeviceRgb> CATEGORY_COLORS = java.util.Map.of(
+            "TEST_DATA", new DeviceRgb(111, 66, 193),
+            "LOCATOR", new DeviceRgb(0, 123, 255),
+            "NETWORK", new DeviceRgb(232, 62, 140),
+            "RESOURCE", new DeviceRgb(253, 126, 20),
+            "OTHER", COLOR_SKIPPED);
+
+    private static final java.util.Map<String, String> CONFIDENCE_LABELS = java.util.Map.of(
+            "high", "keyakinan tinggi", "medium", "keyakinan sedang", "low", "dugaan lemah");
+
+    /** Renders the failure diagnosis (docs/FAILURE_DIAGNOSTICS.md). Returns false when absent. */
+    @SuppressWarnings("unchecked")
+    private boolean addFailureDiagnosisBlock(Document doc, java.util.Map<String, Object> d) {
+        if (d == null || d.get("summary") == null) return false;
+        try {
+            String cat = String.valueOf(d.get("category"));
+            DeviceRgb color = CATEGORY_COLORS.getOrDefault(cat, COLOR_SKIPPED);
+            Table box = new Table(UnitValue.createPercentArray(new float[]{1})).useAllAvailableWidth().setMarginBottom(6);
+            Cell cell = new Cell().setBorder(Border.NO_BORDER).setBorderLeft(new SolidBorder(color, 3f))
+                    .setBackgroundColor(COLOR_BG_LIGHT).setPadding(8);
+            String conf = CONFIDENCE_LABELS.getOrDefault(String.valueOf(d.get("confidence")), "");
+            cell.add(new Paragraph("Dugaan penyebab: " + CATEGORY_LABELS.getOrDefault(cat, cat)
+                    + (conf.isEmpty() ? "" : "  (" + conf + ")"))
+                    .setBold().setFontSize(9).setFontColor(color).setMarginBottom(2));
+            cell.add(new Paragraph(String.valueOf(d.get("summary"))).setFontSize(10).setBold().setFontColor(COLOR_TEXT));
+            Object ev = d.get("evidence");
+            if (ev instanceof java.util.List && !((java.util.List<?>) ev).isEmpty()) {
+                StringBuilder sb = new StringBuilder();
+                int n = 0;
+                for (Object o : (java.util.List<Object>) ev) {
+                    if (!(o instanceof java.util.Map)) continue;
+                    Object detail = ((java.util.Map<String, Object>) o).get("detail");
+                    if (detail == null) continue;
+                    sb.append("\u2022 ").append(detail).append("\n");
+                    if (++n >= 5) break;
+                }
+                if (sb.length() > 0) {
+                    cell.add(new Paragraph(sb.toString().trim()).setFontSize(8).setFontColor(COLOR_TEXT_MUTED).setMarginTop(3));
+                }
+            }
+            box.addCell(cell);
+            doc.add(box);
+            return true;
+        } catch (Exception e) {
+            logger.debug("Could not render failure diagnosis: {}", e.getMessage());
+            return false;
+        }
+    }
 
     /**
      * Extract the most meaningful ERROR message from console/stacktrace,
@@ -2146,8 +2208,8 @@ public class PDFReportGenerator {
     /**
      * Extract user's groovy source files from stack trace / console.
      * Filters out internal Java/Katalon/Selenium frames; keeps only user code
-     * like {@code website.CSWeb.cari(CSWeb.groovy:55)} or
-     * {@code fund_transfer.RTGS_Maker_Revamp.inPageEFT(RTGS_Maker_Revamp.groovy:271)}.
+     * like {@code keywords.MyWeb.find(MyWeb.groovy:55)} or
+     * {@code payments.CheckoutPage.submit(CheckoutPage.groovy:271)}.
      */
     private static java.util.List<String> extractUserGroovyFrames(String stackTrace, String console) {
         java.util.LinkedHashSet<String> result = new java.util.LinkedHashSet<>();
@@ -2158,8 +2220,8 @@ public class PDFReportGenerator {
         String combined = (stackTrace == null ? "" : stackTrace) + "\n" + (console == null ? "" : console);
         java.util.regex.Matcher m = p.matcher(combined);
         while (m.find()) {
-            String fqMethod = m.group(1);   // e.g., website.CSWeb.cari
-            String file = m.group(2);       // e.g., CSWeb.groovy
+            String fqMethod = m.group(1);   // e.g., keywords.MyWeb.find
+            String file = m.group(2);       // e.g., MyWeb.groovy
             String line = m.group(3);       // e.g., 55
 
             // Skip internal/library packages
@@ -2204,8 +2266,27 @@ public class PDFReportGenerator {
         if (console == null || console.isEmpty()) return "";
         StringBuilder sb = new StringBuilder();
         int added = 0;
+        // Steps run with FailureHandling.OPTIONAL are allowed to miss (e.g. a popup that only shows
+        // sometimes); they are not why the test failed, so keep them out of the snippet.
+        java.util.Set<String> optionalLocators = new java.util.HashSet<>();
+        int optionalSkipped = 0;
+        for (String l : console.split("\n")) {
+            if (l.contains("flowControl=OPTIONAL")) {
+                optionalSkipped++;
+                int idx = l.lastIndexOf(": ");
+                if (idx > 0) optionalLocators.add(l.substring(idx + 2).trim());
+            }
+        }
         for (String l : console.split("\n")) {
             String s = l.trim();
+            if (l.contains("flowControl=OPTIONAL")) continue;
+            if (!optionalLocators.isEmpty() && l.contains(" WARN ") && l.contains("not found")) {
+                boolean optionalEcho = false;
+                for (String loc : optionalLocators) {
+                    if (!loc.isEmpty() && l.contains(loc)) { optionalEcho = true; break; }
+                }
+                if (optionalEcho) continue;
+            }
             // Skip Selenium driver boilerplate
             if (s.startsWith("Build info:")) continue;
             if (s.startsWith("System info:")) continue;
@@ -2225,6 +2306,9 @@ public class PDFReportGenerator {
                 added++;
                 if (added >= 15) break;
             }
+        }
+        if (optionalSkipped > 0) {
+            sb.append("(").append(optionalSkipped).append(" step opsional dilewati \u2014 normal, bukan penyebab gagal)\n");
         }
         return sb.toString();
     }
@@ -2459,7 +2543,7 @@ public class PDFReportGenerator {
 
                 Cell kwCell = new Cell()
                         .add(new Paragraph(keyword.isEmpty() ? "—" : keyword)
-                                .setBold().setFontSize(9).setFontColor(COLOR_ORG_BLUE))
+                                .setBold().setFontSize(9).setFontColor(COLOR_PRIMARY))
                         .setBackgroundColor(rowBg)
                         .setBorder(new SolidBorder(COLOR_BORDER, 0.5f))
                         .setPadding(6);

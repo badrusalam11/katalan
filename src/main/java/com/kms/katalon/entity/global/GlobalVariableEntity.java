@@ -8,8 +8,8 @@ import com.kms.katalon.entity.global.enums.VariableValueType;
 /**
  * Katalon Studio's com.kms.katalon.entity.global.GlobalVariableEntity (shipped in
  * com.kms.katalon.entity_*.jar). Katalon puts that jar on every script's classpath, so test
- * cases import it even when they never use it (e.g. nds-automation-testing-new's
- * "00 - Local Approval") - without it the whole test case fails with "unable to resolve class".
+ * cases import it even when they never use it (e.g. a project's
+ * "00 - Shared Setup") - without it the whole test case fails with "unable to resolve class".
  */
 public class GlobalVariableEntity implements Serializable {
 

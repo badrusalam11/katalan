@@ -57,7 +57,7 @@ public class TestObject {
         }
 
         // Objects built in script code carry no selectorMethod at all - they just
-        // add an "xpath"/"css"/"id" property (e.g. CSWeb.cari(), which every web
+        // add an "xpath"/"css"/"id" property (e.g. MyWeb.find(), which every web
         // script uses). Derive the selector from those so WebUI keywords, which
         // read selectorMethod/selectorValue and cannot see the property map, still
         // resolve them. Mobile is unaffected: Mobile.resolveLocator() already

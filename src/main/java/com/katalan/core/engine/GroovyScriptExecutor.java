@@ -73,7 +73,7 @@ public class GroovyScriptExecutor {
         // Add GlobalVariable class (for static field access like GlobalVariable.varName)
         binding.setVariable("GlobalVariable", GlobalVariable.class);
         
-        // Use the kms FailureHandling: custom keyword libraries (CSMobile, CSWeb) are compiled
+        // Use the kms FailureHandling: custom keyword libraries (MyMobile, MyWeb) are compiled
         // against this type, so the binding must match to avoid MissingMethodException.
         binding.setVariable("FailureHandling", com.kms.katalon.core.model.FailureHandling.class);
         
@@ -134,7 +134,7 @@ public class GroovyScriptExecutor {
         // ImportCustomizer outranks the script's own import, so listing them silently
         // rebound `import ...WebUiBuiltInKeywords as WebUI` / `import ...testobject.TestObject`
         // to the katalan-native classes - which changed a script's declared superclass
-        // (`class CSWeb extends WebUI`) and dropped every FailureHandling overload that only
+        // (`class MyWeb extends WebUI`) and dropped every FailureHandling overload that only
         // the kms stub defines. The star imports above still supply both types by default,
         // and star imports correctly lose to a script's explicit import.
         importCustomizer.addImports(
@@ -468,8 +468,8 @@ public class GroovyScriptExecutor {
         );
         
         // com.kms.katalon.core.model.FailureHandling is real and left as-is (not rewritten to
-        // katalan's own compat.FailureHandling): custom keyword library classes like CSWeb/
-        // CSMobile declare method parameters strongly-typed to the kms enum (e.g.
+        // katalan's own compat.FailureHandling): custom keyword library classes like MyWeb/
+        // MyMobile declare method parameters strongly-typed to the kms enum (e.g.
         // `testcase(String, String, boolean, boolean, FailureHandling)`); rewriting the
         // top-level script's import to a different enum class made such calls throw
         // MissingMethodException at runtime even though the call shape was correct. WebUI's
@@ -967,7 +967,7 @@ public class GroovyScriptExecutor {
                 "import com.katalan.core.compat.GlobalVariable"
             );
             // com.kms.katalon.core.model.FailureHandling is real — do not rewrite.
-            // Keeping the kms type ensures CSMobile/CSWeb method signatures match
+            // Keeping the kms type ensures MyMobile/MyWeb method signatures match
             // FailureHandling values passed from test case scripts.
             
             // Replace WebUiCommonHelper and DriverFactory

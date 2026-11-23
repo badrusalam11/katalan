@@ -102,7 +102,7 @@ public class GroovySourcePreprocessor {
         // NOTE: We intentionally DO NOT rewrite com.kms.katalon.core.* imports
         // to katalan equivalents here. The kms.* compatibility stubs bundled
         // in katalan-runner already delegate to com.katalan.keywords.WebUI etc.
-        // Rewriting breaks class inheritance (e.g. CSWeb extends WebUI loses
+        // Rewriting breaks class inheritance (e.g. MyWeb extends WebUI loses
         // disableSmartWait / openBrowser(url, FailureHandling) overloads that
         // only exist on the kms stub, not on com.katalan.keywords.WebUI).
         // The only thing we must rewrite is `internal.GlobalVariable` because

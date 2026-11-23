@@ -16,7 +16,7 @@ import java.util.Map;
 
 /**
  * Reproduces the failure text Katalon Studio produces, so listeners that forward
- * {@code testCaseContext.getMessage()} (e.g. the Actmo reporter) get the same message under katalan.
+ * {@code testCaseContext.getMessage()} (e.g. a reporting listener) get the same message under katalan.
  *
  * <p>A failed built-in keyword surfaces in Katalon as
  * {@code StepFailedException: Unable to click on object 'X' (Root cause: <cause stack trace>)} with the
@@ -29,7 +29,10 @@ public final class KatalonStepFailure {
     private static final String GENERIC_MESSAGE = "Keyword {0} was failed";
 
     /** Root cause Katalon reports when a test object's element cannot be found (EXC_WEB_ELEMENT_NOT_FOUND). */
+    // Katalon prints "with id: 'null'" for objects built from a locator in the script; katalan leaves the
+    // id part out then, so the message does not read as if the script were broken.
     private static final String ELEMENT_NOT_FOUND = "Web element with id: ''{0}'' located by ''{1}'' not found";
+    private static final String ELEMENT_NOT_FOUND_NO_ID = "Web element located by ''{0}'' not found";
 
     /**
      * Katalon's per-keyword failure messages (coreWebuiMessages.properties), formatted with the
@@ -104,7 +107,7 @@ public final class KatalonStepFailure {
         for (int i = 0; i < values.length; i++) {
             if (isTestObject(values[i])) {
                 if (testObject == null) testObject = values[i];
-                values[i] = objectIdOf(values[i]);
+                values[i] = objectLabelOf(values[i]);
             }
         }
 
@@ -154,8 +157,11 @@ public final class KatalonStepFailure {
         if (testObject != null && isLookupFailure(cause)) {
             By by = locatorOf(testObject);
             if (by != null && !elementExists(by)) {
-                WebElementNotFoundException notFound = new WebElementNotFoundException(MessageFormat.format(
-                        ELEMENT_NOT_FOUND, objectIdOf(testObject), locatorText(by)));
+                String id = objectIdOf(testObject);
+                String text = id == null || id.isEmpty() || "null".equals(id)
+                        ? MessageFormat.format(ELEMENT_NOT_FOUND_NO_ID, locatorText(by))
+                        : MessageFormat.format(ELEMENT_NOT_FOUND, id, locatorText(by));
+                WebElementNotFoundException notFound = new WebElementNotFoundException(text);
                 notFound.setStackTrace(cause.getStackTrace());
                 return notFound;
             }
@@ -194,6 +200,17 @@ public final class KatalonStepFailure {
     private static boolean isTestObject(Object o) {
         return o instanceof com.kms.katalon.core.testobject.TestObject
                 || o instanceof com.katalan.core.model.TestObject;
+    }
+
+    /**
+     * The object id like Katalon prints it, or - for objects built from a locator in the script, which
+     * have no id - the locator itself. Katalon prints 'null' there, which reads as if the script broke.
+     */
+    private static String objectLabelOf(Object o) {
+        String id = objectIdOf(o);
+        if (id != null && !id.isEmpty() && !"null".equals(id)) return id;
+        By by = locatorOf(o);
+        return by != null ? locatorText(by) : String.valueOf(id);
     }
 
     private static String objectIdOf(Object o) {

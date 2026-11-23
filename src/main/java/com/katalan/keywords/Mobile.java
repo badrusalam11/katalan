@@ -783,7 +783,7 @@ public class Mobile {
             Path destination = Path.of(getScreenshotPath(), filename + ".png");
             Files.createDirectories(destination.getParent());
             // Copy before returning: callers read the returned path right away (Katalon writes it
-            // synchronously too), e.g. Actmo listeners ImageIO.read() it in AfterTestCase.
+            // synchronously too), e.g. reporting listeners ImageIO.read() it in AfterTestCase.
             Files.copy(source.toPath(), destination, StandardCopyOption.REPLACE_EXISTING);
 
             com.katalan.core.logging.XmlKeywordLogger kwLogger = com.katalan.core.logging.XmlKeywordLogger.getInstance();
@@ -954,7 +954,7 @@ public class Mobile {
      * Resolve a Katalon Mobile TestObject's properties into an Appium {@link By} locator.
      *
      * Property names follow the same convention Katalon's Mobile Object Spy uses (and what
-     * the brimerchant CSMobile.cari() helper builds at runtime): the literal UiAutomator /
+     * what custom locator helpers build at runtime): the literal UiAutomator /
      * XCUITest attribute names - "xpath", "resource-id" (Android), "content-desc" (Android),
      * "class", "text", "name"/"label" (iOS), or any other custom attribute, falling back to a
      * generic XPath attribute match. ConditionType.CONTAINS produces an xpath contains()
