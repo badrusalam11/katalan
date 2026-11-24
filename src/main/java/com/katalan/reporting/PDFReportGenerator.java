@@ -66,6 +66,8 @@ public class PDFReportGenerator {
     private static final DeviceRgb COLOR_PASSED     = new DeviceRgb(40, 167, 69);
     private static final DeviceRgb COLOR_FAILED     = new DeviceRgb(220, 53, 69);
     private static final DeviceRgb COLOR_ERROR      = new DeviceRgb(253, 126, 20);
+    /** Pale red behind the information panel of a failure screenshot. */
+    private static final DeviceRgb COLOR_FAILED_BG  = new DeviceRgb(254, 238, 240);
     private static final DeviceRgb COLOR_SKIPPED    = new DeviceRgb(108, 117, 125);
     private static final DeviceRgb COLOR_INCOMPLETE = new DeviceRgb(255, 193, 7);
     private static final DeviceRgb COLOR_BG_LIGHT   = new DeviceRgb(243, 245, 249);
@@ -754,7 +756,7 @@ public class PDFReportGenerator {
             }
             try {
                 long before = screenshotBytesEmbedded;
-                addOneScreenshot(doc, img);
+                addOneScreenshot(doc, img, isFailureScreenshot(img, tc));
                 embedded++;
                 
                 // Add page break after every 2 screenshots to prevent images from being cut off
@@ -786,18 +788,44 @@ public class PDFReportGenerator {
         }
     }
 
-    private void addOneScreenshot(Document doc, Path img) throws Exception {
+    /** Names like "..._error_1795502243875.png" / "1795502243875_error.png" (also "_failure"), as the engine and keywords write them. */
+    private static final java.util.regex.Pattern FAILURE_SHOT_NAME =
+            java.util.regex.Pattern.compile("(?i)_(error|failure)(_\\d+)?\\.(png|jpe?g)$");
+
+    /** True for a screenshot taken because something failed, so it can be framed differently in the report. */
+    private boolean isFailureScreenshot(Path img, TestCaseResult tc) {
+        if (FAILURE_SHOT_NAME.matcher(img.getFileName().toString()).find()) return true;
+        if (tc.getScreenshotPaths() != null) { // the engine's own failure shot
+            for (String s : tc.getScreenshotPaths()) {
+                Path p = resolveImagePath(s);
+                if (p != null && p.equals(img)) return true;
+            }
+        }
+        return false;
+    }
+
+    private void addOneScreenshot(Document doc, Path img, boolean failure) throws Exception {
         // One screenshot = label + info/image row + path. Kept together on one page: when iText may split
         // it, a block near the bottom of a page got its image shrunk to the leftover height (a thumbnail)
         // and the rest of the row continued, empty, on the next page.
         com.itextpdf.layout.element.Div block = new com.itextpdf.layout.element.Div().setKeepTogether(true);
+        if (failure) {
+            // A failure screenshot gets a red frame all around, so it stands out when paging through the report
+            block.setBorder(new SolidBorder(COLOR_FAILED, 2f)).setPadding(6).setMarginTop(6).setMarginBottom(6);
+        }
 
-        // Section label "Screenshot" with a thin underline
-        block.add(new Paragraph("Screenshot")
-                .setBold().setFontSize(10).setFontColor(COLOR_TEXT)
-                .setMarginTop(8).setMarginBottom(4)
-                .setBorderBottom(new SolidBorder(COLOR_PRIMARY, 1f))
-                .setPaddingBottom(2));
+        // Section label "Screenshot" with a thin underline; failure screenshots carry a red "ERROR" tag
+        Paragraph label = new Paragraph()
+                .add(new Text("Screenshot").setBold().setFontSize(10).setFontColor(failure ? COLOR_FAILED : COLOR_TEXT))
+                .setMarginTop(failure ? 0 : 8).setMarginBottom(4)
+                .setBorderBottom(new SolidBorder(failure ? COLOR_FAILED : COLOR_PRIMARY, 1f))
+                .setPaddingBottom(2);
+        if (failure) {
+            // Non-breaking spaces: a plain space at the edge of a Text is trimmed and the tag would hug the word
+            label.add(new Text("\u00A0\u00A0")).add(new Text("\u00A0\u00A0ERROR\u00A0\u00A0").setBold().setFontSize(8)
+                    .setFontColor(ColorConstants.WHITE).setBackgroundColor(COLOR_FAILED));
+        }
+        block.add(label);
 
         // Compress image bytes (max 1280px wide JPEG q=0.6) to keep PDF small.
         byte[] compressed = compressImageBytes(img, 1280, 0.6f);
@@ -832,12 +860,12 @@ public class PDFReportGenerator {
 
         // Left: Information panel
         Cell info = new Cell()
-                .setBackgroundColor(new DeviceRgb(232, 238, 247))
-                .setBorder(new SolidBorder(COLOR_BORDER, 0.5f))
+                .setBackgroundColor(failure ? COLOR_FAILED_BG : new DeviceRgb(232, 238, 247))
+                .setBorder(new SolidBorder(failure ? COLOR_FAILED : COLOR_BORDER, failure ? 1.5f : 0.5f))
                 .setPadding(10)
                 .setVerticalAlignment(VerticalAlignment.TOP);
         info.add(new Paragraph("Information")
-                .setBold().setFontSize(10).setFontColor(COLOR_PRIMARY).setMarginBottom(8));
+                .setBold().setFontSize(10).setFontColor(failure ? COLOR_FAILED : COLOR_PRIMARY).setMarginBottom(8));
         Paragraph fileName = infoLine("File Name", img.getFileName().toString());
         fileName.setSplitCharacters(FILE_NAME_SPLIT);
         info.add(fileName);
@@ -848,7 +876,7 @@ public class PDFReportGenerator {
 
         // Right: image
         Cell imgCell = new Cell()
-                .setBorder(new SolidBorder(COLOR_BORDER, 0.5f))
+                .setBorder(new SolidBorder(failure ? COLOR_FAILED : COLOR_BORDER, failure ? 1.5f : 0.5f))
                 .setPadding(4)
                 .setTextAlignment(TextAlignment.CENTER)
                 .setVerticalAlignment(VerticalAlignment.MIDDLE);

@@ -334,6 +334,9 @@ public class KatalanEngine {
         int totalTestCases = testCases.size();
         int completedTestCases = 0;
 
+        // One line listing what is about to run (execution order), so a dashboard can show pending test cases
+        ExecutionPlan.emit(suite.getName(), testCases);
+
         for (TestCase testCase : testCases) {
             if (context.shouldStop()) {
                 logger.warn("Execution stopped by request");
