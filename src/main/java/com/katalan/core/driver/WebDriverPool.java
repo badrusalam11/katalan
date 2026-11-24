@@ -279,6 +279,7 @@ public class WebDriverPool {
         } finally {
             totalDrivers.decrementAndGet();
             activeDrivers.remove(pooled);
+            com.katalan.core.cleanup.TempDirManager.onBrowserClosed();
         }
     }
     

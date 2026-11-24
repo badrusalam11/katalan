@@ -252,8 +252,8 @@ public class GroovySourcePreprocessor {
             maxMod = System.currentTimeMillis(); // conservative — won't match future checks
         }
 
-        Path tmp = Files.createTempDirectory("katalan-" + tagName + "-");
-        tmp.toFile().deleteOnExit();
+        // Deleted at JVM exit by TempDirManager (deleteOnExit() cannot remove non-empty dirs).
+        Path tmp = com.katalan.core.cleanup.TempDirManager.createOwnedTempDir("katalan-" + tagName + "-");
         preprocessDirectory(srcDir, tmp);
 
         // Store result in cache (best-effort — ignore errors).

@@ -274,8 +274,15 @@ public class WebDriverFactory {
         
         // Use fresh temporary profile - no saved passwords, no Google account
         // Use File.separator for cross-platform compatibility (Mac/Linux use '/', Windows '\')
-        String tempProfile = System.getProperty("java.io.tmpdir") + java.io.File.separator
-                + "katalan-chrome-" + System.currentTimeMillis();
+        // Unique per driver (OS-guaranteed), so parallel runs never share — or delete — each
+        // other's profile. TempDirManager deletes it once this Chrome has exited.
+        java.nio.file.Path tempProfile;
+        try {
+            tempProfile = com.katalan.core.cleanup.TempDirManager.createChromeProfile();
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("Cannot create temporary Chrome profile in "
+                    + System.getProperty("java.io.tmpdir") + ": " + e.getMessage(), e);
+        }
         options.addArguments("--user-data-dir=" + tempProfile);
         
         // Disable all password/autofill features (defaults - can be overridden by script prefs)
@@ -419,6 +426,7 @@ public class WebDriverFactory {
                     if (chromePid instanceof Number) {
                         long pid = ((Number) chromePid).longValue();
                         DriverCleanupManager.trackChromePid(pid);
+                        com.katalan.core.cleanup.TempDirManager.bindChromePid(tempProfile, pid);
                         logger.debug("📌 Tracked Chrome browser PID: {}", pid);
                     }
                 }

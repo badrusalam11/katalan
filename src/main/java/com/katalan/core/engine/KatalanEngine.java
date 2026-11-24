@@ -107,6 +107,8 @@ public class KatalanEngine {
         // Initialize driver cleanup manager (registers shutdown hook)
         startupProfiler.begin("DriverCleanupManager.init");
         com.katalan.core.driver.DriverCleanupManager.initialize();
+        // Temp dir cleanup: shutdown hook + background sweep of dead runs' leftovers
+        com.katalan.core.cleanup.TempDirManager.initialize();
         startupProfiler.end("DriverCleanupManager.init");
         
         // Load Object Repository
@@ -719,6 +721,8 @@ public class KatalanEngine {
                     // ALWAYS clear driver reference, even if quit() failed
                     context.setWebDriver(null);
                     logger.debug("Driver reference cleared from context");
+                    // Async: deletes this Chrome's temp profile once its process is gone
+                    com.katalan.core.cleanup.TempDirManager.onBrowserClosed();
                 }
             } else {
                 logger.debug("No browser to close (driver is null)");
