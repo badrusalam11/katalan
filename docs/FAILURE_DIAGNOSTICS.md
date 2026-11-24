@@ -1,7 +1,15 @@
 # Failure diagnostics
 
-When a test case fails for good, katalan inspects the still-open browser and tells the tester *why* it
-most likely failed, in one human-readable sentence plus the evidence behind it:
+When a test case fails for good, katalan inspects the still-open browser and records **what it observed**:
+where it failed, messages on screen, failed/slow API calls (and whether they happened while the page loaded
+or after the last action), the state of the last action's target (e.g. a disabled button), open dialogs, the
+page. These are shown as plain **facts** ("Bukti kegagalan") in the PDF report and in the `facts` field of the
+stdout line.
+
+**v1 shows facts only — no category, no confidence, no "probably".** A confident wrong verdict misleads
+more than no verdict. The rule-based guess below is still computed and kept in the JSON
+(`category`/`code`/`confidence`/`summary`) so it can be measured against real labels before it is shown
+again (v2). Categories the guess uses:
 
 | Category | Typical cause |
 |---|---|
@@ -38,8 +46,8 @@ katalan.failureDiagnostics.maxTextChars=300  # max length of any text taken from
 
 ## Output
 
-1. **Report PDF** — the "Failure Summary" shows the category, the sentence and the evidence before the
-   technical details. Console lines of steps run with `FailureHandling.OPTIONAL` are hidden from the
+1. **Report PDF** — the "Failure Summary" keeps Error and Source File(s) Involved, followed by
+   **"Bukti dari browser"** (the facts) and the console snippet. Console lines of steps run with `FailureHandling.OPTIONAL` are hidden from the
    snippet and replaced by a count.
 2. **One stdout line** that a launching process can consume:
 
@@ -60,6 +68,13 @@ Single line, at most 8 KB (least useful fields are dropped first). Schema v1:
   "code": "REQUEST_FAILED",                 // rule that won, see below
   "confidence": "high",                     // high | medium | low
   "summary": "After the last action (click), an API call failed: /api/payments → 500 (12 s) ...",
+  "failedAt": "click //button[text()='Pay'] — elemen tidak ditemukan",   // where it failed (one line)
+  "sourceFrames": [ "PaymentKeywords.groovy:120 · payments.PaymentKeywords.pay()" ],  // project script frames
+  "facts": [                                // v1: what the browser showed (displayed as "Bukti dari browser")
+    "Gagal di: click //button[text()='Pay'] — elemen tidak ditemukan",
+    "API gagal: /api/payments → 500 (12 dtk) (setelah aksi terakhir)",
+    "Halaman: /checkout · Shop"
+  ],
   "evidence": [ { "code": "DIALOG_OPEN", "detail": "Dialog open: \"Payment\"" } ],
   "stepWindow": { "keyword": "verifyElementPresent", "action": "click", "windowSec": 31 },
   "error": {
@@ -108,13 +123,15 @@ The other candidates are kept as `evidence`.
 | 30 | `NETWORK_ERROR_PAGE` | NETWORK | high | browser error page (`chrome-error://`) |
 | 35 | `PAGE_NOT_RENDERED` | NETWORK | high | ≥ 3 untranslated i18n keys visible (`form.email.label`) |
 | 40 | `REQUEST_FAILED` | NETWORK | high | an API call **started after the last action** failed (5xx / 0) |
+| 45 | `PAGE_DATA_FAILED` | NETWORK | high | an API call of **this page** failed (its path shares a resource name with the page URL, e.g. `/api/orders/list` on `/v2/orders`) — even when it failed while the page loaded |
 | 50 | `REQUEST_SLOW` | NETWORK | medium | an API call after the last action took ≥ 10 s, or the page is still loading |
-| 60 | `PAGE_SHOWS_SERVER_ERROR` | NETWORK | medium | visible message mentions timeout / 5xx / server / connection |
+| 60 | `PAGE_SHOWS_SERVER_ERROR` | NETWORK | high/medium | visible message mentions timeout / 5xx / server / an error code like `[099]` / a process id (high when an API call also failed). Error banners are recognised by their text, whatever their CSS |
 | 70 | `PAGE_SHOWS_ERROR` | TEST_DATA | medium | other visible error/alert message |
 | 75 | `MACHINE_OVERLOADED` | RESOURCE | medium | CPU ≥ 90 % or RAM ≥ 95 % |
+| 78 | `ACTION_ON_DISABLED` | TEST_DATA | medium | the last action before the failure hit a disabled control (or an element inside a disabled button): the browser accepts the click and nothing happens |
 | 80 | `DATA_VALUE_NOT_FOUND` | TEST_DATA | high/medium | the locator contains a value (digits, amount, date, email) that is not on the page; same-shaped candidates listed |
 | 85 | `REQUEST_FAILED` | NETWORK | medium/low | failed calls when the step time is unknown (fallback) |
-| 90 | `LOCATOR_TEXT_CHANGED` | LOCATOR | high | label not found but a near-identical text is (case, spacing, partial) |
+| 90 | `LOCATOR_TEXT_CHANGED` | LOCATOR | high/medium | label not found but the same text in another case/spacing is (high), or a longer text containing it (medium) |
 | 95 | `EXPECTED_MESSAGE_MISSING` | RESOURCE | medium | a confirmation sentence the script waits for never showed up |
 | 100 | `ELEMENT_NOT_FOUND` | LOCATOR | medium | element absent on a normally loaded page, no failed call |
 | 110 | `ELEMENT_HIDDEN` / `ELEMENT_OBSCURED` / `ELEMENT_DISABLED` / `ELEMENT_APPEARED_LATE` | LOCATOR / RESOURCE / TEST_DATA / RESOURCE | low | element present but hidden / covered / disabled / visible only now |
@@ -125,7 +142,9 @@ The other candidates are kept as `evidence`.
 
 Keyword calls go through one dispatcher, where katalan records when each keyword starts. The window
 that matters starts at the **last action** (click, setText, select, navigate…) before the failing keyword
-— a wait fails because of what the preceding action triggered. API calls started inside that window are
+— a wait fails because of what the preceding action triggered. When the failing keyword is itself an action
+(a click that finds nothing), the window starts at the action before it, and that action's target is re-checked
+(present? visible? disabled?). API calls started inside that window are
 `inStep` and can be the cause; older ones are page background and only reported as evidence.
 Extra evidence: `NO_REQUEST_IN_STEP` (the action never reached the server) and `SERVER_OK_IN_STEP`
 (the server answered 2xx but the element never appeared).

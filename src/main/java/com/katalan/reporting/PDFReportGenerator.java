@@ -567,12 +567,6 @@ public class PDFReportGenerator {
             doc.add(failHdr);
 
             String errMsg = tc.getErrorMessage() != null ? tc.getErrorMessage() : "Test failed";
-            // Failure diagnosis: category + one human sentence + evidence, before the technical detail
-            boolean diagnosed = addFailureDiagnosisBlock(doc, tc.getFailureDiagnosis());
-            if (diagnosed) {
-                doc.add(new Paragraph("Detail teknis").setFontSize(9).setBold()
-                        .setFontColor(COLOR_TEXT_MUTED).setMarginTop(4).setMarginBottom(2));
-            }
             // Show a short human-friendly first line
             Paragraph em = new Paragraph(errMsg.split("\n")[0]).setFontSize(9).setFontColor(COLOR_TEXT_MUTED);
             doc.add(em);
@@ -608,6 +602,9 @@ public class PDFReportGenerator {
                         .setBackgroundColor(COLOR_BG_LIGHT).setPadding(6).setMarginBottom(6);
                 doc.add(srcPara);
             }
+
+            // === 2b) What the browser showed when it failed (API errors, messages, disabled button...) ===
+            addFailureDiagnosisBlock(doc, tc.getFailureDiagnosis());
 
             // === 3) Filtered console snippet (ERROR lines only, no Selenium noise) ===
             if (!console.isEmpty()) {
@@ -790,8 +787,13 @@ public class PDFReportGenerator {
     }
 
     private void addOneScreenshot(Document doc, Path img) throws Exception {
+        // One screenshot = label + info/image row + path. Kept together on one page: when iText may split
+        // it, a block near the bottom of a page got its image shrunk to the leftover height (a thumbnail)
+        // and the rest of the row continued, empty, on the next page.
+        com.itextpdf.layout.element.Div block = new com.itextpdf.layout.element.Div().setKeepTogether(true);
+
         // Section label "Screenshot" with a thin underline
-        doc.add(new Paragraph("Screenshot")
+        block.add(new Paragraph("Screenshot")
                 .setBold().setFontSize(10).setFontColor(COLOR_TEXT)
                 .setMarginTop(8).setMarginBottom(4)
                 .setBorderBottom(new SolidBorder(COLOR_PRIMARY, 1f))
@@ -821,8 +823,12 @@ public class PDFReportGenerator {
             created = DASH;
         }
 
+        // Fixed layout: column widths stay as declared. With the auto layout a long file name without
+        // spaces (TC_name_with_underscores_error_123.png) widened the info column and squeezed the image.
         Table row = new Table(UnitValue.createPercentArray(new float[]{1.6f, 4f}))
-                .useAllAvailableWidth();
+                .useAllAvailableWidth()
+                .setFixedLayout()
+                .setKeepTogether(true);
 
         // Left: Information panel
         Cell info = new Cell()
@@ -832,7 +838,9 @@ public class PDFReportGenerator {
                 .setVerticalAlignment(VerticalAlignment.TOP);
         info.add(new Paragraph("Information")
                 .setBold().setFontSize(10).setFontColor(COLOR_PRIMARY).setMarginBottom(8));
-        info.add(infoLine("File Name", img.getFileName().toString()));
+        Paragraph fileName = infoLine("File Name", img.getFileName().toString());
+        fileName.setSplitCharacters(FILE_NAME_SPLIT);
+        info.add(fileName);
         info.add(infoLine("Size", formatBytes(sizeBytes)));
         info.add(infoLine("Image Dimension",
                 ((int) data.getWidth()) + "x" + ((int) data.getHeight()) + "px"));
@@ -845,21 +853,39 @@ public class PDFReportGenerator {
                 .setTextAlignment(TextAlignment.CENTER)
                 .setVerticalAlignment(VerticalAlignment.MIDDLE);
         Image pdfImg = new Image(data);
-        pdfImg.setAutoScale(true);
+        // Scale to the column width (keeps the aspect ratio), never to the space left on the page
+        pdfImg.setAutoScaleWidth(true);
         pdfImg.setMaxHeight(260f);
         pdfImg.setHorizontalAlignment(HorizontalAlignment.CENTER);
         imgCell.add(pdfImg);
 
         row.addCell(info);
         row.addCell(imgCell);
-        doc.add(row);
+        block.add(row);
 
         // Absolute path footer line
-        doc.add(new Paragraph(img.toAbsolutePath().toString())
+        block.add(new Paragraph(img.toAbsolutePath().toString())
                 .setFontSize(7).setFontColor(COLOR_TEXT_MUTED)
                 .setTextAlignment(TextAlignment.CENTER)
                 .setMarginTop(2).setMarginBottom(8));
+        doc.add(block);
     }
+
+    /** Let long file names wrap at '_', '-', '.' and '/' in addition to the default break points. */
+    private static final com.itextpdf.layout.splitting.ISplitCharacters FILE_NAME_SPLIT =
+            new com.itextpdf.layout.splitting.ISplitCharacters() {
+                private final com.itextpdf.layout.splitting.DefaultSplitCharacters base =
+                        new com.itextpdf.layout.splitting.DefaultSplitCharacters();
+
+                @Override
+                public boolean isSplitCharacter(com.itextpdf.io.font.otf.GlyphLine text, int glyphPos) {
+                    if (text.get(glyphPos).hasValidUnicode()) {
+                        int c = text.get(glyphPos).getUnicode();
+                        if (c == '_' || c == '-' || c == '.' || c == '/') return true;
+                    }
+                    return base.isSplitCharacter(text, glyphPos);
+                }
+            };
 
     /** Compress a screenshot to a JPEG byte array, downscaling to maxWidth and using the
      *  given quality (0..1). Returns null on failure (caller falls back to raw file). */
@@ -2105,58 +2131,32 @@ public class PDFReportGenerator {
 
     /* === Helper methods for failure rendering (focused error highlights) === */
 
-    private static final java.util.Map<String, String> CATEGORY_LABELS = java.util.Map.of(
-            "TEST_DATA", "Test Data",
-            "LOCATOR", "Locator berubah",
-            "NETWORK", "Network",
-            "RESOURCE", "Timing / beban mesin",
-            "OTHER", "Lainnya");
-
-    private static final java.util.Map<String, DeviceRgb> CATEGORY_COLORS = java.util.Map.of(
-            "TEST_DATA", new DeviceRgb(111, 66, 193),
-            "LOCATOR", new DeviceRgb(0, 123, 255),
-            "NETWORK", new DeviceRgb(232, 62, 140),
-            "RESOURCE", new DeviceRgb(253, 126, 20),
-            "OTHER", COLOR_SKIPPED);
-
-    private static final java.util.Map<String, String> CONFIDENCE_LABELS = java.util.Map.of(
-            "high", "keyakinan tinggi", "medium", "keyakinan sedang", "low", "dugaan lemah");
-
-    /** Renders the failure diagnosis (docs/FAILURE_DIAGNOSTICS.md). Returns false when absent. */
+    /**
+     * Renders the facts observed in the browser when the test failed ("Bukti dari browser"), after the
+     * Error and Source File(s) blocks: no category or confidence in v1,
+     * see docs/FAILURE_DIAGNOSTICS.md. Returns false when there are no facts.
+     */
     @SuppressWarnings("unchecked")
     private boolean addFailureDiagnosisBlock(Document doc, java.util.Map<String, Object> d) {
-        if (d == null || d.get("summary") == null) return false;
+        if (d == null || !(d.get("facts") instanceof java.util.List) || ((java.util.List<?>) d.get("facts")).isEmpty()) return false;
         try {
-            String cat = String.valueOf(d.get("category"));
-            DeviceRgb color = CATEGORY_COLORS.getOrDefault(cat, COLOR_SKIPPED);
-            Table box = new Table(UnitValue.createPercentArray(new float[]{1})).useAllAvailableWidth().setMarginBottom(6);
-            Cell cell = new Cell().setBorder(Border.NO_BORDER).setBorderLeft(new SolidBorder(color, 3f))
-                    .setBackgroundColor(COLOR_BG_LIGHT).setPadding(8);
-            String conf = CONFIDENCE_LABELS.getOrDefault(String.valueOf(d.get("confidence")), "");
-            cell.add(new Paragraph("Dugaan penyebab: " + CATEGORY_LABELS.getOrDefault(cat, cat)
-                    + (conf.isEmpty() ? "" : "  (" + conf + ")"))
-                    .setBold().setFontSize(9).setFontColor(color).setMarginBottom(2));
-            cell.add(new Paragraph(String.valueOf(d.get("summary"))).setFontSize(10).setBold().setFontColor(COLOR_TEXT));
-            Object ev = d.get("evidence");
-            if (ev instanceof java.util.List && !((java.util.List<?>) ev).isEmpty()) {
-                StringBuilder sb = new StringBuilder();
-                int n = 0;
-                for (Object o : (java.util.List<Object>) ev) {
-                    if (!(o instanceof java.util.Map)) continue;
-                    Object detail = ((java.util.Map<String, Object>) o).get("detail");
-                    if (detail == null) continue;
-                    sb.append("\u2022 ").append(detail).append("\n");
-                    if (++n >= 5) break;
-                }
-                if (sb.length() > 0) {
-                    cell.add(new Paragraph(sb.toString().trim()).setFontSize(8).setFontColor(COLOR_TEXT_MUTED).setMarginTop(3));
-                }
+            StringBuilder sb = new StringBuilder();
+            for (Object o : (java.util.List<Object>) d.get("facts")) {
+                if (String.valueOf(o).startsWith("Gagal di:")) continue; // already shown in "Error"
+                // The standard PDF font has no "→" glyph
+                sb.append("\u2022 ").append(String.valueOf(o).replace("\u2192", "->")).append("\n");
             }
-            box.addCell(cell);
-            doc.add(box);
+            if (sb.length() == 0) return false;
+            doc.add(new Paragraph("Bukti dari browser")
+                    .setFontSize(10).setBold().setFontColor(COLOR_PRIMARY).setMarginTop(6).setMarginBottom(4));
+            Paragraph facts = new Paragraph(sb.toString().trim()).setFontSize(9).setFontColor(COLOR_TEXT);
+            facts.setSplitCharacters(FILE_NAME_SPLIT);
+            facts.setBorder(new SolidBorder(COLOR_PRIMARY, 0.8f)).setBackgroundColor(COLOR_BG_LIGHT)
+                    .setPadding(6).setMarginBottom(6);
+            doc.add(facts);
             return true;
         } catch (Exception e) {
-            logger.debug("Could not render failure diagnosis: {}", e.getMessage());
+            logger.debug("Could not render failure evidence: {}", e.getMessage());
             return false;
         }
     }

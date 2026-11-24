@@ -6,6 +6,8 @@ var maxT = arguments[4] || 300, winMs = arguments[5] || 30000;
 // Epoch ms of the last action before the failing step (0 = unknown). Requests started after it are
 // "inStep": caused by what the test just did, not background traffic of the page.
 var stepFrom = arguments[6] || 0;
+// Locator of the last action before the failure (e.g. the click that should have opened a popup)
+var actBy = arguments[7], actVal = arguments[8];
 var origin0 = performance.timeOrigin || (Date.now() - performance.now());
 function inStep(e) { return stepFrom > 0 && origin0 + e.startTime >= stepFrom; }
 var out = { errors: [] };
@@ -125,6 +127,37 @@ if (by && val) {
   } catch (e) { out.errors.push('locator: ' + e.message); }
 }
 
+// 4c2. the last action's target: was it there, and could it react? A click on a disabled button (or on
+// a span inside one) is accepted by the browser and silently does nothing.
+if (actBy && actVal) {
+  try {
+    var an = null, acount = 0;
+    if (actBy === 'xpath') {
+      var asnap = document.evaluate(actVal, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+      acount = asnap.snapshotLength;
+      for (var ai = 0; ai < asnap.snapshotLength && !an; ai++) { if (isVisible(asnap.snapshotItem(ai))) an = asnap.snapshotItem(ai); }
+      if (!an && acount) an = asnap.snapshotItem(0);
+    } else if (actBy === 'css') {
+      var alist = document.querySelectorAll(actVal);
+      acount = alist.length;
+      for (var aj = 0; aj < alist.length && !an; aj++) { if (isVisible(alist[aj])) an = alist[aj]; }
+      if (!an && acount) an = alist[0];
+    }
+    var la = { matches: acount };
+    if (an && an.nodeType === 1) {
+      var selfDisabled = !!(an.disabled || an.getAttribute('aria-disabled') === 'true');
+      var holder = an.parentElement ? an.parentElement.closest('button,[role=button],fieldset,a') : null;
+      var parentDisabled = !!(holder && (holder.disabled || holder.getAttribute('aria-disabled') === 'true'));
+      var ctl = selfDisabled ? an : (parentDisabled ? holder : an);
+      la.visible = isVisible(an);
+      la.disabled = selfDisabled || parentDisabled;
+      la.tag = ctl.tagName.toLowerCase();
+      la.text = cut(ctl.innerText || ctl.value || '').slice(0, 60);
+    }
+    out.lastAction = la;
+  } catch (e) { out.errors.push('lastAction: ' + e.message); }
+}
+
 // 4d. candidates: values of the same shape (data) or near-identical labels (label)
 try {
   if (lit) {
@@ -193,14 +226,37 @@ try {
       if (!isVisible(me)) continue;
       // Route announcers (Next.js/Gatsby/a11y libs) are aria-live regions that read out the page title;
       // visually-hidden regions (1px clip) are not something the tester could have seen either.
-      if (/announcer/i.test(me.id || '') || /announcer|sr-only|visually-hidden/i.test(String(me.className || ''))) continue;
+      if (/announcer|a11y/i.test(me.id || '') || /announcer|sr-only|visually-hidden|a11y/i.test(String(me.className || ''))) continue;
       var mr = me.getBoundingClientRect();
       if (mr.width <= 2 || mr.height <= 2) continue;
       var mt = cut(me.innerText);
       if (mt.length < 2 || mseen[mt] || mt === clean(document.title)) continue;
+      // Screen-reader hints of select widgets ("Use Up and Down to choose options, press Enter...")
+      if (/use up and down to choose|press enter to select|options? available|results? available|option .* focused/i.test(mt)) continue;
       mseen[mt] = 1;
       msgs.push({ source: msgSel[s][0], text: mt });
     }
+  }
+  // Error banners are often custom components (no role/alert class): recognise them by their text -
+  // an error code like "[099]", "General error", a process/trace id, "something went wrong"...
+  var errText = /(\[\d{2,4}\]\s*\S)|general error|internal (server )?error|something went wrong|terjadi kesalahan|kesalahan sistem|process id|trace id|request id|correlation id|error code|service unavailable|bad gateway|gateway time-?out/i;
+  var tw = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null), tn, tscan = 0;
+  while ((tn = tw.nextNode()) && msgs.length < 5 && tscan < 20000) {
+    tscan++;
+    var tt = clean(tn.nodeValue);
+    if (tt.length < 4 || tt.length > 200 || !errText.test(tt)) continue;
+    var box = tn.parentElement;
+    if (!isVisible(box)) continue;
+    // Use the small block around the text (code + message + process id), not just the text node
+    for (var up = 0; up < 3 && box.parentElement && box.parentElement !== document.body
+         && clean(box.parentElement.innerText).length <= 120; up++) box = box.parentElement;
+    var bt = cut(box.innerText);
+    if (bt.length < 4 || mseen[bt]) continue;
+    var dup = false;
+    for (var q = 0; q < msgs.length; q++) { if (msgs[q].text.indexOf(bt) >= 0 || bt.indexOf(msgs[q].text) >= 0) dup = true; }
+    if (dup) continue;
+    mseen[bt] = 1;
+    msgs.push({ source: 'error-text', text: bt });
   }
   out.visibleMessages = msgs;
 } catch (e) { out.errors.push('messages: ' + e.message); }

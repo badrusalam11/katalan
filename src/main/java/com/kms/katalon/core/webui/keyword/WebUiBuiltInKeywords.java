@@ -200,7 +200,7 @@ public class WebUiBuiltInKeywords {
 
         @Override
         public Object invokeStaticMethod(Object object, String methodName, Object[] arguments) {
-            long start = com.katalan.core.diagnostics.StepClock.begin(methodName);
+            long start = com.katalan.core.diagnostics.StepClock.begin(methodName, arguments);
             try {
                 return super.invokeStaticMethod(object, methodName, arguments);
             } catch (VirtualMachineError e) {
@@ -208,6 +208,8 @@ public class WebUiBuiltInKeywords {
             } catch (Throwable t) {
                 com.katalan.core.diagnostics.StepClock.failed(methodName, start);
                 throw KatalonStepFailure.forKeyword(methodName, arguments, t);
+            } finally {
+                com.katalan.core.diagnostics.StepClock.end(methodName);
             }
         }
     }

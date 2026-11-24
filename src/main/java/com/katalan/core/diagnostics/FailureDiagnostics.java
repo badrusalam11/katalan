@@ -72,6 +72,21 @@ public final class FailureDiagnostics {
     private static final java.util.Set<String> FAILED_PATHS_SEEN = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     private static volatile ScheduledExecutorService cpuSampler;
+
+    /**
+     * Endpoints known to fail on many unrelated pages (a broken global widget, a polling call...), given
+     * by the launching process: {@code -Dkatalan.failureDiagnostics.backgroundRequests=/api/a,/api/b}.
+     * Their failures are reported as background, never as the cause. Empty by default.
+     */
+    static java.util.Set<String> backgroundRequests() {
+        String raw = System.getProperty("katalan.failureDiagnostics.backgroundRequests", "");
+        java.util.Set<String> out = new java.util.HashSet<>();
+        for (String p : raw.split(",")) {
+            String t = p.trim();
+            if (!t.isEmpty()) out.add(t);
+        }
+        return out;
+    }
     private static volatile double lastCpuPct = -1;
 
     private FailureDiagnostics() {}
@@ -229,6 +244,7 @@ public final class FailureDiagnostics {
                     if (r == null) continue;
                     String path = String.valueOf(r.get("path"));
                     if (FAILED_PATHS_SEEN.contains(path)) r.put("seenBefore", true);
+                    if (backgroundRequests().contains(path)) r.put("background", true);
                     paths.add(path);
                 }
                 FAILED_PATHS_SEEN.addAll(paths);
@@ -290,6 +306,7 @@ public final class FailureDiagnostics {
             render.put("untranslatedKeys", probe.get("untranslatedKeys"));
             render.put("untranslatedCount", probe.get("untranslatedCount"));
             out.put("pageRender", render);
+            out.put("lastAction", probe.get("lastAction"));
             out.put("visibleMessages", probe.get("visibleMessages"));
             out.put("openDialogs", probe.get("openDialogs"));
         }
@@ -297,7 +314,32 @@ public final class FailureDiagnostics {
         out.put("screenshotPath", screenshotPath);
         out.put("diagnosticsMs", System.currentTimeMillis() - t0);
         out.put("diagnosticsErrors", diagErrors);
+        // v1 shows facts only; category/code/confidence/summary stay in the JSON for later measurement
+        out.put("failedAt", EvidenceFacts.failedAt(out));
+        out.put("sourceFrames", sourceFrames(stackTrace, 4));
+        out.put("facts", EvidenceFacts.build(out));
         return out;
+    }
+
+    private static final Pattern FRAME = Pattern.compile("at\\s+([\\w.$]+)\\(([\\w$]+\\.groovy):(\\d+)\\)");
+
+    /**
+     * Project script frames of the stack trace ("Keyword.groovy:823 · pkg.Keyword.method()"), the same
+     * "Source File(s) Involved" the PDF report shows. Engine/library frames are left out.
+     */
+    static List<String> sourceFrames(String stackTrace, int max) {
+        java.util.LinkedHashSet<String> out = new java.util.LinkedHashSet<>();
+        if (stackTrace == null) return new ArrayList<>();
+        Matcher m = FRAME.matcher(stackTrace);
+        while (m.find() && out.size() < max) {
+            String fq = m.group(1);
+            String low = fq.toLowerCase(Locale.ROOT);
+            if (low.startsWith("com.kms.") || low.startsWith("com.katalan.") || low.startsWith("org.")
+                    || low.startsWith("io.cucumber.") || low.startsWith("java.") || low.startsWith("jdk.")
+                    || low.startsWith("sun.") || low.startsWith("groovy.") || low.startsWith("picocli.")) continue;
+            out.add(m.group(2) + ":" + m.group(3) + " \u00b7 " + fq + "()");
+        }
+        return new ArrayList<>(out);
     }
 
     /** Print the single stdout line a launching process can pick up. Never throws. */
@@ -371,7 +413,8 @@ public final class FailureDiagnostics {
             } catch (Exception ignored) { }
             Object raw = ((JavascriptExecutor) driver).executeScript(probeScript(),
                     err.locatorBy, err.locatorValue, err.literal, err.literalKind,
-                    FailureDiagnosticsConfig.getMaxTextChars(), NETWORK_WINDOW_MS, StepClock.windowStart());
+                    FailureDiagnosticsConfig.getMaxTextChars(), NETWORK_WINDOW_MS, StepClock.windowStart(),
+                    actionBy(), actionValue());
             if (raw == null) return null;
             return MAPPER.readValue(raw.toString(), new TypeReference<LinkedHashMap<String, Object>>() {});
         } finally {
@@ -379,6 +422,16 @@ public final class FailureDiagnostics {
                 try { driver.manage().timeouts().scriptTimeout(oldTimeout); } catch (Exception ignored) { }
             }
         }
+    }
+
+    private static String actionBy() {
+        String[] l = StepClock.actionTargetLocator();
+        return l == null ? null : l[0];
+    }
+
+    private static String actionValue() {
+        String[] l = StepClock.actionTargetLocator();
+        return l == null ? null : l[1];
     }
 
     private static String driverKind(WebDriver driver) {
@@ -429,6 +482,8 @@ public final class FailureDiagnostics {
         private static final Pattern ROOT_CAUSE = Pattern.compile("Root cause:\\s*(?:[\\w.]+\\.)?(\\w+(?:Exception|Error))");
         private static final Pattern LOCATED_BY = Pattern.compile("located by '(.+?)' (?:not found|not visible|not clickable|is not)", Pattern.DOTALL);
         private static final Pattern NOT_PRESENT = Pattern.compile("Element not present: (\\S.*?)\\s*$", Pattern.MULTILINE);
+        // "Unable to click on object '//xpath' (Root cause: ...)" - katalan prints the locator for objects without id
+        private static final Pattern ON_OBJECT = Pattern.compile("(?:on|of|verify) object '(.+?)'(?: \\(Root cause| is | to |$)", Pattern.MULTILINE);
         private static final Pattern BY_PREFIX = Pattern.compile("^By\\.(xpath|cssSelector|css selector|id|name|className|linkText|partialLinkText|tagName):\\s*(.*)$", Pattern.DOTALL);
         private static final Pattern KEYWORD = Pattern.compile("Unable to ([a-z][a-zA-Z ]*?) (?:on |of |to |for )?(?:the )?object");
         private static final Pattern USER_FRAME = Pattern.compile("at\\s+([\\w.$]+)\\(([\\w$]+\\.groovy):(\\d+)\\)");
@@ -464,6 +519,10 @@ public final class FailureDiagnostics {
             if (loc == null) {
                 Matcher np = NOT_PRESENT.matcher(all);
                 if (np.find()) loc = np.group(1);
+            }
+            if (loc == null) {
+                Matcher oo = ON_OBJECT.matcher(msg);
+                if (oo.find() && (oo.group(1).startsWith("/") || oo.group(1).startsWith("(") || oo.group(1).startsWith("By."))) loc = oo.group(1);
             }
             if (loc != null) {
                 loc = loc.trim();

@@ -21,7 +21,9 @@ import static com.katalan.core.diagnostics.FailureDiagnostics.*;
 final class Classifier {
 
     private static final Pattern SERVER_MSG = Pattern.compile(
-            "(?i).*(timeout|time out|timed out|\\b5\\d\\d\\b|server|koneksi|connection|network|jaringan|gangguan|unavailable|try again later).*");
+            "(?is).*(timeout|time out|timed out|\\b5\\d\\d\\b|server|koneksi|connection|network|jaringan|gangguan|unavailable|try again later"
+                    + "|general error|\\[\\d{2,4}\\]|something went wrong|terjadi kesalahan|kesalahan sistem|process id|trace id"
+                    + "|bad gateway|gateway time).*");
 
     private Classifier() {}
 
@@ -48,7 +50,14 @@ final class Classifier {
         List<Candidate> c = new ArrayList<>();
         Map<String, Object> page = probe == null ? null : asMap(probe.get("page"));
         Map<String, Object> net = probe == null ? null : asMap(probe.get("network"));
-        List<Object> failed = net == null ? List.of() : asList(net.get("failed"));
+        List<Object> failedAll = net == null ? List.of() : asList(net.get("failed"));
+        // Endpoints the launcher marked as known background (fail on many unrelated pages): never a cause
+        List<Object> failed = new ArrayList<>();
+        List<Object> knownBackground = new ArrayList<>();
+        for (Object o : failedAll) {
+            Map<String, Object> r = asMap(o);
+            if (r != null && Boolean.TRUE.equals(r.get("background"))) knownBackground.add(o); else failed.add(o);
+        }
         List<Object> slow = net == null ? List.of() : asList(net.get("slow"));
         List<Object> messages = probe == null ? List.of() : asList(probe.get("visibleMessages"));
         List<Object> dialogs = probe == null ? List.of() : asList(probe.get("openDialogs"));
@@ -64,13 +73,21 @@ final class Classifier {
         // only requests started since then can be the cause; everything older is page background.
         List<Object> stepCalls = net == null || net.get("stepCalls") == null ? null : asList(net.get("stepCalls"));
         boolean stepKnown = stepCalls != null;
+        java.util.Set<String> failedBeforeStep = new java.util.HashSet<>();
+        for (Object o : failed) {
+            Map<String, Object> r = asMap(o);
+            if (r != null && !Boolean.TRUE.equals(r.get("inStep"))) failedBeforeStep.add(String.valueOf(r.get("path")));
+        }
         List<Object> freshFailed = new ArrayList<>();
         for (Object o : failed) {
             Map<String, Object> r = asMap(o);
             if (r == null) continue;
             boolean noise;
             if (stepKnown) {
-                noise = !Boolean.TRUE.equals(r.get("inStep"));
+                // Before the last action -> page background. After it, but the same endpoint also failed
+                // before it on this page (fires on every render, e.g. a widget polling) -> background too:
+                // the action cannot be what broke it.
+                noise = !Boolean.TRUE.equals(r.get("inStep")) || failedBeforeStep.contains(String.valueOf(r.get("path")));
             } else {
                 // Fallback without step timing: failed in an earlier failed TC, or again and again on this page
                 Integer count = toInt(r.get("count"));
@@ -113,6 +130,63 @@ final class Classifier {
             add(c, 30, CAT_NETWORK, "NETWORK_ERROR_PAGE", "high",
                     "Halaman tidak bisa dibuka (halaman error browser) — koneksi ke aplikasi terputus.", err);
         }
+        // 3a. the page's own data API failed (path shares a resource name with the page URL, e.g.
+        // /api/rdn-transaction/transaction-inquiry/list on /v2/rdn-transaction/transaction-inquiry). It
+        // usually fails while the page loads - before the last action - yet decides what the page shows
+        // (empty table, disabled buttons), so it is not background noise.
+        List<Object> pageApiFailed = new ArrayList<>();
+        Map<String, Object> lastAction = probe == null ? null : asMap(probe.get("lastAction"));
+        boolean actionDisabled = lastAction != null && Boolean.TRUE.equals(lastAction.get("disabled"));
+        if (page != null && page.get("url") != null) {
+            java.util.Set<String> pageParts = resourceParts(page.get("url").toString().replaceFirst("^https?://[^/]+", ""));
+            for (Object o : failed) {
+                Map<String, Object> r = asMap(o);
+                if (r == null || r.get("path") == null) continue;
+                java.util.Set<String> parts = resourceParts(r.get("path").toString());
+                parts.retainAll(pageParts);
+                if (!parts.isEmpty()) pageApiFailed.add(o);
+            }
+        }
+        if (!pageApiFailed.isEmpty()) {
+            String s = "API data halaman ini gagal: " + requestsText(pageApiFailed) + " \u2014 isi halaman tidak termuat";
+            if (actionDisabled) {
+                s += ", sehingga \"" + lastAction.get("text") + "\" nonaktif dan " + actionName(net) + " terakhir tidak berefek";
+            }
+            s += (target != null && err.notFound ? "; " + lowerFirst(target) + " tidak muncul" : "") + ".";
+            add(c, 45, CAT_NETWORK, "PAGE_DATA_FAILED", "high", s, err);
+        }
+        // An API that failed while the page loaded (before the last action) and was not called again after
+        // it - unlike endpoints that fail on every render - most likely left the page without its data
+        // (empty dropdown, empty table). Not proof, hence medium; endpoints that already failed in an
+        // earlier failed test case of this run are left out as background.
+        if (stepKnown && pageApiFailed.isEmpty()) {
+            List<Object> loadFailed = new ArrayList<>();
+            java.util.Set<String> inStepPaths = new java.util.HashSet<>();
+            for (Object o : failed) {
+                Map<String, Object> r = asMap(o);
+                if (r != null && Boolean.TRUE.equals(r.get("inStep"))) inStepPaths.add(String.valueOf(r.get("path")));
+            }
+            for (Object o : failed) {
+                Map<String, Object> r = asMap(o);
+                // seenBefore is NOT a reason to skip here: an outage that persists through the run fails in every TC
+                if (r == null || Boolean.TRUE.equals(r.get("inStep"))) continue;
+                if (inStepPaths.contains(String.valueOf(r.get("path")))) continue;
+                loadFailed.add(o);
+            }
+            if (!loadFailed.isEmpty()) {
+                add(c, 82, CAT_NETWORK, "PAGE_LOAD_API_FAILED", "medium",
+                        "Saat halaman dimuat, request API gagal: " + requestsText(loadFailed)
+                                + " \u2014 data halaman kemungkinan tidak lengkap"
+                                + (target != null && err.notFound ? ", sehingga " + lowerFirst(target) + " tidak muncul" : "") + ".", err);
+            }
+        }
+        // last action hit a disabled control: the browser accepts the click and nothing happens
+        if (actionDisabled) {
+            add(c, 78, CAT_TEST_DATA, "ACTION_ON_DISABLED", "medium",
+                    capitalize(actionName(net)) + " terakhir mengenai \"" + lastAction.get("text") + "\" yang nonaktif (disabled) "
+                            + "\u2014 tidak berefek. Biasanya karena data kosong atau isian sebelumnya belum valid.", err);
+        }
+
         // 3b. page rendered without its texts: raw i18n keys on screen
         if (keyCount != null && keyCount >= 3) {
             String s = "Halaman tidak termuat sempurna \u2014 teks masih berupa kunci terjemahan ("
@@ -159,8 +233,20 @@ final class Classifier {
             else if (otherMsg == null) otherMsg = t;
         }
         if (serverMsg != null) {
-            add(c, 60, CAT_NETWORK, "PAGE_SHOWS_SERVER_ERROR", "medium",
-                    "Aplikasi menampilkan pesan gangguan: \"" + shorten(serverMsg, 160) + "\".", err);
+            // An error banner on screen plus a failed API call is the app telling us the backend failed
+            boolean apiFailed = !failed.isEmpty();
+            String s = "Aplikasi menampilkan pesan gangguan: \"" + shorten(serverMsg, 160) + "\"";
+            if (apiFailed) {
+                // Rarely failing endpoints first: the one failing on every page is usually background noise
+                List<Object> byCount = new ArrayList<>(failed);
+                // requestsText() reads from the end of the list, so most frequent first here
+                byCount.sort(java.util.Comparator.comparingInt((Object o) -> {
+                    Integer n = toInt(asMap(o) == null ? null : asMap(o).get("count"));
+                    return n == null ? 1 : n;
+                }).reversed());
+                s += "; request API gagal: " + requestsText(byCount);
+            }
+            add(c, 60, CAT_NETWORK, "PAGE_SHOWS_SERVER_ERROR", apiFailed ? "high" : "medium", s + ".", err);
         }
         if (otherMsg != null) {
             add(c, 70, CAT_TEST_DATA, "PAGE_SHOWS_ERROR", "medium",
@@ -192,9 +278,12 @@ final class Classifier {
                 }
                 add(c, 95, CAT_RESOURCE, "EXPECTED_MESSAGE_MISSING", "medium", s, err);
             } else if (err.literal != null && !candidates.isEmpty()) {
-                // 9. label changed
-                add(c, 90, CAT_LOCATOR, "LOCATOR_TEXT_CHANGED", "high",
-                        "Elemen \"" + err.literal + "\" tidak ditemukan, tapi ada \"" + candidates.get(0)
+                // 9. label changed. Only the same text in another case/spacing ("Retry" vs "RETRY") is strong
+                // evidence; a longer text that merely contains it ("Select" in "Select source of funds") is not.
+                String cand = String.valueOf(candidates.get(0));
+                boolean sameText = norm(cand).equals(norm(err.literal));
+                add(c, 90, CAT_LOCATOR, "LOCATOR_TEXT_CHANGED", sameText ? "high" : "medium",
+                        "Elemen \"" + err.literal + "\" tidak ditemukan, tapi ada \"" + cand
                                 + "\" — kemungkinan teks/locator berubah.", err);
             } else if (probe != null && networkClean) {
                 // 10. not found on a normally loaded page
@@ -244,7 +333,8 @@ final class Classifier {
         for (Candidate x : c) {
             if (x == best) continue;
             // The page-not-rendered sentence already lists the failed requests
-            if ("PAGE_NOT_RENDERED".equals(v.code) && "REQUEST_FAILED".equals(x.verdict.code)) continue;
+            if (("PAGE_NOT_RENDERED".equals(v.code) || "PAGE_DATA_FAILED".equals(v.code) || "PAGE_LOAD_API_FAILED".equals(v.code))
+                    && "REQUEST_FAILED".equals(x.verdict.code)) continue;
             v.evidence.add(evidence(x.verdict.code, stripSource(x.verdict.summary, err)));
         }
         if (stepKnown && err.notFound && freshFailed.isEmpty()) {
@@ -263,6 +353,10 @@ final class Classifier {
                             + "), tapi elemen tidak muncul \u2014 cek isi respons/data atau tampilan aplikasi."));
                 }
             }
+        }
+        if (!knownBackground.isEmpty()) {
+            v.evidence.add(evidence("BACKGROUND_REQUESTS", "Request yang dikenal selalu gagal di banyak halaman (bukan penyebab): "
+                    + requestsText(knownBackground) + "."));
         }
         for (Object o : dialogs) {
             Map<String, Object> d = asMap(o);
@@ -340,6 +434,31 @@ final class Classifier {
     private static String actionName(Map<String, Object> net) {
         Object a = net == null ? null : net.get("stepAction");
         return a == null ? "aksi" : a.toString();
+    }
+
+    private static final java.util.Set<String> GENERIC_PARTS = java.util.Set.of(
+            "api", "apis", "rest", "service", "services", "data", "list", "detail", "details", "create", "edit",
+            "update", "delete", "index", "home", "page", "pages", "app", "apps", "web", "main", "public", "static",
+            "assets", "search", "query", "get", "post", "info", "config", "menu", "user", "users", "account");
+
+    /** Meaningful path segments ("rdn-transaction", "transaction-inquiry"), without versions/ids/generic words. */
+    private static java.util.Set<String> resourceParts(String path) {
+        java.util.Set<String> out = new java.util.HashSet<>();
+        for (String seg : path.split("[/?#]")) {
+            String p = seg.toLowerCase(java.util.Locale.ROOT).trim();
+            if (p.length() < 4 || p.contains(".") || p.matches("v\\d+") || p.matches(".*\\d{3,}.*")
+                    || GENERIC_PARTS.contains(p)) continue;
+            out.add(p);
+        }
+        return out;
+    }
+
+    private static String capitalize(String s) {
+        return s == null || s.isEmpty() ? s : Character.toUpperCase(s.charAt(0)) + s.substring(1);
+    }
+
+    private static String norm(String s) {
+        return s == null ? "" : s.replaceAll("\\s+", "").toLowerCase(java.util.Locale.ROOT);
     }
 
     private static String lowerFirst(String s) {

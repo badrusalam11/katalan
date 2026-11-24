@@ -232,6 +232,23 @@ public final class KatalonStepFailure {
     }
 
     /** {@code By.xpath: //a} -> {@code //a}, the bare selector Katalon prints. */
+    /**
+     * {by, value} of a test object's locator ("xpath"/"css"/other selenium name), or null when the object
+     * is not a test object or has no locator. Used by failure diagnostics to re-check the last action's target.
+     */
+    public static String[] locatorPartsOf(Object o) {
+        if (o == null || !isTestObject(o)) return null;
+        By by = locatorOf(o);
+        if (by == null) return null;
+        String s = by.toString();
+        String kind = s.startsWith("By.xpath") ? "xpath" : s.startsWith("By.cssSelector") ? "css"
+                : s.startsWith("By.id") ? "id" : null;
+        if (kind == null) return null;
+        String value = locatorText(by);
+        if ("id".equals(kind)) { kind = "css"; value = "#" + value; }
+        return new String[] { kind, value };
+    }
+
     private static String locatorText(By by) {
         String s = by.toString();
         int i = s.indexOf(": ");

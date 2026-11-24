@@ -23,6 +23,13 @@ public final class StepClock {
             "check", "uncheck", "submit", "navigateToUrl", "openBrowser", "refresh", "back", "forward",
             "dragAndDropToObject", "dragAndDropByOffset", "executeJavaScript");
 
+    private static volatile Object lastActionTarget;
+    // The action before the last one: when the failing keyword is itself an action (a click that finds
+    // nothing), what matters is the action before it (the click that should have opened the popup).
+    private static volatile long prevActionStart;
+    private static volatile String prevActionName;
+    private static volatile Object prevActionTarget;
+    private static volatile Object failedActionTarget;
     private static volatile long lastActionStart;
     private static volatile String lastActionName;
     private static volatile long failedStart;
@@ -34,10 +41,23 @@ public final class StepClock {
 
     /** Called when a keyword starts; returns its start time. */
     public static long begin(String keyword) {
+        return begin(keyword, null);
+    }
+
+    /** Same, also remembering the action's target object (first argument) - only a reference, no work. */
+    public static long begin(String keyword, Object[] args) {
         long now = System.currentTimeMillis();
-        if (keyword != null && ACTIONS.contains(keyword)) {
+        // callTestCase runs a whole test case: its keywords are the test's own actions, not nested internals
+        int depth = isContainer(keyword) ? DEPTH.get()[0] : ++DEPTH.get()[0];
+        // A keyword can dispatch to another overload internally (e.g. a call from a custom keyword class is
+        // converted and dispatched again): only the outermost call is the test's action.
+        if (depth == 1 && keyword != null && ACTIONS.contains(keyword)) {
+            prevActionStart = lastActionStart;
+            prevActionName = lastActionName;
+            prevActionTarget = lastActionTarget;
             lastActionStart = now;
             lastActionName = keyword;
+            lastActionTarget = args != null && args.length > 0 ? args[0] : null;
         }
         return now;
     }
@@ -47,22 +67,50 @@ public final class StepClock {
      * (latest start) is kept.
      */
     public static void failed(String keyword, long start) {
+        if (DEPTH.get()[0] > 1) return; // the outermost call records the failure
         if (start >= failedStart) {
             failedStart = start;
             failedName = keyword;
-            failedActionStart = lastActionStart;
-            failedActionName = lastActionName;
+            boolean failingIsTheAction = lastActionStart == start && prevActionStart > 0;
+            failedActionStart = failingIsTheAction ? prevActionStart : lastActionStart;
+            failedActionName = failingIsTheAction ? prevActionName : lastActionName;
+            failedActionTarget = failingIsTheAction ? prevActionTarget : lastActionTarget;
         }
+    }
+
+    private static final ThreadLocal<int[]> DEPTH = ThreadLocal.withInitial(() -> new int[1]);
+
+    /** Called when a keyword returns or throws (pairs with {@link #begin}). */
+    public static void end(String keyword) {
+        if (isContainer(keyword)) return;
+        int[] d = DEPTH.get();
+        if (d[0] > 0) d[0]--;
+    }
+
+    private static boolean isContainer(String keyword) {
+        return keyword != null && keyword.startsWith("callTestCase");
     }
 
     /** New test case attempt. */
     public static void reset() {
+        DEPTH.get()[0] = 0;
         lastActionStart = 0;
         lastActionName = null;
         failedStart = 0;
         failedName = null;
         failedActionStart = 0;
         failedActionName = null;
+        lastActionTarget = null;
+        failedActionTarget = null;
+        prevActionStart = 0;
+        prevActionName = null;
+        prevActionTarget = null;
+    }
+
+    /** {by, value} of the last action's target before the failure, or null. */
+    public static String[] actionTargetLocator() {
+        return failedActionStart > 0
+                ? com.katalan.core.engine.KatalonStepFailure.locatorPartsOf(failedActionTarget) : null;
     }
 
     /** Epoch ms from which requests count as caused by the failing step, or 0 when unknown. */

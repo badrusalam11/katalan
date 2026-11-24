@@ -892,8 +892,7 @@ public class KatalanEngine {
                     e, errorMessage, stackTrace, screenshot);
             result.setFailureDiagnosis(diagnosis);
             com.katalan.core.diagnostics.FailureDiagnostics.emit(diagnosis);
-            logger.info("Failure diagnosis [{}] {} ({} ms)", diagnosis.get("category"),
-                    diagnosis.get("summary"), diagnosis.get("diagnosticsMs"));
+            logger.info("Failure evidence collected ({} ms): {}", diagnosis.get("diagnosticsMs"), diagnosis.get("facts"));
         } catch (Throwable t) {
             logger.warn("Failure diagnostics skipped: {}", t.getMessage());
         }
