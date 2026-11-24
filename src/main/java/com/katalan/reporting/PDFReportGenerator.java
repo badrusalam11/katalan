@@ -2241,31 +2241,26 @@ public class PDFReportGenerator {
      */
     private static java.util.List<String> extractUserGroovyFrames(String stackTrace, String console) {
         java.util.LinkedHashSet<String> result = new java.util.LinkedHashSet<>();
+        // Keyword/include files (Kw.groovy:12) and test case scripts, which Groovy names after the test
+        // case without extension: "at 60_-_View_Detail.run(60 - View Detail:64)".
         java.util.regex.Pattern p = java.util.regex.Pattern.compile(
-            "at\\s+([\\w.$]+)\\(([\\w$]+\\.groovy):(\\d+)\\)"
+            "at\\s+([\\w.$-]+)\\(([^():\\r\\n]+?):(\\d+)\\)"
         );
 
         String combined = (stackTrace == null ? "" : stackTrace) + "\n" + (console == null ? "" : console);
         java.util.regex.Matcher m = p.matcher(combined);
         while (m.find()) {
             String fqMethod = m.group(1);   // e.g., keywords.MyWeb.find
-            String file = m.group(2);       // e.g., MyWeb.groovy
+            String file = m.group(2).trim(); // e.g., MyWeb.groovy, or "60 - View Detail" for a test case
             String line = m.group(3);       // e.g., 55
-
-            // Skip internal/library packages
-            String lower = fqMethod.toLowerCase();
-            if (lower.startsWith("com.kms.")) continue;
-            if (lower.startsWith("com.katalan.")) continue;
-            if (lower.startsWith("org.codehaus.")) continue;
-            if (lower.startsWith("org.openqa.")) continue;
-            if (lower.startsWith("io.cucumber.")) continue;
-            if (lower.startsWith("java.")) continue;
-            if (lower.startsWith("jdk.")) continue;
-            if (lower.startsWith("sun.")) continue;
-            if (lower.startsWith("groovy.")) continue;
-            if (lower.startsWith("picocli.")) continue;
-
-            result.add(String.format("%s:%s  →  %s()", file, line, fqMethod));
+            if (com.katalan.core.diagnostics.FailureDiagnostics.isLibraryFrame(fqMethod)) continue;
+            if (file.endsWith(".groovy")) {
+                result.add(String.format("%s:%s  →  %s()", file, line, fqMethod));
+            } else if (com.katalan.core.diagnostics.FailureDiagnostics.isTestCaseScript(file)) {
+                result.add(com.katalan.core.diagnostics.FailureDiagnostics.testCaseFrame(file, line));
+            } else {
+                continue;
+            }
             if (result.size() >= 6) break; // keep concise
         }
 

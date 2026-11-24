@@ -321,25 +321,48 @@ public final class FailureDiagnostics {
         return out;
     }
 
-    private static final Pattern FRAME = Pattern.compile("at\\s+([\\w.$]+)\\(([\\w$]+\\.groovy):(\\d+)\\)");
+    /**
+     * A stack frame of project code: a keyword/include file ({@code at pkg.Kw.m(Kw.groovy:12)}) or a test
+     * case script, which Groovy compiles under the test case name without extension
+     * ({@code at 60_-_View_Detail.run(60 - View Detail:64)}).
+     */
+    private static final Pattern FRAME = Pattern.compile("at\\s+([\\w.$-]+)\\(([^():\\r\\n]+?):(\\d+)\\)");
 
     /**
-     * Project script frames of the stack trace ("Keyword.groovy:823 · pkg.Keyword.method()"), the same
-     * "Source File(s) Involved" the PDF report shows. Engine/library frames are left out.
+     * Project script frames of the stack trace ("Keyword.groovy:823 · pkg.Keyword.method()", or
+     * "Test case \"60 - View Detail\" baris 64 (tab Script)"), the same "Source File(s) Involved" the PDF report shows.
+     * Engine/library frames are left out. Never null.
      */
-    static List<String> sourceFrames(String stackTrace, int max) {
+    public static List<String> sourceFrames(String stackTrace, int max) {
         java.util.LinkedHashSet<String> out = new java.util.LinkedHashSet<>();
         if (stackTrace == null) return new ArrayList<>();
         Matcher m = FRAME.matcher(stackTrace);
         while (m.find() && out.size() < max) {
             String fq = m.group(1);
-            String low = fq.toLowerCase(Locale.ROOT);
-            if (low.startsWith("com.kms.") || low.startsWith("com.katalan.") || low.startsWith("org.")
-                    || low.startsWith("io.cucumber.") || low.startsWith("java.") || low.startsWith("jdk.")
-                    || low.startsWith("sun.") || low.startsWith("groovy.") || low.startsWith("picocli.")) continue;
-            out.add(m.group(2) + ":" + m.group(3) + " \u00b7 " + fq + "()");
+            String file = m.group(2).trim();
+            if (isLibraryFrame(fq)) continue;
+            if (file.endsWith(".groovy")) out.add(file + ":" + m.group(3) + " \u00b7 " + fq + "()");
+            else if (isTestCaseScript(file)) out.add(testCaseFrame(file, m.group(3)));
         }
         return new ArrayList<>(out);
+    }
+
+    /** A test case script frame as people find it in Katalon: test case name, line, Script tab. */
+    public static String testCaseFrame(String testCaseName, String line) {
+        return "Test case \"" + testCaseName + "\" baris " + line + " (tab Script)";
+    }
+
+    /** Engine, Groovy runtime and library frames, never the user's own code. */
+    public static boolean isLibraryFrame(String fq) {
+        String low = fq.toLowerCase(Locale.ROOT);
+        return low.startsWith("com.kms.") || low.startsWith("com.katalan.") || low.startsWith("org.")
+                || low.startsWith("io.cucumber.") || low.startsWith("java.") || low.startsWith("jdk.")
+                || low.startsWith("sun.") || low.startsWith("groovy.") || low.startsWith("picocli.");
+    }
+
+    /** A test case script source name: no file extension ("Unknown Source" and "Native Method" excluded). */
+    public static boolean isTestCaseScript(String file) {
+        return !file.isEmpty() && !file.contains(".") && !"Unknown Source".equals(file) && !"Native Method".equals(file);
     }
 
     /** Print the single stdout line a launching process can pick up. Never throws. */

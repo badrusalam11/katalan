@@ -129,9 +129,10 @@ public class GroovySourcePreprocessor {
                 && !result.contains("import groovy.xml.");
         if (needsXmlImports) {
             StringBuilder xmlImports = new StringBuilder();
-            if (result.contains("XmlSlurper"))     xmlImports.append("import groovy.xml.XmlSlurper\n");
-            if (result.contains("XmlParser"))      xmlImports.append("import groovy.xml.XmlParser\n");
-            if (result.contains("XmlNodePrinter")) xmlImports.append("import groovy.xml.XmlNodePrinter\n");
+            // One line, "; "-separated: added lines would shift every line number in stack traces
+            if (result.contains("XmlSlurper"))     xmlImports.append("import groovy.xml.XmlSlurper; ");
+            if (result.contains("XmlParser"))      xmlImports.append("import groovy.xml.XmlParser; ");
+            if (result.contains("XmlNodePrinter")) xmlImports.append("import groovy.xml.XmlNodePrinter; ");
             result = injectAfterPackage(result, xmlImports.toString());
         }
 
@@ -169,14 +170,15 @@ public class GroovySourcePreprocessor {
     }
 
     /**
-     * Insert the given block right after the {@code package ...} line if any,
-     * otherwise at the very top of the file.
+     * Insert the given single-line block ("import a; import b; ") on the {@code package ...} line if
+     * any, otherwise in front of the first line - without adding lines, so line numbers stay the same.
      */
-    private static String injectAfterPackage(String source, String block) {
-        Matcher pkg = Pattern.compile("(?m)^\\s*package\\s+[A-Za-z0-9_.]+\\s*;?\\s*$").matcher(source);
+    static String injectAfterPackage(String source, String block) {
+        Matcher pkg = Pattern.compile("(?m)^[ \\t]*package[ \\t]+[A-Za-z0-9_.]+[ \\t]*;?").matcher(source);
         if (pkg.find()) {
             int insertAt = pkg.end();
-            return source.substring(0, insertAt) + "\n" + block + source.substring(insertAt);
+            String sep = source.charAt(insertAt - 1) == ';' ? " " : "; ";
+            return source.substring(0, insertAt) + sep + block + source.substring(insertAt);
         }
         return block + source;
     }

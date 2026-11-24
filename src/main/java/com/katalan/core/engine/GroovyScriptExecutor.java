@@ -431,7 +431,7 @@ public class GroovyScriptExecutor {
     /**
      * Preprocess Katalon script to convert Katalon imports to katalan equivalents
      */
-    private String preprocessKatalonScript(String script) {
+    static String preprocessKatalonScript(String script) {
         // Replace Katalon imports with katalan equivalents
         String result = script;
         
@@ -543,13 +543,12 @@ public class GroovyScriptExecutor {
             "    static def methodMissing(String name, args) { println \"[WARN] TestNGKW.${name} not supported\"; return null }\n" +
             "}\n";
         
-        // Insert stubs after the last import statement
-        int lastImportIndex = result.lastIndexOf("import ");
-        if (lastImportIndex > 0) {
-            int lineEnd = result.indexOf("\n", lastImportIndex);
-            if (lineEnd > 0) {
-                result = result.substring(0, lineEnd + 1) + stubMethods + result.substring(lineEnd + 1);
-            }
+        // Append the stubs at the END of the script (Groovy hoists script methods and classes), so
+        // the user's lines keep their numbers: an error on line 54 of the test case is reported as
+        // line 54 in the stack trace and in "Source File(s) Involved", not shifted by the stubs.
+        // Same condition as before (scripts with imports only); just the position changed.
+        if (result.lastIndexOf("import ") > 0) {
+            result = result + "\n" + stubMethods;
         }
         
         logger.debug("Preprocessed script imports");
