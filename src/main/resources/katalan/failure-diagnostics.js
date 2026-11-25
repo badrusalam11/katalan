@@ -55,7 +55,8 @@ try {
     var same = true, path = String(e.name).split('?')[0];
     try { var u = new URL(e.name); same = u.origin === location.origin; path = (same ? '' : u.host) + u.pathname; } catch (x) {}
     var item = { path: path.slice(0, 200), type: type, status: st, ms: Math.round(e.duration), inStep: inStep(e) };
-    if (st !== null && (st >= 500 || (st === 0 && same))) failed.push(item);
+    // 4xx counts only after the last action (e.g. search/validation rejected); on page load it is mostly noise
+    if (st !== null && (st >= 500 || (st === 0 && same) || (st >= 400 && item.inStep))) failed.push(item);
     else if (e.duration >= 10000) slow.push(item);
   }
   // Same endpoint failing again and again (e.g. once per loop iteration, also in the iterations that
@@ -93,6 +94,27 @@ try {
   out.network = { failed: grouped.slice(-5), stepCalls: stepCalls, slow: slow.slice(-5), recent: recent, statusKnown: inWindow ? statusKnown : null,
                   bufferFull: res.length >= 250 };
 } catch (e) { out.errors.push('network: ' + e.message); }
+
+// 4c. payload/response of the API calls before the failure, from network-recorder.js (Chromium only).
+// Only what helps find the cause: failed (4xx/5xx/terputus), slow (>= 10 s) and every call since the last action.
+try {
+  var kn = window.__katalanNet;
+  if (kn && kn.calls) {
+    var nowEpoch = Date.now(), calls = [];
+    for (var ci = 0; ci < kn.calls.length; ci++) {
+      var c = kn.calls[ci];
+      if (nowEpoch - (c.start + (c.ms || 0)) > winMs) continue;
+      var cInStep = stepFrom > 0 && c.start >= stepFrom;
+      var bad = c.status === 0 || (typeof c.status === 'number' && c.status >= 400);
+      if (!bad && !cInStep && !((c.ms || 0) >= 10000)) continue;
+      calls.push({ id: c.id, method: c.method, url: c.url, status: c.status, ms: c.ms, inStep: cInStep,
+                   agoSec: Math.round((nowEpoch - c.start) / 1000), req: c.req, resType: c.resType, res: c.res, err: c.err });
+    }
+    out.networkCalls = calls.slice(-12);
+  } else {
+    out.errors.push('network: perekam payload tidak aktif di halaman ini (tab baru / bukan Chrome)');
+  }
+} catch (e) { out.errors.push('networkCalls: ' + e.message); }
 
 // 4c. locator
 var nodes = [];

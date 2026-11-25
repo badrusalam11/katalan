@@ -47,6 +47,7 @@ public class WebDriverFactory {
         }
 
         SmartWait.install(driver);
+        com.katalan.core.diagnostics.NetworkRecorder.install(driver);
         return driver;
     }
     

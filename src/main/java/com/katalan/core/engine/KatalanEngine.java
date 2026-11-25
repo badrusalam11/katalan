@@ -897,8 +897,10 @@ public class KatalanEngine {
             Map<String, Object> diagnosis = com.katalan.core.diagnostics.FailureDiagnostics.diagnose(
                     context.getWebDriver(), config.isHeadless(), testCase.getId(), attempt, maxAttempts, kind,
                     e, errorMessage, stackTrace, screenshot);
-            result.setFailureDiagnosis(diagnosis);
             com.katalan.core.diagnostics.FailureDiagnostics.emit(diagnosis);
+            // bodies of API calls go to their own stdout line only, not into the report
+            diagnosis.remove(com.katalan.core.diagnostics.FailureDiagnostics.NETWORK_CALLS);
+            result.setFailureDiagnosis(diagnosis);
             logger.info("Failure evidence collected ({} ms): {}", diagnosis.get("diagnosticsMs"), diagnosis.get("facts"));
         } catch (Throwable t) {
             logger.warn("Failure diagnostics skipped: {}", t.getMessage());

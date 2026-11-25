@@ -58,6 +58,7 @@ public final class EvidenceFacts {
             Map<String, Object> render = asMap(d.get("pageRender"));
             Map<String, Object> machine = asMap(d.get("machine"));
             boolean stepKnown = step != null;
+            List<String> pageLoadApis = new ArrayList<>();
 
             // 2. what the page said
             for (Object o : asList(d.get("visibleMessages"))) {
@@ -65,24 +66,39 @@ public final class EvidenceFacts {
                 if (m != null && m.get("text") != null) f.add("Pesan di layar: \"" + shorten(String.valueOf(m.get("text")), 200) + "\"");
             }
 
-            // 3. what the server did
+            // 3. what the server did. Requests after the last action come first: they show whether the action
+            // reached the server and what it answered. Failures on page load are often the same noisy endpoint
+            // on every page, so they go last (section 8).
+            List<Object> stepCalls = net == null || net.get("stepCalls") == null ? null : asList(net.get("stepCalls"));
+            java.util.Set<String> stepPaths = new java.util.HashSet<>();
+            if (stepCalls != null && !stepCalls.isEmpty()) {
+                List<String> calls = new ArrayList<>();
+                for (Object o : stepCalls) {
+                    Map<String, Object> r = asMap(o);
+                    if (r == null) continue;
+                    stepPaths.add(String.valueOf(r.get("path")));
+                    calls.add(r.get("path") + " → " + statusText(r.get("status")) + durationText(r.get("ms"), 0));
+                }
+                if (!calls.isEmpty()) f.add("API setelah aksi terakhir (" + actionName(step, net) + "): " + String.join("; ", calls));
+            }
             List<String> apis = new ArrayList<>();
             for (Object o : net == null ? List.of() : asList(net.get("failed"))) {
                 Map<String, Object> r = asMap(o);
                 if (r == null) continue;
-                StringBuilder s = new StringBuilder(String.valueOf(r.get("path")));
-                Object st = r.get("status");
-                s.append(" → ").append(st == null ? "?" : ("0".equals(String.valueOf(st)) ? "gagal/terputus" : st));
+                boolean inStep = Boolean.TRUE.equals(r.get("inStep"));
+                String path = String.valueOf(r.get("path"));
+                if (inStep && stepPaths.contains(path)) continue; // already in the line above
+                StringBuilder s = new StringBuilder(path).append(" → ").append(statusText(r.get("status")));
                 Object n = r.get("count");
                 if (n instanceof Number && ((Number) n).intValue() > 1) s.append(" ×").append(n);
-                Object ms = r.get("ms");
-                if (ms instanceof Number && ((Number) ms).longValue() >= 1000) s.append(" (").append(Math.round(((Number) ms).longValue() / 1000.0)).append(" dtk)");
+                s.append(durationText(r.get("ms"), 1000));
                 List<String> notes = new ArrayList<>();
                 if (Boolean.TRUE.equals(r.get("background"))) notes.add("juga gagal di banyak halaman lain");
-                else if (stepKnown) notes.add(Boolean.TRUE.equals(r.get("inStep")) ? "setelah aksi terakhir" : "saat halaman dimuat");
+                else if (stepKnown && inStep) notes.add("setelah aksi terakhir");
                 if (Boolean.TRUE.equals(r.get("seenBefore"))) notes.add("juga gagal di TC sebelumnya");
                 if (!notes.isEmpty()) s.append(" (").append(String.join(", ", notes)).append(")");
-                apis.add(s.toString());
+                if (stepKnown && !inStep) pageLoadApis.add(s.toString());
+                else apis.add(s.toString());
             }
             if (!apis.isEmpty()) f.add("API gagal: " + String.join("; ", apis));
             for (Object o : net == null ? List.of() : asList(net.get("slow"))) {
@@ -91,8 +107,8 @@ public final class EvidenceFacts {
                 Object ms = r.get("ms");
                 f.add("API lambat: " + r.get("path") + (ms instanceof Number ? " (" + Math.round(((Number) ms).longValue() / 1000.0) + " dtk)" : ""));
             }
-            if (stepKnown && net != null && net.get("stepCalls") != null && asList(net.get("stepCalls")).isEmpty()) {
-                f.add("Tidak ada request API sejak aksi terakhir (" + step.get("action") + ")");
+            if (stepKnown && stepCalls != null && stepCalls.isEmpty()) {
+                f.add("Tidak ada request API sejak aksi terakhir (" + actionName(step, net) + ")");
             }
 
             // 4. the action before the failure and the state around it
@@ -147,10 +163,31 @@ public final class EvidenceFacts {
                 String path = String.valueOf(browser.get("url")).replaceFirst("^https?://[^/]+", "");
                 f.add("Halaman: " + (path.isEmpty() ? "/" : path) + (browser.get("title") != null ? " · " + browser.get("title") : ""));
             }
+
+            // 8. failures from before the last action (page load): rarely the cause, kept for completeness
+            if (!pageLoadApis.isEmpty()) f.add("API gagal saat halaman dimuat (sebelum aksi terakhir): " + String.join("; ", pageLoadApis));
         } catch (Throwable ignored) {
             // facts are best effort
         }
         return f;
+    }
+
+    private static String statusText(Object st) {
+        if (st == null) return "?";
+        return "0".equals(String.valueOf(st)) ? "gagal/terputus" : String.valueOf(st);
+    }
+
+    /** " (1.2 dtk)" when the duration is known and at least minMs, else "". */
+    private static String durationText(Object ms, long minMs) {
+        if (!(ms instanceof Number)) return "";
+        long v = ((Number) ms).longValue();
+        if (v < minMs) return "";
+        return v < 1000 ? " (" + v + " ms)" : String.format(Locale.ROOT, " (%.1f dtk)", v / 1000.0);
+    }
+
+    private static String actionName(Map<String, Object> step, Map<String, Object> net) {
+        Object a = step != null && step.get("action") != null ? step.get("action") : net != null ? net.get("stepAction") : null;
+        return a != null ? String.valueOf(a) : "aksi";
     }
 
     private static String join(List<Object> items, int max) {

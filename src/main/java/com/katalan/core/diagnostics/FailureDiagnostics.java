@@ -42,6 +42,11 @@ public final class FailureDiagnostics {
     private static final Logger logger = LoggerFactory.getLogger(FailureDiagnostics.class);
 
     public static final String STDOUT_PREFIX = "KATALAN_FAILURE ";
+    /** Separate stdout line with request/response bodies of the API calls before a failure. */
+    public static final String NETWORK_PREFIX = "KATALAN_NET ";
+    /** Key in the diagnosis map holding the calls until {@link #emit} splits them off. */
+    public static final String NETWORK_CALLS = "networkCalls";
+    private static final int MAX_NETWORK_LINE_BYTES = 60000;
     public static final int SCHEMA_VERSION = 1;
     private static final int MAX_LINE_BYTES = 8000;
     // Element waits usually time out after ~30 s, so a request that failed right before the wait
@@ -309,6 +314,8 @@ public final class FailureDiagnostics {
             out.put("lastAction", probe.get("lastAction"));
             out.put("visibleMessages", probe.get("visibleMessages"));
             out.put("openDialogs", probe.get("openDialogs"));
+            // Not part of the 8 KB failure line: emitted as its own line by emitNetwork (bodies are large)
+            if (probe.get("networkCalls") != null) out.put(NETWORK_CALLS, probe.get("networkCalls"));
         }
         out.put("machine", machine);
         out.put("screenshotPath", screenshotPath);
@@ -373,12 +380,55 @@ public final class FailureDiagnostics {
         } catch (Throwable t) {
             logger.debug("Could not emit failure diagnostics: {}", t.getMessage());
         }
+        emitNetwork(diagnosis);
+    }
+
+    /**
+     * {@code KATALAN_NET {testCaseId, ts, attempt, calls}}: payload/response of the API calls before the
+     * failure, paired with the failure line by testCaseId + ts. Its own line because bodies do not fit the
+     * 8 KB failure line. Never throws.
+     */
+    @SuppressWarnings("unchecked")
+    static void emitNetwork(Map<String, Object> diagnosis) {
+        try {
+            List<Object> calls = asList(diagnosis.get(NETWORK_CALLS));
+            if (calls.isEmpty()) return;
+            Map<String, Object> line = new LinkedHashMap<>();
+            line.put("testCaseId", diagnosis.get("testCaseId"));
+            line.put("ts", diagnosis.get("ts"));
+            line.put("attempt", diagnosis.get("attempt"));
+            List<Map<String, Object>> copy = new ArrayList<>();
+            for (Object o : calls) {
+                Map<String, Object> m = asMap(o);
+                if (m != null) copy.add(new LinkedHashMap<>(m));
+            }
+            line.put("calls", copy);
+            String json = MAPPER.writeValueAsString(line);
+            // too big: shorten bodies, then drop the oldest calls (the ones closest to the failure stay)
+            int[][] limits = {{2000, 4000}, {500, 1500}};
+            for (int i = 0; json.getBytes(StandardCharsets.UTF_8).length > MAX_NETWORK_LINE_BYTES && i < limits.length; i++) {
+                for (Map<String, Object> m : copy) {
+                    if (m.get("req") instanceof String) m.put("req", shorten((String) m.get("req"), limits[i][0]));
+                    if (m.get("res") instanceof String) m.put("res", shorten((String) m.get("res"), limits[i][1]));
+                }
+                json = MAPPER.writeValueAsString(line);
+            }
+            while (json.getBytes(StandardCharsets.UTF_8).length > MAX_NETWORK_LINE_BYTES && copy.size() > 1) {
+                copy.remove(0);
+                json = MAPPER.writeValueAsString(line);
+            }
+            System.out.println(NETWORK_PREFIX + json);
+            System.out.flush();
+        } catch (Throwable t) {
+            logger.debug("Could not emit network calls: {}", t.getMessage());
+        }
     }
 
     /** JSON on one line, at most {@link #MAX_LINE_BYTES}; drops the least useful fields first. */
     @SuppressWarnings("unchecked")
     static String toBoundedJson(Map<String, Object> diagnosis) throws Exception {
         Map<String, Object> d = new LinkedHashMap<>(diagnosis);
+        d.remove(NETWORK_CALLS);
         String json = MAPPER.writeValueAsString(d);
         String[] dropOrder = {"openDialogs", "visibleMessages", "network", "locatorCheck", "evidence"};
         for (int i = 0; json.getBytes(StandardCharsets.UTF_8).length > MAX_LINE_BYTES && i < dropOrder.length; i++) {
