@@ -42,6 +42,11 @@ public final class FailureDiagnostics {
     private static final Logger logger = LoggerFactory.getLogger(FailureDiagnostics.class);
 
     public static final String STDOUT_PREFIX = "KATALAN_FAILURE ";
+    /** Separate stdout line with request/response bodies of the API calls before a failure. */
+    public static final String NETWORK_PREFIX = "KATALAN_NET ";
+    /** Key in the diagnosis map holding the calls until {@link #emit} splits them off. */
+    public static final String NETWORK_CALLS = "networkCalls";
+    private static final int MAX_NETWORK_LINE_BYTES = 60000;
     public static final int SCHEMA_VERSION = 1;
     private static final int MAX_LINE_BYTES = 8000;
     // Element waits usually time out after ~30 s, so a request that failed right before the wait
@@ -88,6 +93,8 @@ public final class FailureDiagnostics {
         return out;
     }
     private static volatile double lastCpuPct = -1;
+    private static volatile int lastRamPct = -1;
+    private static int ramTicks = 0;
 
     private FailureDiagnostics() {}
 
@@ -108,6 +115,12 @@ public final class FailureDiagnostics {
         cpuSampler.scheduleAtFixedRate(() -> {
             double v = readSystemCpuLoad();
             if (v >= 0) lastCpuPct = v * 100.0;
+            // RAM every 3rd tick (15 s): on macOS it spawns vm_stat, which can take seconds on a busy machine,
+            // so the failure diagnosis reads this cached value instead of waiting for it
+            if (ramTicks++ % 3 == 0) {
+                Integer r = readRamPct();
+                if (r != null) lastRamPct = r;
+            }
         }, 0, 5, TimeUnit.SECONDS);
     }
 
@@ -126,6 +139,11 @@ public final class FailureDiagnostics {
     static Map<String, Object> machineInfo() {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("cpuPct", lastCpuPct >= 0 ? (int) Math.round(lastCpuPct) : null);
+        m.put("ramPct", lastRamPct >= 0 ? Integer.valueOf(lastRamPct) : readRamPct());
+        return m;
+    }
+
+    static Integer readRamPct() {
         Integer ram = null;
         try {
             // Linux: "free" excludes page cache and always looks full; MemAvailable is the real headroom.
@@ -153,8 +171,7 @@ public final class FailureDiagnostics {
                 }
             }
         } catch (Throwable ignored) { }
-        m.put("ramPct", ram);
-        return m;
+        return ram;
     }
 
     /**
@@ -196,7 +213,6 @@ public final class FailureDiagnostics {
                                                Throwable error, String errorMessage, String stackTrace,
                                                String screenshotPath) {
         long t0 = System.currentTimeMillis();
-        long deadline = t0 + FailureDiagnosticsConfig.getTimeoutMs();
         List<String> diagErrors = new ArrayList<>();
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("v", SCHEMA_VERSION);
@@ -209,7 +225,14 @@ public final class FailureDiagnostics {
         ErrorInfo err = ErrorInfo.parse(error, errorMessage, stackTrace);
         Map<String, Object> browser = new LinkedHashMap<>();
         Map<String, Object> probe = null;
-        Map<String, Object> machine = machineInfo();
+        // network part of the probe, filled by probeBrowser before the (slower) DOM scan: kept even when the
+        // DOM scan times out on a busy page
+        java.util.concurrent.atomic.AtomicReference<Map<String, Object>> netPart = new java.util.concurrent.atomic.AtomicReference<>();
+        // machineInfo can be slow on a busy Mac (spawns vm_stat): run it next to the browser probe instead of
+        // before it, so it does not eat the probe's time budget
+        java.util.concurrent.CompletableFuture<Map<String, Object>> machineF =
+                java.util.concurrent.CompletableFuture.supplyAsync(FailureDiagnostics::machineInfo, BROWSER_PROBE);
+        Map<String, Object> machine = null;
 
         try {
             String driverKind = driverKind(driver);
@@ -218,9 +241,11 @@ public final class FailureDiagnostics {
             if (driver == null) {
                 browser.put("alive", null);
             } else {
+                // the budget starts when the probe starts, not when the diagnosis started
+                long deadline = System.currentTimeMillis() + FailureDiagnosticsConfig.getTimeoutMs();
                 long remaining = Math.max(50, deadline - System.currentTimeMillis());
                 Future<Map<String, Object>> f = BROWSER_PROBE.submit(
-                        () -> probeBrowser(driver, driverKind, err, deadline, diagErrors, browser));
+                        () -> probeBrowser(driver, driverKind, err, deadline, diagErrors, browser, netPart));
                 try {
                     probe = f.get(remaining, TimeUnit.MILLISECONDS);
                 } catch (TimeoutException te) {
@@ -232,6 +257,20 @@ public final class FailureDiagnostics {
             diagErrors.add("browser: " + t.getClass().getSimpleName() + ": " + shorten(t.getMessage(), 150));
         }
 
+        try {
+            machine = machineF.get(1000, TimeUnit.MILLISECONDS);
+        } catch (Exception e) {
+            machine = new LinkedHashMap<>();
+            diagErrors.add("machine: " + e.getClass().getSimpleName());
+        }
+        Map<String, Object> np = netPart.get();
+        if (np != null) {
+            if (probe == null) probe = new LinkedHashMap<>();
+            Object ne = np.remove("errors");
+            if (ne instanceof List) for (Object o : (List<?>) ne) diagErrors.add(String.valueOf(o));
+            probe.put("network", np.get("network"));
+            if (np.get(NETWORK_CALLS) != null) probe.put(NETWORK_CALLS, np.get(NETWORK_CALLS));
+        }
         if (probe != null) {
             Object pe = probe.remove("errors");
             if (pe instanceof List) for (Object o : (List<?>) pe) diagErrors.add(String.valueOf(o));
@@ -309,6 +348,8 @@ public final class FailureDiagnostics {
             out.put("lastAction", probe.get("lastAction"));
             out.put("visibleMessages", probe.get("visibleMessages"));
             out.put("openDialogs", probe.get("openDialogs"));
+            // Not part of the 8 KB failure line: emitted as its own line by emitNetwork (bodies are large)
+            if (probe.get("networkCalls") != null) out.put(NETWORK_CALLS, probe.get("networkCalls"));
         }
         out.put("machine", machine);
         out.put("screenshotPath", screenshotPath);
@@ -373,12 +414,59 @@ public final class FailureDiagnostics {
         } catch (Throwable t) {
             logger.debug("Could not emit failure diagnostics: {}", t.getMessage());
         }
+        emitNetwork(diagnosis);
+    }
+
+    /**
+     * {@code KATALAN_NET {testCaseId, ts, attempt, calls}}: payload/response of the API calls before the
+     * failure, paired with the failure line by testCaseId + ts. Its own line because bodies do not fit the
+     * 8 KB failure line. Never throws.
+     */
+    @SuppressWarnings("unchecked")
+    static void emitNetwork(Map<String, Object> diagnosis) {
+        try {
+            List<Object> calls = asList(diagnosis.get(NETWORK_CALLS));
+            if (calls.isEmpty()) return;
+            Map<String, Object> line = new LinkedHashMap<>();
+            line.put("testCaseId", diagnosis.get("testCaseId"));
+            line.put("ts", diagnosis.get("ts"));
+            line.put("attempt", diagnosis.get("attempt"));
+            List<Map<String, Object>> copy = new ArrayList<>();
+            for (Object o : calls) {
+                Map<String, Object> m = asMap(o);
+                if (m != null) copy.add(new LinkedHashMap<>(m));
+            }
+            line.put("calls", copy);
+            String json = MAPPER.writeValueAsString(line);
+            // too big: shorten bodies, then drop the oldest calls (the ones closest to the failure stay)
+            int[][] limits = {{2000, 4000}, {500, 1500}};
+            for (int i = 0; json.getBytes(StandardCharsets.UTF_8).length > MAX_NETWORK_LINE_BYTES && i < limits.length; i++) {
+                for (Map<String, Object> m : copy) {
+                    if (m.get("req") instanceof String) m.put("req", shorten((String) m.get("req"), limits[i][0]));
+                    if (m.get("res") instanceof String) m.put("res", shorten((String) m.get("res"), limits[i][1]));
+                }
+                json = MAPPER.writeValueAsString(line);
+            }
+            if (json.getBytes(StandardCharsets.UTF_8).length > MAX_NETWORK_LINE_BYTES) {
+                for (Map<String, Object> m : copy) m.remove("resHeaders"); // least useful first
+                json = MAPPER.writeValueAsString(line);
+            }
+            while (json.getBytes(StandardCharsets.UTF_8).length > MAX_NETWORK_LINE_BYTES && copy.size() > 1) {
+                copy.remove(0);
+                json = MAPPER.writeValueAsString(line);
+            }
+            System.out.println(NETWORK_PREFIX + json);
+            System.out.flush();
+        } catch (Throwable t) {
+            logger.debug("Could not emit network calls: {}", t.getMessage());
+        }
     }
 
     /** JSON on one line, at most {@link #MAX_LINE_BYTES}; drops the least useful fields first. */
     @SuppressWarnings("unchecked")
     static String toBoundedJson(Map<String, Object> diagnosis) throws Exception {
         Map<String, Object> d = new LinkedHashMap<>(diagnosis);
+        d.remove(NETWORK_CALLS);
         String json = MAPPER.writeValueAsString(d);
         String[] dropOrder = {"openDialogs", "visibleMessages", "network", "locatorCheck", "evidence"};
         for (int i = 0; json.getBytes(StandardCharsets.UTF_8).length > MAX_LINE_BYTES && i < dropOrder.length; i++) {
@@ -412,9 +500,22 @@ public final class FailureDiagnostics {
         return probeScript;
     }
 
+    private static String networkScript;
+
+    private static synchronized String networkScript() throws Exception {
+        if (networkScript == null) {
+            try (InputStream in = FailureDiagnostics.class.getResourceAsStream("/katalan/failure-network.js")) {
+                if (in == null) throw new IllegalStateException("failure-network.js not on classpath");
+                networkScript = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            }
+        }
+        return networkScript;
+    }
+
     private static Map<String, Object> probeBrowser(WebDriver driver, String driverKind, ErrorInfo err,
                                                     long deadline, List<String> diagErrors,
-                                                    Map<String, Object> browser) throws Exception {
+                                                    Map<String, Object> browser,
+                                                    java.util.concurrent.atomic.AtomicReference<Map<String, Object>> netPart) throws Exception {
         try {
             driver.getWindowHandle();
             browser.put("alive", true);
@@ -434,6 +535,16 @@ public final class FailureDiagnostics {
                 oldTimeout = driver.manage().timeouts().getScriptTimeout();
                 driver.manage().timeouts().scriptTimeout(Duration.ofMillis(remaining));
             } catch (Exception ignored) { }
+            // 1. network first: cheap (performance entries + recorder buffer), survives a slow DOM scan
+            try {
+                Object rawNet = ((JavascriptExecutor) driver).executeScript(networkScript(), NETWORK_WINDOW_MS, StepClock.windowStart());
+                if (rawNet != null) {
+                    netPart.set(MAPPER.readValue(rawNet.toString(), new TypeReference<LinkedHashMap<String, Object>>() {}));
+                }
+            } catch (Exception e) {
+                diagErrors.add("network: " + e.getClass().getSimpleName() + ": " + shorten(e.getMessage(), 150));
+            }
+            // 2. DOM scan (locator, candidates, messages, dialogs)
             Object raw = ((JavascriptExecutor) driver).executeScript(probeScript(),
                     err.locatorBy, err.locatorValue, err.literal, err.literalKind,
                     FailureDiagnosticsConfig.getMaxTextChars(), NETWORK_WINDOW_MS, StepClock.windowStart(),
