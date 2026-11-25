@@ -24,7 +24,7 @@ public final class FailureDiagnosticsConfig {
     public static final String KEY_MAX_TEXT = "katalan.failureDiagnostics.maxTextChars";
 
     private static volatile boolean enabled = true;
-    private static volatile long timeoutMs = 1500;
+    private static volatile long timeoutMs = 4000; // network part runs first; the DOM scan gets the rest
     private static volatile int maxTextChars = 300;
 
     private FailureDiagnosticsConfig() {}
