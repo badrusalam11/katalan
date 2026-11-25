@@ -447,6 +447,10 @@ public final class FailureDiagnostics {
                 }
                 json = MAPPER.writeValueAsString(line);
             }
+            if (json.getBytes(StandardCharsets.UTF_8).length > MAX_NETWORK_LINE_BYTES) {
+                for (Map<String, Object> m : copy) m.remove("resHeaders"); // least useful first
+                json = MAPPER.writeValueAsString(line);
+            }
             while (json.getBytes(StandardCharsets.UTF_8).length > MAX_NETWORK_LINE_BYTES && copy.size() > 1) {
                 copy.remove(0);
                 json = MAPPER.writeValueAsString(line);

@@ -66,6 +66,37 @@
       return cut(mask(String(b)), MAX_REQ);
     } catch (e) { return '[tidak terbaca]'; }
   }
+  // Headers: only what the page's JS can see. Request: the ones the app sets (not Cookie/User-Agent, which the
+  // browser adds). Response: what the server exposes (never Set-Cookie). Secret ones masked by name.
+  var MAX_HEADERS = 40, MAX_HEADER_VALUE = 500;
+  var SECRET_HEADER = /authori|cookie|token|secret|api.?key|session|signature|password|pin$|otp|csrf|xsrf/i;
+  function addHeader(h, k, v) {
+    try {
+      if (!k || Object.keys(h).length >= MAX_HEADERS) return;
+      var key = String(k).toLowerCase(), val = String(v == null ? '' : v);
+      if (SECRET_HEADER.test(key)) val = /^bearer\s/i.test(val) ? 'Bearer ***' : '***';
+      h[key] = h[key] ? h[key] + ', ' + val.slice(0, MAX_HEADER_VALUE) : val.slice(0, MAX_HEADER_VALUE);
+    } catch (e) {}
+  }
+  function headersOf(src) {
+    var h = {};
+    try {
+      if (!src) return h;
+      if (typeof Headers !== 'undefined' && src instanceof Headers) { src.forEach(function (v, k) { addHeader(h, k, v); }); }
+      else if (Array.isArray(src)) { for (var i = 0; i < src.length; i++) addHeader(h, src[i][0], src[i][1]); }
+      else if (typeof src === 'object') { for (var k in src) if (Object.prototype.hasOwnProperty.call(src, k)) addHeader(h, k, src[k]); }
+    } catch (e) {}
+    return h;
+  }
+  function parseRawHeaders(raw) {
+    var h = {};
+    String(raw || '').trim().split(/[\r\n]+/).forEach(function (line) {
+      var i = line.indexOf(':');
+      if (i > 0) addHeader(h, line.slice(0, i).trim(), line.slice(i + 1).trim());
+    });
+    return h;
+  }
+
   function textual(type) {
     return !type || /json|text|xml|javascript|x-www-form-urlencoded/i.test(type);
   }
@@ -81,22 +112,28 @@
   }
 
   if (window.XMLHttpRequest) {
-    var XP = XMLHttpRequest.prototype, open = XP.open, send = XP.send;
+    var XP = XMLHttpRequest.prototype, open = XP.open, send = XP.send, setHeader = XP.setRequestHeader;
     XP.open = function (method, url) {
-      try { this.__kn = { method: String(method || 'GET').toUpperCase(), url: urlOf(url) }; } catch (e) {}
+      try { this.__kn = { method: String(method || 'GET').toUpperCase(), url: urlOf(url), reqHeaders: {} }; } catch (e) {}
       return open.apply(this, arguments);
+    };
+    XP.setRequestHeader = function (k, v) {
+      try { if (this.__kn) addHeader(this.__kn.reqHeaders, k, v); } catch (e) {}
+      return setHeader.apply(this, arguments);
     };
     XP.send = function (body) {
       var xhr = this, info = xhr.__kn;
       try {
         if (info) {
           var c = { id: ++net.seq, kind: 'xhr', method: info.method, url: info.url, start: Date.now(),
-                    req: bodyOf(body), status: null, ms: null, resType: null, res: null };
+                    reqHeaders: info.reqHeaders, req: bodyOf(body), status: null, ms: null, resType: null,
+                    resHeaders: null, res: null };
           xhr.addEventListener('loadend', function () {
             try {
               c.ms = Date.now() - c.start;
               c.status = xhr.status;
               c.resType = xhr.getResponseHeader('Content-Type');
+              c.resHeaders = parseRawHeaders(xhr.getAllResponseHeaders());
               var rt = xhr.responseType;
               if (rt === '' || rt === 'text') {
                 c.res = textual(c.resType) ? cut(mask(xhr.responseText || ''), MAX_RES) : '[' + (c.resType || 'binary') + ']';
@@ -124,7 +161,8 @@
         var c = { id: ++net.seq, kind: 'fetch',
                   method: String((init && init.method) || (isReq && input.method) || 'GET').toUpperCase(),
                   url: urlOf(isReq ? input.url : input), start: Date.now(),
-                  req: bodyOf(init && init.body), status: null, ms: null, resType: null, res: null };
+                  reqHeaders: headersOf((init && init.headers) || (isReq && input.headers)),
+                  req: bodyOf(init && init.body), status: null, ms: null, resType: null, resHeaders: null, res: null };
         if (c.req === null && isReq && c.method !== 'GET' && c.method !== 'HEAD') {
           try { input.clone().text().then(function (t) { c.req = cut(mask(t), MAX_REQ); }, function () {}); } catch (e) {}
         }
@@ -133,6 +171,7 @@
             c.ms = Date.now() - c.start;
             c.status = r.status;
             c.resType = r.headers.get('Content-Type');
+            c.resHeaders = headersOf(r.headers);
             var len = Number(r.headers.get('Content-Length') || 0);
             if (!textual(c.resType) || /event-stream/i.test(c.resType || '')) { c.res = '[' + (c.resType || 'binary') + ']'; push(c); return; }
             if (len > MAX_READ) { c.res = '[' + len + ' bytes, tidak disimpan]'; push(c); return; }

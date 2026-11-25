@@ -87,7 +87,8 @@ try {
     var isBad = function (c) { return c.status === 0 || (typeof c.status === 'number' && c.status >= 400) || (c.ms || 0) >= 10000; };
     var pick = function (c) {
       return { id: c.id, method: c.method, url: c.url, status: c.status, ms: c.ms, inStep: stepFrom > 0 && c.start >= stepFrom,
-               agoSec: Math.round((nowEpoch - c.start) / 1000), count: counts[keyOf(c)], req: c.req, resType: c.resType, res: c.res, err: c.err };
+               agoSec: Math.round((nowEpoch - c.start) / 1000), count: counts[keyOf(c)], reqHeaders: c.reqHeaders, req: c.req,
+               resType: c.resType, resHeaders: c.resHeaders, res: c.res, err: c.err };
     };
     // newest call per endpoint+status for the failed ones, newest per endpoint for the rest
     var bad = [], badSeen = {}, ok = [], okSeen = {};
