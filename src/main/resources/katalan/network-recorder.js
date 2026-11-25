@@ -7,7 +7,10 @@
 (function () {
   if (window !== window.top || window.__katalanNet) return;
   var MAX = 40, MAX_REQ = 4000, MAX_RES = 8000, MAX_READ = 2 * 1024 * 1024;
-  var net = window.__katalanNet = { v: 1, calls: [], seq: 0 };
+  // calls: last MAX calls of any status. bad: failed (4xx/5xx/terputus) or slow calls, kept apart so a chatty
+  // endpoint (monitoring beacon, polling) cannot push the one failed call out before the diagnosis reads it.
+  var MAX_BAD = 20;
+  var net = window.__katalanNet = { v: 2, calls: [], bad: [], seq: 0 };
   var SECRET_KEY = /^(pin|otp|cvv|cvc|mpin|tpin)$|pass|pwd|token|secret|authori|cookie|session|credential|signature|captcha|private.?key|api.?key/i;
 
   function maskObj(o, depth) {
@@ -70,6 +73,10 @@
     try {
       net.calls.push(c);
       if (net.calls.length > MAX) net.calls.splice(0, net.calls.length - MAX);
+      if (c.status === 0 || c.status >= 400 || (c.ms || 0) >= 10000) {
+        net.bad.push(c);
+        if (net.bad.length > MAX_BAD) net.bad.splice(0, net.bad.length - MAX_BAD);
+      }
     } catch (e) {}
   }
 

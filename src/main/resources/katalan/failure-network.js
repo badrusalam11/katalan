@@ -66,21 +66,41 @@ try {
 } catch (e) { out.errors.push('network: ' + e.message); }
 
 // 4c. payload/response of the API calls before the failure, from network-recorder.js (Chromium only).
-// Only what helps find the cause: failed (4xx/5xx/terputus), slow (>= 10 s) and every call since the last action.
+// Failed (4xx/5xx/terputus) and slow calls always come first; then the calls since the last action. The same
+// endpoint called again and again (monitoring beacon, polling, translations) is one row with a count, and
+// endpoints called 5+ times are left out of the "since the last action" part - they are background noise.
 try {
   var kn = window.__katalanNet;
   if (kn && kn.calls) {
-    var nowEpoch = Date.now(), calls = [];
-    for (var ci = 0; ci < kn.calls.length; ci++) {
-      var c = kn.calls[ci];
-      if (nowEpoch - (c.start + (c.ms || 0)) > winMs) continue;
-      var cInStep = stepFrom > 0 && c.start >= stepFrom;
-      var bad = c.status === 0 || (typeof c.status === 'number' && c.status >= 400);
-      if (!bad && !cInStep && !((c.ms || 0) >= 10000)) continue;
-      calls.push({ id: c.id, method: c.method, url: c.url, status: c.status, ms: c.ms, inStep: cInStep,
-                   agoSec: Math.round((nowEpoch - c.start) / 1000), req: c.req, resType: c.resType, res: c.res, err: c.err });
+    var nowEpoch = Date.now(), seen = {}, all = [];
+    var src = (kn.bad || []).concat(kn.calls);
+    for (var ci = 0; ci < src.length; ci++) {
+      var c = src[ci];
+      if (seen[c.id] || nowEpoch - (c.start + (c.ms || 0)) > winMs) continue;
+      seen[c.id] = true;
+      all.push(c);
     }
-    out.networkCalls = calls.slice(-12);
+    all.sort(function (a, b) { return a.start - b.start; });
+    var keyOf = function (c) { return c.method + ' ' + String(c.url).split('?')[0]; };
+    var counts = {};
+    for (var k = 0; k < all.length; k++) counts[keyOf(all[k])] = (counts[keyOf(all[k])] || 0) + 1;
+    var isBad = function (c) { return c.status === 0 || (typeof c.status === 'number' && c.status >= 400) || (c.ms || 0) >= 10000; };
+    var pick = function (c) {
+      return { id: c.id, method: c.method, url: c.url, status: c.status, ms: c.ms, inStep: stepFrom > 0 && c.start >= stepFrom,
+               agoSec: Math.round((nowEpoch - c.start) / 1000), count: counts[keyOf(c)], req: c.req, resType: c.resType, res: c.res, err: c.err };
+    };
+    // newest call per endpoint+status for the failed ones, newest per endpoint for the rest
+    var bad = [], badSeen = {}, ok = [], okSeen = {};
+    for (var j = all.length - 1; j >= 0; j--) {
+      var cj = all[j], key = keyOf(cj);
+      if (isBad(cj)) {
+        if (!badSeen[key + '#' + cj.status]) { badSeen[key + '#' + cj.status] = true; bad.push(pick(cj)); }
+      } else if (stepFrom > 0 && cj.start >= stepFrom && counts[key] < 5 && !okSeen[key]) {
+        okSeen[key] = true; ok.push(pick(cj));
+      }
+    }
+    bad = bad.slice(0, 8);
+    out.networkCalls = bad.concat(ok.slice(0, Math.max(0, 12 - bad.length)));
   } else {
     out.errors.push('network: perekam payload tidak aktif di halaman ini (tab baru / bukan Chrome)');
   }

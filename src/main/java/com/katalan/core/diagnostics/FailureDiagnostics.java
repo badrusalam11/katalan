@@ -93,6 +93,8 @@ public final class FailureDiagnostics {
         return out;
     }
     private static volatile double lastCpuPct = -1;
+    private static volatile int lastRamPct = -1;
+    private static int ramTicks = 0;
 
     private FailureDiagnostics() {}
 
@@ -113,6 +115,12 @@ public final class FailureDiagnostics {
         cpuSampler.scheduleAtFixedRate(() -> {
             double v = readSystemCpuLoad();
             if (v >= 0) lastCpuPct = v * 100.0;
+            // RAM every 3rd tick (15 s): on macOS it spawns vm_stat, which can take seconds on a busy machine,
+            // so the failure diagnosis reads this cached value instead of waiting for it
+            if (ramTicks++ % 3 == 0) {
+                Integer r = readRamPct();
+                if (r != null) lastRamPct = r;
+            }
         }, 0, 5, TimeUnit.SECONDS);
     }
 
@@ -131,6 +139,11 @@ public final class FailureDiagnostics {
     static Map<String, Object> machineInfo() {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("cpuPct", lastCpuPct >= 0 ? (int) Math.round(lastCpuPct) : null);
+        m.put("ramPct", lastRamPct >= 0 ? Integer.valueOf(lastRamPct) : readRamPct());
+        return m;
+    }
+
+    static Integer readRamPct() {
         Integer ram = null;
         try {
             // Linux: "free" excludes page cache and always looks full; MemAvailable is the real headroom.
@@ -158,8 +171,7 @@ public final class FailureDiagnostics {
                 }
             }
         } catch (Throwable ignored) { }
-        m.put("ramPct", ram);
-        return m;
+        return ram;
     }
 
     /**
