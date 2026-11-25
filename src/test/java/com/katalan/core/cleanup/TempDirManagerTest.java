@@ -15,6 +15,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TempDirManagerTest {
 
+    static {
+        // createChromeProfile() lazily initializes the manager; keep that from sweeping (or
+        // registering a shutdown hook on) the real java.io.tmpdir of the machine running tests.
+        System.setProperty("katalan.tempCleanup", "false");
+    }
+
     @TempDir
     Path root;
 
@@ -78,6 +84,17 @@ class TempDirManagerTest {
         TempDirManager.sweepStale(root);
 
         assertTrue(Files.exists(inUse), "profile locked by a running Chrome must survive");
+    }
+
+    @Test
+    void deadOwnerButOrphanChromeStillRunningIsKept() throws Exception {
+        long liveChrome = ProcessHandle.current().parent().map(ProcessHandle::pid).orElseThrow();
+        Path orphan = dirWithOwner("katalan-chrome-orphan", deadPid());
+        Files.createSymbolicLink(orphan.resolve("SingletonLock"), Path.of("my-host-" + liveChrome));
+
+        TempDirManager.sweepStale(root);
+
+        assertTrue(Files.exists(orphan), "profile still used by an orphan Chrome must survive");
     }
 
     @Test

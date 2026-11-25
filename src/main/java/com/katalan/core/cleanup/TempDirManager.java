@@ -62,8 +62,12 @@ public final class TempDirManager {
     /** Chrome's child processes can hold files briefly after the main process exits. */
     private static final long RELEASE_DELAY_MS = 1500;
     private static final int RELEASE_ATTEMPTS = 3;
+    /** Upper bound on how long JVM shutdown waits for still-running Chrome processes to exit. */
+    private static final long SHUTDOWN_CHROME_WAIT_MS = 5000;
 
     private static final long OWN_PID = ProcessHandle.current().pid();
+    private static final boolean IS_WINDOWS =
+            System.getProperty("os.name", "").toLowerCase().contains("win");
 
     /** Every directory this JVM created and has not deleted yet. */
     private static final Set<Path> owned = ConcurrentHashMap.newKeySet();
@@ -163,10 +167,34 @@ public final class TempDirManager {
     }
 
     static void deleteAllOwned() {
-        int deleted = 0;
+        // JVM exiting with a browser still open (no closeBrowser / "terminate drivers" off):
+        // DriverCleanupManager's hook is killing Chrome concurrently. Chrome writes "Local State"
+        // while it shuts down, so deleting first would let it recreate the profile without the
+        // owner marker (then only swept after LEGACY_MAX_AGE_MS). Wait for those PIDs first.
+        long deadline = System.currentTimeMillis() + SHUTDOWN_CHROME_WAIT_MS;
+        for (long pid : chromeProfiles.values()) {
+            while (pid > 0 && isAlive(pid) && System.currentTimeMillis() < deadline) {
+                sleepQuietly(100);
+            }
+        }
+        int deleted = 0, kept = 0;
         for (Path dir : owned) {
+            Long chromePid = chromeProfiles.get(dir);
+            if (chromePid != null && chromePid > 0 && isAlive(chromePid)) {
+                kept++; // Chrome outlived the JVM: never pull the profile from under it.
+                continue; // Startup sweep removes it once that Chrome is gone (SingletonLock check).
+            }
             if (deleteRecursively(dir)) deleted++;
         }
+        if (!chromeProfiles.isEmpty()) {
+            sleepQuietly(300); // catch a late write from a dying Chrome helper process
+            for (Map.Entry<Path, Long> e : chromeProfiles.entrySet()) {
+                Path profile = e.getKey();
+                boolean running = e.getValue() > 0 && isAlive(e.getValue());
+                if (!running && Files.exists(profile, LinkOption.NOFOLLOW_LINKS)) deleteRecursively(profile);
+            }
+        }
+        if (kept > 0) logger.info("🧹 Kept {} Chrome profile(s) still in use by a running Chrome", kept);
         owned.clear();
         chromeProfiles.clear();
         if (deleted > 0) logger.info("🧹 Deleted {} katalan temp dir(s)", deleted);
@@ -196,7 +224,9 @@ public final class TempDirManager {
         Optional<Long> owner = readOwnerPid(dir);
         if (owner.isPresent()) {
             long pid = owner.get();
-            return pid != OWN_PID && !isAlive(pid);
+            // Owner JVM dead is not enough: after kill -9 its Chrome can survive as an orphan
+            // still using the profile — leave that to whoever kills the orphan.
+            return pid != OWN_PID && !isAlive(pid) && !chromeLockHeldByLiveProcess(dir);
         }
         // No marker: created by an older katalan, or by a process that is writing it right now.
         if (now - Files.getLastModifiedTime(dir, LinkOption.NOFOLLOW_LINKS).toMillis() < LEGACY_MAX_AGE_MS) {
@@ -233,8 +263,27 @@ public final class TempDirManager {
         }
     }
 
+    /**
+     * A zombie (exited, not yet reaped — e.g. Chrome killed while its chromedriver lives on)
+     * reports isAlive()=true but holds no files, so it counts as dead here. Only confirmed
+     * zombies are treated as dead; anything uncertain counts as alive.
+     */
     static boolean isAlive(long pid) {
-        return ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false);
+        Optional<ProcessHandle> h = ProcessHandle.of(pid);
+        if (h.isEmpty() || !h.get().isAlive()) return false;
+        if (IS_WINDOWS || h.get().info().command().isPresent()) return true;
+        return !isZombie(pid);
+    }
+
+    private static boolean isZombie(long pid) {
+        try {
+            Process p = new ProcessBuilder("ps", "-o", "stat=", "-p", String.valueOf(pid))
+                    .redirectErrorStream(true).start();
+            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+            return p.waitFor(2, TimeUnit.SECONDS) && out.startsWith("Z");
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /** Best-effort recursive delete that never follows symlinks. Returns true when gone. */
