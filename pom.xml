@@ -317,6 +317,17 @@
                 </configuration>
             </plugin>
 
+            <!-- Unit tests: pin Surefire 3.x so JUnit 5 (Jupiter) tests are discovered.
+                 Older default Surefire versions silently run zero JUnit 5 tests. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+                <configuration>
+                    <failIfNoTests>false</failIfNoTests>
+                </configuration>
+            </plugin>
+
             <!-- Create executable JAR with dependencies -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

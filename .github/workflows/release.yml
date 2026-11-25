@@ -15,6 +15,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history + tags, needed for release notes
 
       - name: Setup Java 11
         uses: actions/setup-java@v4
@@ -23,18 +25,43 @@ jobs:
           java-version: '11'
           cache: 'maven'
 
-      - name: Build with Maven
-        run: mvn clean package -DskipTests
+      # Tests run as part of `package`; a failing test blocks the release.
+      - name: Build & test with Maven
+        run: mvn -B clean package
 
       - name: Get JAR file
         id: jar
         run: |
-          JAR_FILE=$(ls target/*.jar | head -n 1)
+          JAR_FILE=$(ls target/*.jar | grep -v -E '(original-|-sources|-javadoc)' | head -n 1)
           echo "jar_file=$JAR_FILE" >> $GITHUB_OUTPUT
+
+      - name: Build release notes
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          # Prefer the curated section from CHANGELOG.md (written by bump-version.sh)
+          if [ -f CHANGELOG.md ]; then
+            awk -v ver="$VERSION" '
+              $0 ~ "^## \\[" ver "\\]" { found=1; next }
+              found && /^## \[/ { exit }
+              found { print }
+            ' CHANGELOG.md > RELEASE_NOTES.md
+          fi
+          # Fallback: generate from git log since the previous tag
+          if [ ! -s RELEASE_NOTES.md ] || ! grep -q '[^[:space:]]' RELEASE_NOTES.md; then
+            bash scripts/release-notes.sh "" "$GITHUB_REF_NAME" > RELEASE_NOTES.md
+          fi
+          PREV_TAG=$(git describe --tags --abbrev=0 --match 'v*' "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          if [ -n "$PREV_TAG" ]; then
+            printf '\n**Full diff:** https://github.com/%s/compare/%s...%s\n' \
+              "$GITHUB_REPOSITORY" "$PREV_TAG" "$GITHUB_REF_NAME" >> RELEASE_NOTES.md
+          fi
+          cat RELEASE_NOTES.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          name: katalan ${{ github.ref_name }}
+          body_path: RELEASE_NOTES.md
           files: ${{ steps.jar.outputs.jar_file }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

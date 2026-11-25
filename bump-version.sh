@@ -2,6 +2,7 @@
 
 # Bump version script for katalan project
 # Usage: ./bump-version.sh [patch|minor|major]
+#        SKIP_TESTS=1 ./bump-version.sh patch   (skip local mvn test)
 # - patch: 1.0.0 -> 1.0.1
 # - minor: 1.0.0 -> 1.1.0
 # - major: 1.0.0 -> 2.0.0
@@ -15,6 +16,27 @@ if [[ ! "$BUMP_TYPE" =~ ^(patch|minor|major)$ ]]; then
     echo "❌ Invalid bump type: $BUMP_TYPE"
     echo "Usage: $0 [patch|minor|major]"
     exit 1
+fi
+
+# Must release from an up-to-date, clean main
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+if [ "$CURRENT_BRANCH" != "main" ]; then
+    echo "❌ You are on '$CURRENT_BRANCH'. Switch to main before bumping."
+    exit 1
+fi
+if ! git diff --quiet || ! git diff --cached --quiet; then
+    echo "❌ Working tree has uncommitted changes. Commit or stash them first."
+    exit 1
+fi
+
+# Run unit tests before releasing (skip with SKIP_TESTS=1)
+if [ "${SKIP_TESTS:-0}" != "1" ]; then
+    if command -v mvn >/dev/null 2>&1; then
+        echo "🧪 Running unit tests..."
+        mvn -q test || { echo "❌ Tests failed. Fix them or re-run with SKIP_TESTS=1."; exit 1; }
+    else
+        echo "⚠️  mvn not found, skipping local tests (CI will still run them)."
+    fi
 fi
 
 # Get current version from pom.xml
@@ -71,11 +93,50 @@ fi
 
 echo "✅ Version updated in pom.xml"
 
+# Release notes -> CHANGELOG.md
+echo "📝 Generating release notes..."
+NOTES=$(scripts/release-notes.sh "v$CURRENT_VERSION" HEAD 2>/dev/null || scripts/release-notes.sh)
+TODAY=$(date +%Y-%m-%d)
+CHANGELOG_ENTRY="## [$NEW_VERSION] - $TODAY
+
+$NOTES
+"
+
+if [ ! -f CHANGELOG.md ]; then
+    printf '# Changelog\n\nAll notable changes to katalan are documented here.\n\n' > CHANGELOG.md
+fi
+
+# Insert the new entry right above the first existing "## [" section (newest first)
+ENTRY_FILE=$(mktemp)
+TMP_FILE=$(mktemp)
+printf '%s\n' "$CHANGELOG_ENTRY" > "$ENTRY_FILE"
+awk -v entry_file="$ENTRY_FILE" '
+    function emit() { while ((getline line < entry_file) > 0) print line; close(entry_file) }
+    !inserted && /^## \[/ { emit(); inserted=1 }
+    { print }
+    END { if (!inserted) emit() }
+' CHANGELOG.md > "$TMP_FILE"
+mv "$TMP_FILE" CHANGELOG.md
+rm -f "$ENTRY_FILE"
+
+echo ""
+echo "----------------------------------------"
+echo "$CHANGELOG_ENTRY"
+echo "----------------------------------------"
+
+# Let the user polish the notes before they are committed (interactive shells only)
+if [ -t 0 ]; then
+    read -r -p "✏️  Edit CHANGELOG.md before committing? [y/N] " EDIT_ANSWER
+    if [[ "$EDIT_ANSWER" =~ ^[Yy]$ ]]; then
+        ${EDITOR:-vi} CHANGELOG.md
+    fi
+fi
+
 # Git operations
 echo "📌 Creating git tag v$NEW_VERSION..."
-git add pom.xml
+git add pom.xml CHANGELOG.md
 git commit -m "Bump version to $NEW_VERSION"
-git tag "v$NEW_VERSION"
+git tag -a "v$NEW_VERSION" -m "Release v$NEW_VERSION"
 
 echo "🚢 Pushing to remote..."
 git push origin main
@@ -87,4 +148,4 @@ echo "   Old version: $CURRENT_VERSION"
 echo "   New version: $NEW_VERSION"
 echo "   Tag: v$NEW_VERSION"
 echo ""
-echo "🎉 GitHub Actions will now build and create a release automatically."
+echo "🎉 GitHub Actions will now run tests, build, and create a release with these notes."

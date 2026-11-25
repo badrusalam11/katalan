@@ -404,6 +404,24 @@ See [docs/HEADLESS_INSECURE.md](docs/HEADLESS_INSECURE.md) for what `--insecure`
 
 Contributions are welcome! Please feel free to submit issues and pull requests.
 
+### Running tests
+
+```bash
+mvn test
+```
+
+CI (`.github/workflows/ci.yml`) runs the unit tests on every push and PR to `main`.
+
+### Releasing
+
+```bash
+./bump-version.sh patch    # or minor / major
+```
+
+The script runs the tests, bumps `pom.xml`, adds a new entry to [CHANGELOG.md](CHANGELOG.md) built from the commits since the last tag (you can edit it before it is committed), then tags and pushes. The release workflow tests and builds the JAR, then publishes a GitHub Release using that CHANGELOG entry as its notes.
+
+Commit subjects are grouped by their first word: `add …`/`feat …` → **Added**, `fix …` → **Fixed**, anything else → **Changed**. Preview the notes for unreleased work with `scripts/release-notes.sh`.
+
 ## 📄 License
 
 MIT License - Use freely for any purpose.
