@@ -223,6 +223,7 @@ public class ExecutionContext {
                 logger.warn("Error closing WebDriver: {}", e.getMessage());
             }
             webDriver = null;
+            com.katalan.core.cleanup.TempDirManager.onBrowserClosed();
         }
         if (mobileDriver != null) {
             try {

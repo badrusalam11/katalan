@@ -242,8 +242,8 @@ public class GroovyScriptExecutor {
         if (!Files.isDirectory(binGroovy)) return;
 
         try {
-            Path staging = Files.createTempDirectory("katalan-bin-groovy-");
-            staging.toFile().deleteOnExit();
+            // Deleted at JVM exit by TempDirManager (deleteOnExit() cannot remove non-empty dirs).
+            Path staging = com.katalan.core.cleanup.TempDirManager.createOwnedTempDir("katalan-bin-groovy-");
 
             int copied = 0;
             try (java.util.stream.Stream<Path> stream = Files.walk(binGroovy)) {

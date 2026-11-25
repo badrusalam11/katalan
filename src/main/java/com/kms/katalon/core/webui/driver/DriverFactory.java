@@ -69,6 +69,7 @@ public class DriverFactory {
             } catch (Exception e) {
                 logger.warn("Error closing WebDriver: {}", e.getMessage());
             }
+            com.katalan.core.cleanup.TempDirManager.onBrowserClosed();
         }
         ExecutionContext ctx = ExecutionContext.getCurrent();
         if (ctx != null) {
