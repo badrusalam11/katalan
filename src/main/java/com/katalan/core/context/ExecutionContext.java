@@ -205,6 +205,11 @@ public class ExecutionContext {
         apiCalls.add(call);
     }
 
+    /** The API calls recorded so far in this test case, without clearing them (failure diagnostics). */
+    public java.util.List<com.katalan.core.model.ApiCallRecord> peekApiCalls() {
+        return new java.util.ArrayList<>(apiCalls);
+    }
+
     /** Returns the API calls recorded since the last call, and clears them. */
     public java.util.List<com.katalan.core.model.ApiCallRecord> drainApiCalls() {
         java.util.List<com.katalan.core.model.ApiCallRecord> drained = new java.util.ArrayList<>(apiCalls);

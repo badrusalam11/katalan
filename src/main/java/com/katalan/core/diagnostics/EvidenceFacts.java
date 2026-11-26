@@ -33,17 +33,34 @@ public final class EvidenceFacts {
             String type = String.valueOf(err.get("type"));
             String result;
             if (type.contains("NotFound") || type.contains("NoSuchElement")) result = "elemen tidak ditemukan";
-            else if (type.contains("Assertion")) result = "nilai tidak sesuai harapan";
+            else if (type.contains("Assertion")) {
+                // "assert response.responseCode == '00'" says which value; the power-assert diagram stays in the message
+                String first = firstLine(err.get("message"));
+                result = "nilai tidak sesuai harapan" + (first.isEmpty() ? "" : ": " + shorten(first, 200));
+            }
             else if (type.contains("NotInteractable")) result = "elemen ada tapi tidak bisa diinteraksi";
             else if (type.contains("ClickIntercepted")) result = "klik tertutup elemen lain";
             else if (type.contains("StaleElement")) result = "elemen berubah saat sedang diproses";
             else if (type.contains("Timeout")) result = "timeout";
             else result = shorten(String.valueOf(err.get("message")), 160);
             String at = ((kw != null ? kw + " " : "") + (what != null ? what : "")).trim();
+            // BDD: the step people wrote in the feature file says more than the generic keyword
+            if (at.isEmpty() && d.get("bddStep") != null) at = String.valueOf(d.get("bddStep"));
             return at.isEmpty() ? result : at + " \u2014 " + result;
         } catch (Throwable t) {
             return null;
         }
+    }
+
+    private static String firstLine(Object message) {
+        if (message == null) return "";
+        String m = String.valueOf(message).trim();
+        int nl = m.indexOf('\n');
+        if (nl >= 0) m = m.substring(0, nl);
+        // Groovy power-assert diagram ("| | '68' false") once the message was flattened to one line
+        int diagram = m.indexOf(" | ");
+        if (diagram < 0 && m.endsWith(" |")) diagram = m.length() - 2;
+        return (diagram > 0 && m.startsWith("assert ") ? m.substring(0, diagram) : m).trim();
     }
 
     /** Facts observed in the browser, most useful first (without the failedAt line). Never throws. */
@@ -58,6 +75,15 @@ public final class EvidenceFacts {
             Map<String, Object> render = asMap(d.get("pageRender"));
             Map<String, Object> machine = asMap(d.get("machine"));
             boolean stepKnown = step != null;
+
+            // 1. API test (WS.sendRequest): the last call and what it answered - usually why an assert failed
+            Map<String, Object> ws = asMap(d.get("wsCall"));
+            if (ws != null) {
+                String path = String.valueOf(ws.get("url")).replaceFirst("^https?://[^/]+", "");
+                if (ws.get("err") != null) f.add("API " + ws.get("method") + " " + path + " \u2192 gagal: " + ws.get("err"));
+                else f.add("API " + ws.get("method") + " " + path + " \u2192 HTTP " + ws.get("status") + durationText(ws.get("ms"), 0));
+                if (ws.get("res") != null && !String.valueOf(ws.get("res")).isEmpty()) f.add("Response: " + ws.get("res"));
+            }
             List<String> pageLoadApis = new ArrayList<>();
 
             // 2. what the page said

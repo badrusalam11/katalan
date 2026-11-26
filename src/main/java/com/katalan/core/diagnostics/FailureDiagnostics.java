@@ -406,6 +406,72 @@ public final class FailureDiagnostics {
         return !file.isEmpty() && !file.contains(".") && !"Unknown Source".equals(file) && !"Native Method".equals(file);
     }
 
+    /**
+     * BDD and API (WS.sendRequest) facts the browser probe cannot see: the failed step ("Then User verify
+     * response ...") and the last API call of the test case with its response, which is usually the reason
+     * an API assert failed ("responseCode 68 Timeout"). Recomputes failedAt/facts. Never throws.
+     */
+    public static void addBddAndApiEvidence(Map<String, Object> d, String failedStep,
+                                            List<com.katalan.core.model.ApiCallRecord> calls) {
+        try {
+            if (failedStep != null && !failedStep.trim().isEmpty()) d.put("bddStep", shorten(failedStep.trim(), 300));
+            if (calls != null && !calls.isEmpty()) {
+                com.katalan.core.model.ApiCallRecord last = calls.get(calls.size() - 1);
+                Map<String, Object> ws = new LinkedHashMap<>();
+                ws.put("method", last.getMethod());
+                ws.put("url", withoutQuery(last.getUrl()));
+                ws.put("status", last.getError() != null && last.getStatusCode() == 0 ? null : last.getStatusCode());
+                ws.put("ms", last.getElapsedMs());
+                ws.put("res", last.getResponseBody() == null ? null : shorten(last.getResponseBody().replaceAll("\\s+", " ").trim(), 400));
+                ws.put("err", last.getError() == null ? null : shorten(last.getError(), 200));
+                ws.put("total", calls.size());
+                d.put("wsCall", ws);
+                // the payload/response panel: same shape as the browser network recorder's calls
+                if (asList(d.get(NETWORK_CALLS)).isEmpty()) {
+                    List<Map<String, Object>> net = new ArrayList<>();
+                    long now = System.currentTimeMillis();
+                    for (int i = Math.max(0, calls.size() - 5); i < calls.size(); i++) {
+                        com.katalan.core.model.ApiCallRecord c = calls.get(i);
+                        Map<String, Object> m = new LinkedHashMap<>();
+                        m.put("id", "ws-" + i);
+                        m.put("method", c.getMethod());
+                        m.put("url", c.getUrl());
+                        m.put("status", c.getError() != null && c.getStatusCode() == 0 ? 0 : c.getStatusCode());
+                        m.put("ms", c.getElapsedMs());
+                        m.put("inStep", i == calls.size() - 1);
+                        m.put("agoSec", c.getTimestamp() == null ? null : Math.round((now - c.getTimestamp().toEpochMilli()) / 1000.0));
+                        m.put("count", 1);
+                        Map<String, Object> rh = new LinkedHashMap<>();
+                        for (String[] h : c.getRequestHeaders()) if (h != null && h.length == 2) rh.put(h[0], h[1]);
+                        m.put("reqHeaders", rh);
+                        m.put("req", c.getRequestBody());
+                        Map<String, Object> sh = new LinkedHashMap<>();
+                        if (c.getResponseHeaders() != null) {
+                            c.getResponseHeaders().forEach((k, v) -> { if (k != null) sh.put(k, v == null ? null : String.join(", ", v)); });
+                        }
+                        m.put("resHeaders", sh);
+                        m.put("res", c.getResponseBody());
+                        m.put("err", c.getError());
+                        net.add(m);
+                    }
+                    d.put(NETWORK_CALLS, net);
+                }
+            }
+            if (d.containsKey("bddStep") || d.containsKey("wsCall")) {
+                d.put("failedAt", EvidenceFacts.failedAt(d));
+                d.put("facts", EvidenceFacts.build(d));
+            }
+        } catch (Throwable t) {
+            logger.debug("BDD/API evidence skipped: {}", t.getMessage());
+        }
+    }
+
+    private static String withoutQuery(String url) {
+        if (url == null) return null;
+        int q = url.indexOf('?');
+        return q < 0 ? url : url.substring(0, q);
+    }
+
     /** Print the single stdout line a launching process can pick up. Never throws. */
     public static void emit(Map<String, Object> diagnosis) {
         try {

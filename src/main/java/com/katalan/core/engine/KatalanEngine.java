@@ -542,6 +542,8 @@ public class KatalanEngine {
             context.drainApiCalls();
             context.setProperty(FAILURE_SCREENSHOT_TAKEN, null);
             context.setProperty(FAILURE_SCREENSHOT_PATH, null);
+            context.setProperty(BDD_FAILED_STEP, null);
+            context.setProperty(BDD_FAILED_STEP_ERROR, null);
             com.katalan.core.diagnostics.StepClock.reset();
 
             try {
@@ -813,6 +815,10 @@ public class KatalanEngine {
     public static final String FAILURE_SCREENSHOT_TAKEN = "failureScreenshotTaken";
     /** Context property: path of the failure screenshot taken at the failing BDD step. */
     public static final String FAILURE_SCREENSHOT_PATH = "failureScreenshotPath";
+    /** Context property: "Then User verify ..." - the first BDD step that failed in this test case. */
+    public static final String BDD_FAILED_STEP = "bddFailedStep";
+    /** Context property: the real error (Throwable) of {@link #BDD_FAILED_STEP}. */
+    public static final String BDD_FAILED_STEP_ERROR = "bddFailedStepError";
 
     private void handleTestFailure(TestCase testCase, TestCaseResult result,
                                     Throwable e, int attempt, int maxAttempts) {
@@ -894,9 +900,25 @@ public class KatalanEngine {
             } else if (result.getScreenshotPaths() != null && !result.getScreenshotPaths().isEmpty()) {
                 screenshot = result.getScreenshotPaths().get(result.getScreenshotPaths().size() - 1);
             }
+            // A BDD test case fails with CucumberKW's generic "Cucumber execution finished with N failed
+            // scenario(s)": diagnose the failed step's own error instead (assert / keyword / locator), with
+            // its frames first and the test case script line after, like the PDF's Failure Summary.
+            Throwable diagError = e;
+            String diagMessage = errorMessage;
+            String diagStack = stackTrace;
+            Object stepError = context.getProperty(BDD_FAILED_STEP_ERROR);
+            Object failedStep = context.getProperty(BDD_FAILED_STEP);
+            if (stepError instanceof Throwable && stepError != e) {
+                Throwable se = (Throwable) stepError;
+                diagError = se;
+                diagMessage = se.getMessage() != null ? se.getMessage() : se.toString();
+                diagStack = getStackTraceString(se) + "\n" + (stackTrace == null ? "" : stackTrace);
+            }
             Map<String, Object> diagnosis = com.katalan.core.diagnostics.FailureDiagnostics.diagnose(
                     context.getWebDriver(), config.isHeadless(), testCase.getId(), attempt, maxAttempts, kind,
-                    e, errorMessage, stackTrace, screenshot);
+                    diagError, diagMessage, diagStack, screenshot);
+            com.katalan.core.diagnostics.FailureDiagnostics.addBddAndApiEvidence(diagnosis,
+                    failedStep != null ? failedStep.toString() : null, context.peekApiCalls());
             com.katalan.core.diagnostics.FailureDiagnostics.emit(diagnosis);
             // bodies of API calls go to their own stdout line only, not into the report
             diagnosis.remove(com.katalan.core.diagnostics.FailureDiagnostics.NETWORK_CALLS);

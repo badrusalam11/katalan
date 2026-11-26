@@ -721,6 +721,12 @@ public class KatalanBDDExecutor {
             if (rootMsg == null) rootMsg = "Step failed (no message)";
             String exType = root != null ? root.getClass().getName() : e.getClass().getName();
             lastStepError = root != null ? root : e;
+            // The test case itself fails later with the generic "Cucumber execution finished with N failed
+            // scenario(s)"; failure diagnostics use this to show the step and its real error instead.
+            if (context != null && context.getProperty(com.katalan.core.engine.KatalanEngine.BDD_FAILED_STEP_ERROR) == null) {
+                context.setProperty(com.katalan.core.engine.KatalanEngine.BDD_FAILED_STEP, step.keyword + " " + stepName);
+                context.setProperty(com.katalan.core.engine.KatalanEngine.BDD_FAILED_STEP_ERROR, lastStepError);
+            }
 
             stepData.put("type", "TEST_STEP");
             stepData.put("name", stepName);
