@@ -28,6 +28,8 @@ Thumbs.db
 # Logs
 logs/
 *.log
+# Execution logs copied from the consumer/agent can hold internal hosts and credentials
+automation-log-order-*
 
 # Reports
 reports/
